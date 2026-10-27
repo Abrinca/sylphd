@@ -238,7 +238,7 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
         form = await request.form(
             max_files=MAX_SKETCHES,
             max_fields=16,
-            max_part_size=64 * 1024,
+            max_part_size=1024 * 1024,
         )
     except StarletteHTTPException as error:
         return _error(str(error.detail), error.status_code)
