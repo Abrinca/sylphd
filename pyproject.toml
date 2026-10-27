@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sylphd"
+version = "0.1.0"
+description = "A long-running sylph server with a sketching client, for shared database and profiling."
+readme = "README.md"
+requires-python = ">=3.14"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Thomas Roder" },
+]
+keywords = ["bioinformatics", "genomics", "ani", "taxonomy", "profiling", "sylph"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Typing :: Typed",
+]
+dependencies = [
+  "dnaio",
+  "httpx",
+  "pysylph",
+  "python-multipart",
+  "starlette",
+  "uvicorn",
+]
+
+[project.urls]
+"Source" = "https://github.com/MrTomRod/sylphd"
+
+[project.scripts]
+sylphd = "sylphd.cli:main"
+
+[tool.uv]
+# `libz-ng-sys` (a dependency of the sylph Rust crate) wants `cmake` at build
+# time; provide it in the isolated build environment instead of relying on a
+# system-wide install.
+extra-build-dependencies = { pysylph = ["cmake"] }
+
+[tool.uv.sources]
+pysylph = { git = "https://github.com/MrTomRod/pysylph", branch = "multi-db" }
+
+[dependency-groups]
+dev = [
+  "pytest",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sylphd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

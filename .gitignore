@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.venv*/
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local data, references and scratch space
+ref/
+scratch/
+db/
+*.part
+*.sqlite
+*.sqlite3
+*.sqlite-*
+
+# Editors / OS
+.DS_Store
+*.swp
