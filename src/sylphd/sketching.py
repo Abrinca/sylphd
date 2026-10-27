@@ -173,7 +173,7 @@ def build_sample_inputs(
     for path in interleaved:
         samples.append(
             SampleInput(
-                sample_name_from_path(path),
+                sample_name_from_path(path, paired=True),
                 ((path,),),
                 interleaved=True,
             )
