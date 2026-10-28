@@ -265,8 +265,6 @@ textarea:disabled { opacity: .5; }
 .gauge text.value, .gauge text.unit { paint-order: stroke; stroke: var(--card); stroke-width: 5px; stroke-linejoin: round; }
 .gauge text.value { fill: var(--fg); font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .gauge text.unit { font-size: 12px; letter-spacing: .06em; }
-.gauge .needle { stroke: var(--fg); stroke-width: 3; stroke-linecap: round; }
-.gauge .hub { fill: var(--fg); }
 .gauge .knob { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .4)); }
 .gauge .knob-outer { fill: var(--fg); }
 .gauge .knob-ring { fill: var(--card); }

@@ -666,12 +666,13 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     });
     // neutral track for the full scale
     g.append(svg('path', { d: arc(min, max, R), class: 'track' }));
-    // fill from the scale minimum up to the value; the part under imprecise_below is striped
+    // fill from the scale minimum up to the value, coloured per zone segment; the part under imprecise_below is striped
     const v = Math.min(max, Math.max(min, ani));
-    if (v > min) {
-      const cut = okScale ? Math.min(v, imp) : min;
-      if (cut > min) g.append(svg('path', { d: arc(min, cut, R), class: 'fill imprecise', stroke: zoneColor }));
-      if (v > cut) g.append(svg('path', { d: arc(cut, v, R), class: 'fill', stroke: zoneColor }));
+    const segs = okScale
+      ? [[min, imp, 'distant', 'fill imprecise'], [imp, sp, 'below', 'fill'], [sp, max, 'species', 'fill']]
+      : [[min, max, zone, 'fill']];
+    for (const [a, b, c, cls] of segs) {
+      if (v > a) g.append(svg('path', { d: arc(a, Math.min(b, v), R), class: cls, stroke: `var(--${c})` }));
     }
     // thin zone bands inside the arc keep the thresholds visible on the unfilled track
     if (okScale) {
@@ -694,10 +695,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     }
     g.append(svg('text', { x: cx - R, y: cy + 36, 'text-anchor': 'middle' }, String(min)));
     g.append(svg('text', { x: cx + R, y: cy + 36, 'text-anchor': 'middle' }, String(max)));
-    // needle pointing from the centre toward the value (starts clear of the number), then a knob on the arc
-    const [kx, ky] = pt(v, R), [nx, ny] = pt(v, 92);
-    g.append(svg('line', { x1: nx, y1: ny, x2: kx, y2: ky, class: 'needle' }));
-    g.append(svg('circle', { cx: nx, cy: ny, r: 3.5, class: 'hub' }));
+    // knob on the arc marks the value, in the value's zone colour
+    const [kx, ky] = pt(v, R);
     g.append(svg('g', { class: 'knob' },
       svg('circle', { cx: kx, cy: ky, r: 16, class: 'knob-outer' }),
       svg('circle', { cx: kx, cy: ky, r: 14.5, class: 'knob-ring' }),
