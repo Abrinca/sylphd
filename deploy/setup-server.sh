@@ -201,8 +201,9 @@ site_conf=$(mktemp)
     [[ -n ${SYLPH_DB:-} ]] && echo "Environment=SYLPH_DB=$SYLPH_DB"
     [[ -n ${SYLPH_META:-} ]] && echo "Environment=SYLPH_META=$SYLPH_META"
     [[ -n ${SYLPH_SERVE_ARGS:-} ]] && echo "Environment=SYLPH_SERVE_ARGS=$SYLPH_SERVE_ARGS"
+    true
 } >"$site_conf"
-if [[ $(wc -l <"$site_conf") -le 3 ]]; then
+if ! grep -q '^Environment=' "$site_conf"; then
     # Nothing site-specific: make sure a stale drop-in cannot linger.
     if [[ -f $dropin_dir/10-site.conf ]]; then
         rm -f "$dropin_dir/10-site.conf"
