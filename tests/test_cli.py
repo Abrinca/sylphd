@@ -450,6 +450,38 @@ class TestLocalCLI:
         assert cli.main(["setup", "-m", str(source), "-o", str(output), "-q"]) == 0
         assert output.is_file()
 
+    def test_setup_reps_only(self, tmp_path: Path) -> None:
+        from sylphd.metadata import METADATA_COLUMNS, MetadataDB
+
+        def line(accession: str, representative: str) -> str:
+            values = {column: "none" for column in METADATA_COLUMNS}
+            values["gtdb_representative"] = representative
+            return "\t".join([accession, *[values[column] for column in METADATA_COLUMNS]])
+
+        source = tmp_path / "meta.tsv"
+        source.write_text(
+            "\t".join(["accession", *METADATA_COLUMNS])
+            + "\n"
+            + line("GCA_1", "t")
+            + "\n"
+            + line("GCA_2", "f")
+            + "\n"
+        )
+        output = tmp_path / "reps.sqlite"
+        assert (
+            cli.main(
+                ["setup", "-m", str(source), "-o", str(output), "--reps-only", "-q"]
+            )
+            == 0
+        )
+        with MetadataDB(output) as db:
+            assert db.info["reps_only"] == "true"
+            assert set(db.lookup(["GCA_1", "GCA_2"])) == {"GCA_1"}
+
+    def test_setup_help(self) -> None:
+        result = _run("setup", "--help")
+        assert "--reps-only" in result.stdout
+
     def test_download_help(self) -> None:
         result = _run("download", "--help")
         assert "--release" in result.stdout

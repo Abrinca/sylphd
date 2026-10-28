@@ -456,6 +456,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
             output=args.output,
             release=args.release,
             force=args.force,
+            reps_only=args.reps_only,
             progress=callback,
         )
     except (OSError, ValueError) as error:
@@ -463,9 +464,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 1
     if not args.quiet:
         print(file=sys.stderr)
+    suffix = ", species representatives only" if args.reps_only else ""
     print(
         f"wrote {stats['path']} ({_format_size(int(stats['size']))}, "
-        f"{stats['rows']:,} genomes)",
+        f"{stats['rows']:,} genomes{suffix})",
         file=sys.stderr,
     )
     for source in stats["sources"]:  # type: ignore[union-attr]
@@ -592,6 +594,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     setup_parser.add_argument(
         "--release", default=None, metavar="N", help="GTDB release to record in the file"
+    )
+    setup_parser.add_argument(
+        "--reps-only",
+        action="store_true",
+        help="store only species representatives (gtdb_representative true)",
     )
     setup_parser.add_argument(
         "--force", action="store_true", help="overwrite the output file"
