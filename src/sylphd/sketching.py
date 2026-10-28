@@ -202,16 +202,32 @@ def iter_sequences(path: str) -> Iterator[str]:
             yield record.sequence
 
 
-def iter_interleaved(path: str, *, side: int) -> Iterator[str]:
-    """Yield every other record of an interleaved FASTQ file.
+def _paired_records(sample: SampleInput) -> Iterator[tuple[str, str]]:
+    """Yield ``(r1_sequence, r2_sequence)`` pairs from paired or interleaved input.
 
-    The file is read once per mate, which keeps memory flat at the price of
-    reading it twice.
+    ``dnaio`` validates read names and counts for each lane, so mismatched
+    mates, odd interleaved counts, and lane-count mismatches fail loudly
+    instead of silently dropping reads.
     """
-    with dnaio.open(path) as reader:
-        for index, record in enumerate(reader):
-            if index % 2 == side:
-                yield record.sequence
+    if sample.interleaved:
+        if any(len(item) != 1 for item in sample.inputs):
+            raise InputError(
+                f"sample {sample.name!r}: interleaved input must be a single file per input"
+            )
+        for item in sample.inputs:
+            path = item[0]
+            with dnaio.open(path, interleaved=True) as reader:
+                for r1, r2 in reader:
+                    yield r1.sequence, r2.sequence
+        return
+    if any(len(item) != 2 for item in sample.inputs):
+        raise InputError(
+            f"sample {sample.name!r}: paired input must have exactly two files per input"
+        )
+    for r1_path, r2_path in sample.inputs:
+        with dnaio.open(r1_path, file2=r2_path) as reader:
+            for r1, r2 in reader:
+                yield r1.sequence, r2.sequence
 
 
 def _combined(sides: Iterable[Iterable[str]]) -> Iterator[str]:
@@ -233,18 +249,24 @@ def sketch_sample(sample: SampleInput, *, c: int, k: int) -> SampleSketch:
 
     sketcher = Sketcher(c=c, k=k)
     try:
-        if sample.interleaved:
-            path = sample.inputs[0][0]
-            return sketcher.sketch_paired(
-                sample.name, iter_interleaved(path, side=0), iter_interleaved(path, side=1)
-            )
-        if sample.paired:
-            r1 = _combined(iter_sequences(item[0]) for item in sample.inputs)
-            r2 = _combined(iter_sequences(item[1]) for item in sample.inputs)
-            return sketcher.sketch_paired(sample.name, r1, r2)
+        if sample.interleaved or sample.paired:
+            # ``sketch_paired`` (Rust) swallows exceptions from lazy iterators,
+            # so mismatched counts/IDs would be silently lost.  Materializing the
+            # pairs makes ``dnaio`` raise before the Rust zip runs.  This costs
+            # memory, but correctness matters more; the paired stream is already
+            # read once per lane by ``dnaio``.
+            pairs = list(_paired_records(sample))
+            seq1 = [pair[0] for pair in pairs]
+            seq2 = [pair[1] for pair in pairs]
+            return sketcher.sketch_paired(sample.name, iter(seq1), iter(seq2))
         reads = _combined(iter_sequences(item[0]) for item in sample.inputs)
         return sketcher.sketch_single(sample.name, reads)
-    except (OSError, ValueError) as error:
+    except (
+        OSError,
+        ValueError,
+        dnaio.FileFormatError,
+        dnaio.UnknownFileFormat,
+    ) as error:
         raise InputError(f"cannot sketch sample {sample.name!r}: {error}") from error
 
 

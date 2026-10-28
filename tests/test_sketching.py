@@ -12,7 +12,6 @@ from sylphd.sketching import (
     SampleInput,
     build_sample_inputs,
     check_sketch,
-    iter_interleaved,
     parse_multi_file_spec,
     sample_name_from_path,
     sketch_sample,
@@ -146,4 +145,49 @@ class TestSketching:
     def test_missing_file(self, tmp_path: Path) -> None:
         sample = SampleInput("gone", ((str(tmp_path / "nope.fq"),),))
         with pytest.raises(InputError):
+            sketch_sample(sample, c=200, k=31)
+
+
+class TestPairedValidation:
+    @staticmethod
+    def _write(path: Path, records: list[tuple[str, str]]) -> None:
+        with open(path, "w") as handle:
+            for name, seq in records:
+                handle.write(f"@{name}\n{seq}\n+\n{'I' * len(seq)}\n")
+
+    def test_paired_count_mismatch(self, tmp_path: Path) -> None:
+        r1 = tmp_path / "r1.fq"
+        r2 = tmp_path / "r2.fq"
+        self._write(r1, [("read1/1", "AAAA"), ("read2/1", "CCCC")])
+        self._write(r2, [("read1/2", "TTTT")])
+        sample = SampleInput("x", ((str(r1), str(r2)),))
+        with pytest.raises(InputError, match="improperly paired|more reads"):
+            sketch_sample(sample, c=200, k=31)
+
+    def test_paired_name_mismatch(self, tmp_path: Path) -> None:
+        r1 = tmp_path / "r1.fq"
+        r2 = tmp_path / "r2.fq"
+        self._write(r1, [("read1/1", "AAAA"), ("read2/1", "CCCC")])
+        self._write(r2, [("other/2", "TTTT"), ("read2/2", "GGGG")])
+        sample = SampleInput("x", ((str(r1), str(r2)),))
+        with pytest.raises(InputError, match="does not match|improperly paired"):
+            sketch_sample(sample, c=200, k=31)
+
+    def test_odd_interleaved(self, tmp_path: Path) -> None:
+        path = tmp_path / "il.fq"
+        self._write(
+            path,
+            [("read1/1", "AAAA"), ("read1/2", "TTTT"), ("read2/1", "CCCC")],
+        )
+        sample = SampleInput("x", ((str(path),),), interleaved=True)
+        with pytest.raises(InputError, match="incomplete|no partner|improperly paired"):
+            sketch_sample(sample, c=200, k=31)
+
+    def test_mixed_lane_shapes(self, tmp_path: Path) -> None:
+        r1 = tmp_path / "r1.fq"
+        r2 = tmp_path / "r2.fq"
+        self._write(r1, [("read1/1", "AAAA")])
+        self._write(r2, [("read1/2", "TTTT")])
+        sample = SampleInput("x", ((str(r1), str(r2)), (str(r1),)))
+        with pytest.raises(InputError, match="exactly two files per input"):
             sketch_sample(sample, c=200, k=31)
