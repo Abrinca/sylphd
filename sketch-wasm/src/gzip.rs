@@ -4,14 +4,11 @@
 //! files made of several members ("Junk found after end of compressed data"),
 //! and those are common for sequencing reads (BGZF, ONT basecallers that
 //! `cat` batches, `cat a.fq.gz b.fq.gz`). The deflate body is inflated with
-//! `miniz_oxide`; the gzip framing (RFC 1952: header, CRC32/ISIZE trailer,
+//! flate2's `zlib-rs` backend (raw deflate); the gzip framing (RFC 1952: header, CRC32/ISIZE trailer,
 //! member loop) is done here. Input comes in arbitrary chunks.
 
-use crc32fast::Hasher;
-use miniz_oxide::inflate::stream::{inflate, InflateState};
-use miniz_oxide::{DataFormat, MZError, MZFlush, MZStatus};
-
-const OUT_SIZE: usize = 128 * 1024;
+use flate2::{Decompress, FlushDecompress, Status};
+use zlib_rs::crc32::crc32;
 
 enum Stage {
     /// Collecting the bytes of a member header.
@@ -26,10 +23,11 @@ pub struct GzipDecoder {
     stage: Stage,
     header: Vec<u8>,
     trailer: Vec<u8>,
-    state: Box<InflateState>,
-    crc: Hasher,
+    inflater: Decompress,
+    /// Verify CRC32 and ISIZE of every member.
+    verify: bool,
+    crc: u32,
     isize: u32,
-    out: Vec<u8>,
     /// Completed members.
     pub members: u32,
     /// Bytes seen after the last member that were all zero (tape padding).
@@ -85,24 +83,49 @@ fn parse_header(h: &[u8]) -> Result<Option<usize>, String> {
 
 impl GzipDecoder {
     pub fn new() -> Self {
+        Self::with_verify(true)
+    }
+
+    pub fn with_verify(verify: bool) -> Self {
         Self {
             stage: Stage::Header,
             header: Vec::new(),
             trailer: Vec::new(),
-            state: InflateState::new_boxed(DataFormat::Raw),
-            crc: Hasher::new(),
+            inflater: Decompress::new(false),
+            verify,
+            crc: 0,
             isize: 0,
-            out: vec![0; OUT_SIZE],
             members: 0,
             padding: false,
         }
     }
 
-    /// Decodes one chunk, passing decompressed bytes to `sink`.
+    /// Decodes one chunk, passing decompressed bytes to `sink` (in pieces of
+    /// up to 128 KiB).
     pub fn push(
         &mut self,
         mut input: &[u8],
         sink: &mut dyn FnMut(&[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let mut out = Vec::with_capacity(128 * 1024);
+        while !input.is_empty() {
+            out.clear();
+            self.decode(&mut input, &mut out, 128 * 1024)?;
+            if !out.is_empty() {
+                sink(&out)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Decodes from `input` (advancing it) and appends to `out` until `input`
+    /// is used up or `out` holds at least `limit` bytes. Inflates straight into
+    /// `out`'s spare capacity.
+    pub fn decode(
+        &mut self,
+        input: &mut &[u8],
+        out: &mut Vec<u8>,
+        limit: usize,
     ) -> Result<(), String> {
         while !input.is_empty() {
             match self.stage {
@@ -113,64 +136,69 @@ impl GzipDecoder {
                             return Err("junk after the end of the gzip data".into());
                         }
                         self.padding = true;
+                        *input = &[];
                         return Ok(());
                     }
                     // append byte by byte until the header is complete
                     let mut used = 0;
-                    loop {
-                        if used == input.len() {
-                            break;
-                        }
+                    while used < input.len() {
                         self.header.push(input[used]);
                         used += 1;
                         if let Some(len) = parse_header(&self.header)? {
                             debug_assert_eq!(len, self.header.len());
                             self.header.clear();
-                            self.state.reset(DataFormat::Raw);
-                            self.crc = Hasher::new();
+                            self.inflater.reset(false);
+                            self.crc = 0;
                             self.isize = 0;
                             self.stage = Stage::Body;
                             break;
                         }
                     }
-                    input = &input[used..];
+                    *input = &input[used..];
                 }
-                Stage::Body => loop {
-                    let result = inflate(&mut self.state, input, &mut self.out, MZFlush::None);
-                    let produced = &self.out[..result.bytes_written];
-                    self.crc.update(produced);
-                    self.isize = self.isize.wrapping_add(produced.len() as u32);
-                    sink(produced)?;
-                    input = &input[result.bytes_consumed..];
-                    match result.status {
-                        Ok(MZStatus::StreamEnd) => {
-                            self.stage = Stage::Trailer;
-                            break;
-                        }
-                        Ok(_) | Err(MZError::Buf) => {}
-                        Err(error) => return Err(format!("corrupt gzip data ({error:?})")),
-                    }
-                    if result.bytes_consumed == 0 && result.bytes_written == 0 {
-                        return if input.is_empty() {
-                            Ok(())
-                        } else {
-                            Err("corrupt gzip data (stalled)".into())
-                        };
-                    }
-                    // an unfilled output buffer means everything pending was flushed
-                    if input.is_empty() && result.bytes_written < self.out.len() {
+                Stage::Body => {
+                    if out.len() >= limit {
                         return Ok(());
                     }
-                },
+                    out.reserve(limit - out.len());
+                    let (in_before, out_before) =
+                        (self.inflater.total_in(), self.inflater.total_out());
+                    let start = out.len();
+                    let status = self
+                        .inflater
+                        .decompress_vec(input, out, FlushDecompress::None)
+                        .map_err(|e| format!("corrupt gzip data ({e})"))?;
+                    let consumed = (self.inflater.total_in() - in_before) as usize;
+                    let produced = (self.inflater.total_out() - out_before) as usize;
+                    *input = &input[consumed..];
+                    if self.verify {
+                        self.crc = crc32(self.crc, &out[start..]);
+                    }
+                    self.isize = self.isize.wrapping_add(produced as u32);
+                    match status {
+                        Status::StreamEnd => self.stage = Stage::Trailer,
+                        Status::Ok => {}
+                        Status::BufError => {
+                            if consumed == 0 && produced == 0 {
+                                // no progress possible: needs more input or output room
+                                return if input.is_empty() {
+                                    Ok(())
+                                } else {
+                                    Err("corrupt gzip data (stalled)".into())
+                                };
+                            }
+                        }
+                    }
+                }
                 Stage::Trailer => {
                     let need = 8 - self.trailer.len();
                     let take = need.min(input.len());
                     self.trailer.extend_from_slice(&input[..take]);
-                    input = &input[take..];
+                    *input = &input[take..];
                     if self.trailer.len() == 8 {
                         let crc = u32::from_le_bytes(self.trailer[..4].try_into().unwrap());
                         let size = u32::from_le_bytes(self.trailer[4..].try_into().unwrap());
-                        if crc != self.crc.clone().finalize() || size != self.isize {
+                        if (self.verify && crc != self.crc) || size != self.isize {
                             return Err("gzip CRC or length check failed (corrupt data)".into());
                         }
                         self.trailer.clear();
@@ -188,8 +216,8 @@ impl GzipDecoder {
     pub fn finish(&mut self) -> Result<(), String> {
         let complete =
             matches!(self.stage, Stage::Header) && (self.header.is_empty() || self.padding);
-        let members = self.members;
-        *self = Self::new();
+        let (members, verify) = (self.members, self.verify);
+        *self = Self::with_verify(verify);
         if members == 0 {
             Err("empty or invalid gzip file".into())
         } else if complete {

@@ -139,3 +139,80 @@ impl WasmSketcher {
         self.inner.finish(sample_name).map_err(js_err)
     }
 }
+
+/// Streaming gzip decoder for the browser (multi-member / BGZF / plain gzip
+/// all behave the same; flate2 + zlib-rs inside).
+///
+/// ```js
+/// const gz = new WasmGunzip(2 << 20);      // output chunk size
+/// gz.push(compressedChunk);
+/// let out; while ((out = gz.pull()) !== undefined) post(out);   // full chunks
+/// ...
+/// post(gz.finish());                        // last partial chunk; throws if truncated
+/// ```
+#[wasm_bindgen]
+pub struct WasmGunzip {
+    decoder: gzip::GzipDecoder,
+    pending: Vec<u8>,
+    pos: usize,
+    out: Vec<u8>,
+    chunk: usize,
+}
+
+#[wasm_bindgen]
+impl WasmGunzip {
+    /// `chunk_size`: size of the decompressed pieces `pull` returns (default
+    /// 2 MiB). `verify`: check CRC32 of every member (default true).
+    #[wasm_bindgen(constructor)]
+    pub fn new(chunk_size: Option<usize>, verify: Option<bool>) -> WasmGunzip {
+        let chunk = chunk_size.unwrap_or(2 << 20).max(1);
+        WasmGunzip {
+            decoder: gzip::GzipDecoder::with_verify(verify.unwrap_or(true)),
+            pending: Vec::new(),
+            pos: 0,
+            out: Vec::with_capacity(chunk + chunk / 4),
+            chunk,
+        }
+    }
+
+    /// Queues compressed bytes.
+    pub fn push(&mut self, data: &[u8]) {
+        if self.pos == self.pending.len() {
+            self.pending.clear();
+            self.pos = 0;
+        }
+        self.pending.extend_from_slice(data);
+    }
+
+    /// Decompresses queued input; returns a full chunk, or `undefined` when
+    /// the queued input is used up (call `push` again).
+    pub fn pull(&mut self) -> Result<Option<Vec<u8>>, JsError> {
+        let mut input = &self.pending[self.pos..];
+        let before = input.len();
+        let result = self.decoder.decode(&mut input, &mut self.out, self.chunk);
+        self.pos += before - input.len();
+        result.map_err(js_err)?;
+        if self.out.len() >= self.chunk {
+            let full = std::mem::replace(
+                &mut self.out,
+                Vec::with_capacity(self.chunk + self.chunk / 4),
+            );
+            Ok(Some(full))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Ends the file: checks that the gzip data is complete and returns the
+    /// remaining decompressed bytes. Call after `pull` returned `undefined`
+    /// for the last time.
+    pub fn finish(&mut self) -> Result<Vec<u8>, JsError> {
+        self.decoder.finish().map_err(js_err)?;
+        Ok(std::mem::take(&mut self.out))
+    }
+
+    /// Number of gzip members completed so far.
+    pub fn members(&self) -> u32 {
+        self.decoder.members
+    }
+}

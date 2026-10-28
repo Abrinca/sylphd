@@ -5,7 +5,7 @@
 //   ./build.sh && cargo test --release && node tests/node_check.mjs [--big]
 import { readFileSync, createReadStream } from "node:fs";
 import { gunzipSync, createGunzip } from "node:zlib";
-import { initSync, WasmSketcher } from "../demo/pkg/sylph_sketch.js";
+import { initSync, WasmSketcher, WasmGunzip } from "../demo/pkg/sylph_sketch.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -29,7 +29,19 @@ for (const c of cases) {
   const expected = readFileSync(path.join(here, "../target/equality", c.name + ".sylsp"));
   const s = new WasmSketcher(c.c ?? 200, c.k ?? 31, c.deduplicate ?? true);
   const t0 = performance.now();
-  const gz = c.raw_gz ? "_gz" : "";
+  // raw_gz cases go through WasmGunzip (the browser worker's path) instead of
+  // sketcher.push_gz, so both gzip entry points are exercised
+  const gunzipper = () => {
+    const gz = new WasmGunzip(1 << 16);
+    return {
+      feed(chunk, push) {
+        gz.push(chunk);
+        let out;
+        while ((out = gz.pull()) !== undefined) push(out);
+      },
+      end(push) { push(gz.finish()); },
+    };
+  };
   const read = (f) => (c.raw_gz ? readFileSync(abs(f)) : load(f));
   if (c.big && !c.raw_gz) {
     // stream, like the browser does
@@ -43,20 +55,33 @@ for (const c of cases) {
   } else if (c.big) {
     await new Promise((resolve, reject) => {
       const stream = createReadStream(abs(c.files[0]), { highWaterMark: 1 << 20 });
-      stream.on("data", (b) => s.push_gz(b));
-      stream.on("end", resolve);
+      const g = gunzipper();
+      stream.on("data", (b) => g.feed(b, (o) => s.push(o)));
+      stream.on("end", () => { g.end((o) => s.push(o)); resolve(); });
       stream.on("error", reject);
     });
     s.end_file();
   } else if (c.kind === "paired") {
     const [a, b] = c.files.map((f) => chunks(read(f), 5000));
+    const [g1, g2] = [gunzipper(), gunzipper()];
+    const p1 = (o) => s.push_r1(o), p2 = (o) => s.push_r2(o);
     for (let i = 0; i < Math.max(a.length, b.length); i++) {
-      if (a[i]) s["push_r1" + gz](a[i]);
-      if (b[i]) s["push_r2" + gz](b[i]);
+      if (c.raw_gz) {
+        if (a[i]) g1.feed(a[i], p1);
+        if (b[i]) g2.feed(b[i], p2);
+      } else {
+        if (a[i]) p1(a[i]);
+        if (b[i]) p2(b[i]);
+      }
     }
+    if (c.raw_gz) { g1.end(p1); g2.end(p2); }
   } else {
     for (const f of c.files) {
-      for (const piece of chunks(read(f), 4093)) s["push" + gz](piece);
+      const g = c.raw_gz ? gunzipper() : null;
+      for (const piece of chunks(read(f), 4093)) {
+        if (g) g.feed(piece, (o) => s.push(o)); else s.push(piece);
+      }
+      if (g) g.end((o) => s.push(o));
       s.end_file();
     }
   }

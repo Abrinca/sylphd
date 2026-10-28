@@ -119,3 +119,23 @@ fn corruption_and_truncation_are_errors() {
     assert!(decode(b"not gzip at all", 4).is_err());
     assert!(decode(b"", 4).is_err());
 }
+
+#[test]
+fn decode_respects_the_output_limit() {
+    // 20 MB of zeros compress to ~20 KB: one input chunk must not expand
+    // into one huge output
+    let data = vec![0u8; 20_000_000];
+    let gz = member(&data, Compression::best());
+    let mut decoder = GzipDecoder::new();
+    let mut input = &gz[..];
+    let (mut total, mut max_out) = (0, 0);
+    while !input.is_empty() {
+        let mut out = Vec::new();
+        decoder.decode(&mut input, &mut out, 1 << 20).unwrap();
+        max_out = max_out.max(out.len());
+        total += out.len();
+    }
+    decoder.finish().unwrap();
+    assert_eq!(total, data.len());
+    assert!(max_out < 3 << 20, "output piece of {max_out} bytes");
+}

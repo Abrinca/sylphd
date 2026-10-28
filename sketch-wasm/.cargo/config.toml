@@ -1,0 +1,4 @@
+# SIMD128 is supported by Chrome 91+, Firefox 89+, Safari 16.4+. It speeds up
+# the sketching loop and zlib-rs' wasm kernels (adler32, compare256).
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]
