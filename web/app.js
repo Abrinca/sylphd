@@ -85,7 +85,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   let serverProblem = null;
   let bannerKey = '';
   const PROBLEM_HINT = {
-    none: 'No server', invalid: 'Invalid API URL', offline: 'Server offline',
+    none: 'Public server offline', invalid: 'Invalid API URL', offline: 'Server offline',
     noassembly: 'Server does not accept assemblies',
   };
 
@@ -147,9 +147,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     let body;
     let retry = false;
     if (serverProblem === 'none') {
-      cls = 'info';
-      title = 'No public server yet';
-      body = [el('p', null, 'The public sylphd server is not available yet, so this page cannot search anything for now. ',
+      title = 'Public server offline';
+      body = [el('p', null, 'The public sylphd server is offline, so this page cannot search anything right now. ',
         'You can use your own server instead (see ', el('a', { href: './docs/guides/public-server/', text: 'running a public server' }), ').')];
     } else if (serverProblem === 'invalid') {
       title = 'Invalid API URL';
@@ -197,8 +196,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     clearTimeout(infoTimer);
     if (!API) {
       serverInfo = null;
-      setStatus('offline', 'No public server yet');
-      ui.statusDetail.replaceChildren('The public server is not available yet. ',
+      setStatus('offline', 'Public server offline');
+      ui.statusDetail.replaceChildren('The public server is offline. ',
         'To use your own server, add ', el('code', { text: '?api=https://…' }), ' to the address.');
       setProblem('none');
       return;

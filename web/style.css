@@ -119,7 +119,7 @@ a:hover { text-decoration-thickness: 2px; }
 }
 .privacy svg { flex: none; margin-top: 4px; color: var(--species); }
 .terms-note svg { color: var(--accent); }
-.brand a { color: inherit; text-decoration: none; }
+.brand h1 a { color: inherit; text-decoration: none; }
 
 /* cards */
 main.wrap { padding-top: 22px; padding-bottom: 36px; }
