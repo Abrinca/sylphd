@@ -283,12 +283,12 @@ impl GzipDecoder {
             matches!(self.stage, Stage::Header) && (self.header.is_empty() || self.padding);
         let (members, mode) = (self.members, self.mode);
         *self = Self::with_mode(mode);
-        if members == 0 {
-            Err("empty or invalid gzip file".into())
-        } else if complete {
-            Ok(())
-        } else {
+        if !complete {
             Err("gzip data is truncated".into())
+        } else if members == 0 {
+            Err("empty or invalid gzip file".into())
+        } else {
+            Ok(())
         }
     }
 }
