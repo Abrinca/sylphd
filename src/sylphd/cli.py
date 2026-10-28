@@ -10,10 +10,21 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
+from urllib.parse import urlparse
 
 from . import __version__
 from .client import ClientError, connect
-from .download import METADATA_FILES, ProgressPrinter, download_release
+from .download import (
+    LIST_KEYWORD,
+    METADATA_FILES,
+    DownloadError,
+    ProgressPrinter,
+    VerifyPrinter,
+    aria2c_path,
+    database_table,
+    download_database,
+    download_release,
+)
 from .limits import parse_rate_limit
 from .metadata import build_metadata_db
 from .paths import check_socket_path, default_socket_path, parse_tcp
@@ -564,20 +575,62 @@ def _gtdb_species(taxonomy: Any) -> str:
 
 
 def cmd_download(args: argparse.Namespace) -> int:
-    domains = args.only or list(METADATA_FILES)
-    progress = ProgressPrinter(sys.stderr)
-    try:
-        paths = download_release(
-            release=args.release,
-            outdir=args.outdir,
-            domains=domains,
-            base_url=args.base_url,
-            force=args.force,
-            progress=progress,
-        )
-    except Exception as error:  # httpx errors, checksum errors, ...
-        _print_error(str(error))
+    databases: list[str] = list(args.database or [])
+    urls: list[str] = list(args.url or [])
+    if args.list_databases or LIST_KEYWORD in databases:
+        print(database_table())
+        return 0
+    if urls and len(databases) > 1:
+        _print_error("--url can only be combined with a single --database")
         return 1
+
+    progress = ProgressPrinter(sys.stderr)
+    paths: list[Path] = []
+
+    if databases or urls:
+        use_aria2c = args.aria2c and aria2c_path() is not None
+        jobs: list[tuple[str, tuple[str, ...]]] = []
+        if databases:
+            jobs = [(name, tuple(urls)) for name in databases]
+        else:
+            for url in urls:
+                name = os.path.basename(urlparse(url).path)
+                if not name:
+                    _print_error(f"could not derive a file name from --url {url}")
+                    return 1
+                jobs.append((name, (url,)))
+        try:
+            for name, sources in jobs:
+                paths.append(
+                    download_database(
+                        name,
+                        args.outdir,
+                        urls=sources,
+                        verify=args.verify,
+                        force=args.force,
+                        use_aria2c=use_aria2c,
+                        progress=None if use_aria2c else progress,
+                        verify_progress=VerifyPrinter(sys.stderr),
+                    )
+                )
+        except (DownloadError, ValueError, OSError) as error:
+            _print_error(str(error))
+            return 1
+    else:
+        domains = args.only or list(METADATA_FILES)
+        try:
+            paths = download_release(
+                release=args.release,
+                outdir=args.outdir,
+                domains=domains,
+                base_url=args.base_url,
+                force=args.force,
+                progress=progress,
+            )
+        except Exception as error:  # httpx errors, checksum errors, ...
+            _print_error(str(error))
+            return 1
+
     for path in paths:
         print(path)
     return 0
@@ -789,7 +842,52 @@ def build_parser() -> argparse.ArgumentParser:
 
     # download ----------------------------------------------------------
     download_parser = subparsers.add_parser(
-        "download", help="download GTDB metadata files"
+        "download",
+        help="download GTDB metadata files or a pre-built sylph database",
+        description=(
+            "Download the GTDB metadata files (default), a pre-built sylph "
+            "database from the built-in catalogue (--database), or an "
+            "arbitrary file (--url). See --list-databases for the catalogue."
+        ),
+    )
+    download_parser.add_argument(
+        "--database",
+        action="append",
+        metavar="NAME",
+        help=(
+            "pre-built database to fetch, e.g. gtdb-r232-c200-dbv2.syl2db "
+            "(repeatable; 'list' prints the catalogue)"
+        ),
+    )
+    download_parser.add_argument(
+        "--url",
+        action="append",
+        metavar="URL",
+        help=(
+            "fetch --database from this source instead of the catalogue "
+            "mirrors (repeatable); without --database, download this URL, "
+            "named after its last path segment"
+        ),
+    )
+    download_parser.add_argument(
+        "--list-databases",
+        action="store_true",
+        help="print the built-in database catalogue and exit",
+    )
+    download_parser.add_argument(
+        "--verify",
+        action="store_true",
+        help=(
+            "also check the MD5 of a downloaded database (reads the whole "
+            "file: minutes for 20 GB on slow disks)"
+        ),
+    )
+    download_parser.add_argument(
+        "--no-aria2c",
+        dest="aria2c",
+        action="store_false",
+        default=True,
+        help="never use aria2c, even if it is installed",
     )
     download_parser.add_argument(
         "--release", type=int, default=232, help="GTDB release [default: 232]"
@@ -801,7 +899,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--only",
         action="append",
         choices=sorted(METADATA_FILES),
-        help="download only this domain (repeatable) [default: all]",
+        help="download only this metadata domain (repeatable) [default: all]",
     )
     download_parser.add_argument(
         "--base-url", default=None, metavar="URL", help="mirror of the GTDB release directory"

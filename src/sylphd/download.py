@@ -1,8 +1,9 @@
-"""Download GTDB metadata files.
+"""Download GTDB metadata files and pre-built sylph databases.
 
-GTDB metadata is verified against the release ``MD5SUM.txt``. Transfers go to
-``*.part`` files, resume with HTTP ``Range`` and can use ``aria2c`` to fetch
-from all mirrors at once.
+GTDB metadata is verified against the release ``MD5SUM.txt``; databases are
+checked against the small catalogue below (size always, MD5 on request).
+Transfers go to ``*.part`` files, resume with HTTP ``Range`` and can use
+``aria2c`` to fetch from all mirrors at once.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -109,6 +111,270 @@ def md5_file(
 
 def _md5sum(path: Path) -> str:
     return md5_file(path)
+
+
+# ---------------------------------------------------------------------------
+# database catalogue
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Database:
+    """A pre-built sylph database and where to get it."""
+
+    name: str
+    filename: str
+    mirrors: tuple[str, ...]
+    size: int | None = None
+    md5: str | None = None
+    genomes: int | None = None
+    c: int | None = None
+    description: str = ""
+
+
+def _database(
+    name: str,
+    mirrors: tuple[str, ...],
+    *,
+    size: int,
+    md5: str | None = None,
+    genomes: int | None = None,
+    c: int | None = None,
+    description: str = "",
+) -> Database:
+    return Database(
+        name=name,
+        filename=name,
+        mirrors=mirrors,
+        size=size,
+        md5=md5,
+        genomes=genomes,
+        c=c,
+        description=description,
+    )
+
+
+_FAUST = "http://faust.compbio.cs.cmu.edu/sylph-stuff/"
+_GCS = "https://storage.googleapis.com/sylph-stuff/"
+
+#: Pre-built databases from the sylph project, see
+#: https://sylph-docs.github.io/pre%E2%80%90built-databases/.
+#:
+#: Sizes were recorded from the servers' ``Content-Length``. MD5 sums are the
+#: object checksums published by the Google Cloud mirror (``x-goog-hash``), or
+#: were computed from a local copy where noted; mean "that mirror has no
+#: published checksum" (multipart uploads), so ``--verify`` cannot check them.
+DATABASES: dict[str, Database] = {
+    database.name: database
+    for database in (
+        # -- GTDB ------------------------------------------------------
+        _database(
+            "gtdb-r232-c200-dbv2.syl2db",
+            (_FAUST + "gtdb-r232-c200-dbv2.syl2db", _GCS + "gtdb-r232-c200-dbv2.syl2db"),
+            size=20044737329,
+            md5="89ad2dbdd532be81c72e78f5d493d78d",
+            genomes=199923,
+            c=200,
+            description="GTDB r232 species representatives, two-stage (recommended)",
+        ),
+        _database(
+            "gtdb-r232-c200-dbv1.syldb",
+            (_FAUST + "gtdb-r232-c200-dbv1.syldb", _GCS + "gtdb-r232-c200-dbv1.syldb"),
+            size=25872594195,
+            md5="051e7c7debff82b367dc2073965506e5",
+            genomes=199923,
+            c=200,
+            description="GTDB r232 species representatives, c200",
+        ),
+        _database(
+            "gtdb-r232-c1000-dbv1.syldb",
+            (_FAUST + "gtdb-r232-c1000-dbv1.syldb", _GCS + "gtdb-r232-c1000-dbv1.syldb"),
+            size=5219051219,
+            md5="8cc9bc3ca5eac9ab7b57527a312fd623",
+            genomes=199923,
+            c=1000,
+            description="GTDB r232 species representatives, c1000",
+        ),
+        _database(
+            "gtdb-r226-c200-dbv2.syl2db",
+            (_FAUST + "gtdb-r226-c200-dbv2.syl2db", _GCS + "gtdb-r226-c200-dbv2.syl2db"),
+            size=14272284891,
+            md5="1815389774987c7ce3d713c975a8853f",
+            genomes=143614,
+            c=200,
+            description="GTDB r226 species representatives, two-stage",
+        ),
+        _database(
+            "gtdb-r226-c200-dbv1.syldb",
+            (_FAUST + "gtdb-r226-c200-dbv1.syldb", _GCS + "gtdb-r226-c200-dbv1.syldb"),
+            size=18414135368,
+            md5="a4ef042a2a5b037a276a5922c150d5d3",
+            genomes=143614,
+            c=200,
+            description="GTDB r226 species representatives, c200",
+        ),
+        _database(
+            "gtdb-r226-c1000-dbv1.syldb",
+            (_FAUST + "gtdb-r226-c1000-dbv1.syldb", _GCS + "gtdb-r226-c1000-dbv1.syldb"),
+            size=3713953632,
+            md5="e56ac73c24e0e77f7e72a6e25a08c6a5",
+            genomes=143614,
+            c=1000,
+            description="GTDB r226 species representatives, c1000",
+        ),
+        _database(
+            "gtdb-r220-c200-dbv1.syldb",
+            (_FAUST + "gtdb-r220-c200-dbv1.syldb", _GCS + "gtdb-r220-c200-dbv1.syldb"),
+            size=14061572967,
+            genomes=113104,
+            c=200,
+            description="GTDB r220 species representatives, c200",
+        ),
+        _database(
+            "gtdb-r220-c1000-dbv1.syldb",
+            (_FAUST + "gtdb-r220-c1000-dbv1.syldb", _GCS + "gtdb-r220-c1000-dbv1.syldb"),
+            size=2836800847,
+            genomes=113104,
+            c=1000,
+            description="GTDB r220 species representatives, c1000",
+        ),
+        _database(
+            "v0.3-c200-gtdb-r214.syldb",
+            (_FAUST + "v0.3-c200-gtdb-r214.syldb", _GCS + "v0.3-c200-gtdb-r214.syldb"),
+            size=10825539803,
+            genomes=85202,
+            c=200,
+            description="GTDB r214 species representatives, c200",
+        ),
+        _database(
+            "v0.3-c1000-gtdb-r214.syldb",
+            (_FAUST + "v0.3-c1000-gtdb-r214.syldb", _GCS + "v0.3-c1000-gtdb-r214.syldb"),
+            size=2183213283,
+            genomes=85202,
+            c=1000,
+            description="GTDB r214 species representatives, c1000",
+        ),
+        # -- other prokaryotes -----------------------------------------
+        _database(
+            "globdb_r232_sylph_v2_c200.syl2db",
+            (_FAUST + "globdb_r232_sylph_v2_c200.syl2db",),
+            size=31194509116,
+            genomes=346233,
+            c=200,
+            description="GlobDB r232, two-stage (no Google mirror)",
+        ),
+        _database(
+            "OceanDNA-c200-v0.3.syldb",
+            (_FAUST + "OceanDNA-c200-v0.3.syldb", _GCS + "OceanDNA-c200-v0.3.syldb"),
+            size=827489083,
+            genomes=8466,
+            c=200,
+            description="OceanDNA ocean MAGs",
+        ),
+        _database(
+            "SMAG-c200-v0.3.syldb",
+            (_FAUST + "SMAG-c200-v0.3.syldb", _GCS + "SMAG-c200-v0.3.syldb"),
+            size=2720077433,
+            genomes=21077,
+            c=200,
+            description="SMAG soil MAGs",
+        ),
+        _database(
+            "uhgg_all_c200_v0.3.0.syldb",
+            (_FAUST + "uhgg_all_c200_v0.3.0.syldb", _GCS + "uhgg_all_c200_v0.3.0.syldb"),
+            size=27971290837,
+            genomes=289232,
+            c=200,
+            description="UHGG v2.0.1 gut genomes, not dereplicated (not for profiling)",
+        ),
+        # -- viruses ---------------------------------------------------
+        _database(
+            "uhgv_c100_dbv1.syldb",
+            (_FAUST + "uhgv_c100_dbv1.syldb", _GCS + "uhgv_c100_dbv1.syldb"),
+            size=435767920,
+            md5="36aa5391c50732f515a603adad9c2e19",
+            genomes=171338,
+            c=100,
+            description="UHGV gut vOTUs, c100",
+        ),
+        _database(
+            "uhgv_c200_dbv1.syldb",
+            (_FAUST + "uhgv_c200_dbv1.syldb", _GCS + "uhgv_c200_dbv1.syldb"),
+            size=227714056,
+            md5="2fa195f73b7e685ac19d44f2d56dde1b",
+            genomes=171338,
+            c=200,
+            description="UHGV gut vOTUs, c200",
+        ),
+        _database(
+            "imgvr_c200_v0.3.0.syldb",
+            (_FAUST + "imgvr_c200_v0.3.0.syldb", _GCS + "imgvr_c200_v0.3.0.syldb"),
+            size=2134450877,
+            genomes=2917516,
+            c=200,
+            description="IMG/VR4.1 high-confidence vOTU representatives",
+        ),
+        # -- eukaryotes ------------------------------------------------
+        _database(
+            "fungi-refseq-2025-10-11-c200-dbv1.syldb",
+            (
+                _FAUST + "fungi-refseq-2025-10-11-c200-dbv1.syldb",
+                _GCS + "fungi-refseq-2025-10-11-c200-dbv1.syldb",
+            ),
+            size=783659265,
+            md5="954d655c282c6b71df5675f113ada5ca",
+            genomes=661,
+            c=200,
+            description="RefSeq fungi representatives (2025-10-11)",
+        ),
+        _database(
+            "tara-eukmags-c200-v0.3.syldb",
+            (_FAUST + "tara-eukmags-c200-v0.3.syldb", _GCS + "tara-eukmags-c200-v0.3.syldb"),
+            size=971458802,
+            genomes=713,
+            c=200,
+            description="TARA Oceans eukaryotic MAGs/SAGs",
+        ),
+    )
+}
+
+LIST_KEYWORD = "list"
+
+
+def lookup_database(name: str) -> Database:
+    """Return the catalogue entry for ``name``."""
+    try:
+        return DATABASES[name]
+    except KeyError:
+        known = ", ".join(DATABASES)
+        raise ValueError(
+            f"unknown database {name!r}; known names: {known} "
+            "(run 'sylphd download --list-databases')"
+        ) from None
+
+
+def database_table() -> str:
+    """Render the catalogue as an aligned text table."""
+    header = ("NAME", "SIZE", "GENOMES", "C", "DESCRIPTION")
+    rows = [
+        (
+            database.name,
+            format_size(database.size) if database.size else "?",
+            f"{database.genomes:,}" if database.genomes else "?",
+            str(database.c) if database.c else "?",
+            database.description,
+        )
+        for database in DATABASES.values()
+    ]
+    widths = [max(len(row[index]) for row in (*rows, header)) for index in range(4)]
+    lines = [
+        "  ".join(
+            [value.ljust(width) for width, value in zip(widths, row[:4])] + [row[4]]
+        ).rstrip()
+        for row in (header, *rows)
+    ]
+    lines.insert(1, "  ".join("-" * width for width in widths))
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +605,72 @@ def download_file(
         destination,
         expected_md5=expected_md5,
         progress=progress,
+    )
+
+
+def download_database(
+    database: str | Database,
+    outdir: str | os.PathLike[str] = ".",
+    *,
+    urls: Sequence[str] = (),
+    verify: bool = False,
+    force: bool = False,
+    use_aria2c: bool = False,
+    progress: ProgressCallback | None = None,
+    verify_progress: VerifyCallback | None = None,
+) -> Path:
+    """Download one pre-built database into ``outdir``.
+
+    ``urls`` replaces the catalogue mirrors (or supplies mirrors for a
+    database name that is not in the catalogue). Existing files with the
+    right size are kept unless ``force`` is given; ``verify`` also checks the
+    MD5 when the catalogue knows it.
+    """
+    if isinstance(database, Database):
+        entry = database
+    elif database in DATABASES:
+        entry = DATABASES[database]
+    elif urls:
+        entry = Database(
+            name=database,
+            filename=os.path.basename(database),
+            mirrors=tuple(urls),
+        )
+    else:
+        entry = lookup_database(database)  # raises a helpful error
+    mirrors = tuple(urls) or entry.mirrors
+    if not mirrors:
+        raise ValueError(f"no download URLs known for {entry.name}")
+    if verify and entry.md5 is None:
+        print(
+            f"{entry.name}: no published MD5, checking the size only",
+            file=sys.stderr,
+        )
+
+    directory = Path(outdir)
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / entry.filename
+
+    if destination.exists() and not force:
+        size = destination.stat().st_size
+        if entry.size is not None and size != entry.size:
+            # Wrong size: the file is incomplete or from another source.
+            destination.unlink()
+        elif not verify or entry.md5 is None:
+            return destination
+        elif md5_file(destination, progress=verify_progress) == entry.md5:
+            return destination
+        else:
+            destination.unlink()
+
+    return download_urls(
+        mirrors,
+        destination,
+        expected_size=entry.size,
+        expected_md5=entry.md5 if verify else None,
+        use_aria2c=use_aria2c,
+        progress=progress,
+        verify_progress=verify_progress,
     )
 
 

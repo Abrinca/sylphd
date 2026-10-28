@@ -15,13 +15,18 @@ import pytest
 
 from sylphd import download
 from sylphd.download import (
+    DATABASES,
     MD5SUMS_FILE,
+    Database,
     DownloadError,
     aria2c_command,
     aria2c_path,
+    database_table,
+    download_database,
     download_file,
     download_release,
     download_urls,
+    lookup_database,
     parse_md5sums,
     release_url,
 )
@@ -138,6 +143,50 @@ def test_download_file_without_checksum(tmp_path: Path, http_server) -> None:
     target = download_file(base_url + "x.tsv.gz", tmp_path / "x.tsv.gz")
     assert target.read_bytes() == content
 
+
+# ---------------------------------------------------------------------------
+# database catalogue
+# ---------------------------------------------------------------------------
+
+
+class TestCatalogue:
+    def test_gtdb_r232_c200_dbv2(self) -> None:
+        entry = lookup_database("gtdb-r232-c200-dbv2.syl2db")
+        assert entry.filename == "gtdb-r232-c200-dbv2.syl2db"
+        assert entry.size == 20044737329
+        # Computed from a local copy of the file; matches the cloud mirror's
+        # published object checksum.
+        assert entry.md5 == "89ad2dbdd532be81c72e78f5d493d78d"
+        assert entry.mirrors == (
+            "http://faust.compbio.cs.cmu.edu/sylph-stuff/gtdb-r232-c200-dbv2.syl2db",
+            "https://storage.googleapis.com/sylph-stuff/gtdb-r232-c200-dbv2.syl2db",
+        )
+
+    def test_entries_are_consistent(self) -> None:
+        assert DATABASES
+        for name, entry in DATABASES.items():
+            assert entry.name == name
+            assert entry.filename == name
+            assert entry.size is None or entry.size > 0
+            assert entry.md5 is None or len(entry.md5) == 32
+            assert entry.mirrors
+            for mirror in entry.mirrors:
+                assert mirror.startswith(("http://", "https://"))
+                assert mirror.endswith("/" + entry.filename)
+
+    def test_table_lists_every_database(self) -> None:
+        table = database_table()
+        assert "NAME" in table and "SIZE" in table
+        for name in DATABASES:
+            assert name in table
+
+    def test_unknown_database(self) -> None:
+        with pytest.raises(ValueError, match="unknown database"):
+            lookup_database("nope.syldb")
+        with pytest.raises(ValueError, match="gtdb-r232-c200-dbv2"):
+            lookup_database("nope.syldb")
+
+
 # ---------------------------------------------------------------------------
 # transfer engine
 # ---------------------------------------------------------------------------
@@ -227,6 +276,20 @@ def www(tmp_path: Path) -> Path:
     return root
 
 
+def _serve_database(
+    root: Path, name: str, content: bytes, base_url: str, *, md5: str | None = None
+) -> Database:
+    """Publish ``content`` as ``name`` and describe it as a catalogue entry."""
+    (root / name).write_bytes(content)
+    return Database(
+        name=name,
+        filename=name,
+        mirrors=(base_url + name,),
+        size=len(content),
+        md5=md5,
+    )
+
+
 def test_resume_with_range(tmp_path: Path, www: Path, serve) -> None:
     content = b"0123456789" * 1000
     (www / "db.syldb").write_bytes(content)
@@ -306,6 +369,72 @@ def test_md5_mismatch_removes_file(tmp_path: Path, www: Path, serve) -> None:
     assert not destination.exists()
     assert not destination.with_name("db.syldb.part").exists()
 
+
+def test_download_database_skips_existing(tmp_path: Path, www: Path, serve) -> None:
+    content = b"already here" * 100
+    records: list[str | None] = []
+    base_url = serve(www, records=records)
+    entry = _serve_database(www, "db.syldb", content, base_url)
+
+    destination = download_database(entry, tmp_path, use_aria2c=False)
+    assert destination.read_bytes() == content
+    assert records == [None]
+
+    download_database(entry, tmp_path, use_aria2c=False)
+    assert records == [None]  # not fetched again
+
+    # A wrong-size file is replaced, not reused.
+    destination.write_bytes(b"truncated")
+    records.clear()
+    download_database(entry, tmp_path, use_aria2c=False)
+    assert destination.read_bytes() == content
+    assert records == [None]
+
+
+def test_download_database_force(tmp_path: Path, www: Path, serve) -> None:
+    content = b"x" * 10
+    base_url = serve(www)
+    entry = _serve_database(www, "db.syldb", content, base_url)
+    destination = tmp_path / "db.syldb"
+    destination.write_bytes(content)
+    download_database(entry, tmp_path, force=True, use_aria2c=False)
+    assert destination.read_bytes() == content
+
+
+def test_download_database_verify(tmp_path: Path, www: Path, serve) -> None:
+    content = b"verify me" * 50
+    digest = hashlib.md5(content).hexdigest()
+    base_url = serve(www)
+    entry = _serve_database(www, "db.syldb", content, base_url, md5=digest)
+
+    destination = download_database(entry, tmp_path, verify=True, use_aria2c=False)
+    assert destination.read_bytes() == content
+
+    # A same-size corruption is caught by --verify and replaced.
+    destination.write_bytes(b"y" * len(content))
+    download_database(entry, tmp_path, verify=True, use_aria2c=False)
+    assert destination.read_bytes() == content
+
+    # Without --verify, the size check alone accepts the file.
+    destination.write_bytes(b"z" * len(content))
+    download_database(entry, tmp_path, use_aria2c=False)
+    assert destination.read_bytes() == b"z" * len(content)
+
+
+def test_download_database_unknown_name_with_url(tmp_path: Path, www: Path, serve) -> None:
+    content = b"arbitrary"
+    (www / "my.syldb").write_bytes(content)
+    base_url = serve(www)
+    destination = download_database(
+        "my.syldb", tmp_path, urls=(base_url + "my.syldb",), use_aria2c=False
+    )
+    assert destination == tmp_path / "my.syldb"
+    assert destination.read_bytes() == content
+
+    with pytest.raises(ValueError, match="unknown database"):
+        download_database("nope.syldb", tmp_path, use_aria2c=False)
+
+
 # ---------------------------------------------------------------------------
 # aria2c
 # ---------------------------------------------------------------------------
@@ -370,3 +499,88 @@ def test_aria2c_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     )
     with pytest.raises(DownloadError, match="aria2c failed with exit status 9"):
         download_urls(["http://a/x"], tmp_path / "x", use_aria2c=True)
+
+
+# ---------------------------------------------------------------------------
+# command line
+# ---------------------------------------------------------------------------
+
+
+def _run(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "sylphd", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
+def test_cli_lists_databases() -> None:
+    for flag in ("--list-databases", "--database=list"):
+        result = _run("download", flag)
+        assert result.returncode == 0, result.stderr
+        assert "gtdb-r232-c200-dbv2.syl2db" in result.stdout
+        assert "18.7 GiB" in result.stdout
+
+
+def test_cli_downloads_database_from_url(tmp_path: Path, www: Path, serve) -> None:
+    content = b"cli database"
+    (www / "db.syldb").write_bytes(content)
+    base_url = serve(www)
+    result = _run(
+        "download",
+        "--database",
+        "db.syldb",
+        "--url",
+        base_url + "db.syldb",
+        "--no-aria2c",
+        "--outdir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(tmp_path / "db.syldb")
+    assert (tmp_path / "db.syldb").read_bytes() == content
+
+
+def test_cli_rejects_url_with_several_databases() -> None:
+    result = _run(
+        "download",
+        "--database",
+        "a.syldb",
+        "--database",
+        "b.syldb",
+        "--url",
+        "http://example.org/a.syldb",
+    )
+    assert result.returncode == 1
+    assert "single --database" in result.stderr
+
+
+def test_cli_downloads_several_urls(tmp_path: Path, www: Path, serve) -> None:
+    (www / "a.syldb").write_bytes(b"aaa")
+    (www / "b.syldb").write_bytes(b"bb")
+    base_url = serve(www)
+    result = _run(
+        "download",
+        "--url",
+        base_url + "a.syldb",
+        "--url",
+        base_url + "b.syldb",
+        "--no-aria2c",
+        "--outdir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stderr
+    assert sorted(result.stdout.split()) == sorted(
+        [str(tmp_path / "a.syldb"), str(tmp_path / "b.syldb")]
+    )
+    assert (tmp_path / "a.syldb").read_bytes() == b"aaa"
+    assert (tmp_path / "b.syldb").read_bytes() == b"bb"
+
+
+def test_cli_unknown_database(tmp_path: Path) -> None:
+    result = _run("download", "--database", "nope.syldb", "--outdir", str(tmp_path))
+    assert result.returncode == 1
+    assert "unknown database" in result.stderr
+    assert "--list-databases" in result.stderr
