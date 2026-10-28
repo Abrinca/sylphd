@@ -1,0 +1,34 @@
+# Changelog
+
+All notable changes to `sylphd` are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
+[semantic versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2026-10-28
+
+The first release. `sylphd` is a long-running [sylph](https://github.com/bluenote-1577/sylph)
+server with a sketching client: the database is loaded once and shared, clients send sketches.
+
+### Added
+
+- **`sylphd serve`**: loads a `.syl2db` (two-stage) or `.syldb` database into memory and serves
+  query/profile/assembly requests over a Unix socket (`$XDG_RUNTIME_DIR/sylphd.sock`, mode `0660`)
+  or TCP. Optional GTDB metadata SQLite, upload limits, rate limit, request queue, trusted-proxy
+  handling, CORS and an opt-in endpoint for raw sequences (`--allow-sequences`).
+- **Client commands** that sketch locally and send only sketches: `sylphd info`, `sylphd query`
+  (ANI hits) and `sylphd profile` (taxonomic abundances), for single-end, paired, interleaved and
+  multi-file samples, or ready-made `.sylsp` sketches.
+- **Output formats**: sylph's TSV columns plus `accession` and metadata columns, JSON, and
+  `sylph-tax`-style `.sylphmpa` profiles, clade × sample matrices and sequence matrices.
+- **`sylphd assembly`**: identifies a FASTA assembly against the database, with a species
+  assignment at 95 % ANI and the lineage relation of every hit.
+- **`sylphd download` and `sylphd setup`**: fetch GTDB metadata (checksums verified) and build the
+  SQLite metadata database.
+- **Web app** (<https://abrinca.github.io/sylphd/>): paste an assembly, get its closest GTDB
+  genomes.
+- **Release wheels** (see
+  [Install from a release](https://abrinca.github.io/sylphd/docs/install/#from-a-release-no-rust-needed))
+  for Linux x86_64 and aarch64, CPython 3.14, so a production server can install without a Rust
+  toolchain.
+
+[0.1.0]: https://github.com/Abrinca/sylphd/releases/tag/v0.1.0

@@ -27,6 +27,17 @@ uv run sylphd --help
 
 or, in another project: `uv add "sylphd @ git+https://github.com/Abrinca/sylphd"`.
 
+If you would rather not install a Rust toolchain, tagged releases carry prebuilt wheels for Linux
+x86_64 and aarch64 (CPython 3.14):
+
+```console
+uv venv --python 3.14
+uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/v0.1.0 "sylphd==0.1.0"
+```
+
+See [Install from a release](https://abrinca.github.io/sylphd/docs/install/#from-a-release-no-rust-needed)
+for the details.
+
 ## Quick start
 
 ```console

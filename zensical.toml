@@ -36,6 +36,7 @@ nav = [
     { "Security notes" = "reference/security.md" },
   ] },
   { "Project" = [
+    { "Changelog" = "project/changelog.md" },
     { "Citing" = "project/citing.md" },
     { "License" = "project/license.md" },
     { "Terms of the web service" = "project/terms.md" },
