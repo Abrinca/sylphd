@@ -313,3 +313,43 @@ def check_sketch(sketch: SampleSketch, *, c: int, k: int, name: str = "") -> Non
             f"{prefix}sketch was built with c={sketch.c}, which is sparser than the "
             f"database c={c}; re-sketch it at c<={c} or send the reads instead"
         )
+
+
+@dataclass(frozen=True)
+class AssemblyStats:
+    """Facts about a sketched assembly that a sketch does not carry."""
+
+    records: int
+    length: int
+    gc: float
+
+
+def sketch_assembly(
+    path: str | os.PathLike[str], name: str, *, c: int, k: int
+) -> tuple[SampleSketch, AssemblyStats]:
+    """Sketch one assembly (FASTA/FASTQ, gzip fine) like the server does for ``/assembly``.
+
+    Every record is one "read" of a single-end sample.  Also returns the record
+    count, total length and GC percent, counted while the file streams by.
+    """
+    records = length = gc = 0
+
+    def sequences() -> Iterator[str]:
+        nonlocal records, length, gc
+        with dnaio.open(str(path)) as reader:
+            for record in reader:
+                sequence = record.sequence.upper()
+                if not sequence:
+                    raise InputError(f"{path}: sequence #{records + 1} is empty")
+                records += 1
+                length += len(sequence)
+                gc += sequence.count("G") + sequence.count("C")
+                yield sequence
+
+    try:
+        sketch = Sketcher(c=c, k=k).sketch_single(name, sequences())
+    except (OSError, ValueError, dnaio.FileFormatError, dnaio.UnknownFileFormat) as error:
+        raise InputError(f"cannot sketch {path}: {error}") from error
+    if not records or not length:
+        raise InputError(f"{path} contains no sequences")
+    return sketch, AssemblyStats(records, length, round(100.0 * gc / length, 2))
