@@ -17,6 +17,7 @@ import json
 import os
 import signal
 import socket
+import stat
 import sys
 import threading
 import time
@@ -28,6 +29,7 @@ import anyio
 import pysylph
 import uvicorn
 from starlette.applications import Starlette
+from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -271,14 +273,20 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
         return _error("no 'sketch' part in the request", 400)
     if len(sketches) > MAX_SKETCHES:
         return _error(f"more than {MAX_SKETCHES} sketches in one request", 413)
+    for part in sketches:
+        if not isinstance(part, UploadFile):
+            return _error("'sketch' parts must be file uploads", 400)
 
     names = _resolve_names(params_data.get("names"), sketches)
     if isinstance(names, JSONResponse):
         return names
 
-    payloads = []
-    for part in sketches:
-        payloads.append(await part.read())
+    try:
+        payloads = []
+        for part in sketches:
+            payloads.append(await part.read())
+    except Exception as error:
+        return _error(f"failed to read a 'sketch' part: {error}", 500)
 
     samples: list[dict[str, Any] | None] = [None] * len(sketches)
     try:
@@ -450,7 +458,10 @@ def create_app(
             Route("/profile", _profile, methods=["POST"]),
             Route("/query", _query, methods=["POST"]),
         ],
-        exception_handlers={StarletteHTTPException: _json_http_error},
+        exception_handlers={
+            StarletteHTTPException: _json_http_error,
+            Exception: _json_http_error,
+        },
         lifespan=_lifespan(config),
     )
     app.state.database = loaded
@@ -465,17 +476,54 @@ def create_app(
     return app
 
 
+def _socket_identity(path: Path) -> tuple[int, int] | None:
+    """Return the ``(st_dev, st_ino)`` identity of ``path``, or ``None``."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def _unlink_socket_if_owned(path: Path, identity: tuple[int, int] | None) -> None:
+    """Unlink ``path`` only if it is still the socket this process bound."""
+    if identity is None:
+        return
+    try:
+        st = path.stat()
+    except OSError:
+        return
+    if (st.st_dev, st.st_ino) != identity:
+        return
+    if not stat.S_ISSOCK(st.st_mode):
+        return
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
 def prepare_unix_socket(path: Path) -> None:
     """Remove a stale socket file, refusing to steal a live one."""
     if not path.exists() and not path.is_symlink():
         return
-    if path.is_socket():
+    if not path.is_socket():
+        raise RuntimeError(f"{path} exists and is not a socket; refusing to remove it")
+    # A server that has just bound but not yet called listen() also gets
+    # ECONNREFUSED.  Retry briefly before declaring the socket stale.
+    last_refused = False
+    for attempt in range(3):
         probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         probe.settimeout(1.0)
         try:
             probe.connect(str(path))
-        except (ConnectionRefusedError, FileNotFoundError):
-            path.unlink()
+        except FileNotFoundError:
+            return
+        except ConnectionRefusedError:
+            last_refused = True
+            if attempt < 2:
+                time.sleep(0.1)
+                continue
         except OSError as error:
             raise RuntimeError(
                 f"cannot check whether {path} is in use: {error}"
@@ -484,8 +532,11 @@ def prepare_unix_socket(path: Path) -> None:
             raise RuntimeError(f"another server is already listening on {path}")
         finally:
             probe.close()
-        return
-    raise RuntimeError(f"{path} exists and is not a socket; refusing to remove it")
+    if last_refused:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def bind_unix_socket(path: Path) -> socket.socket:
@@ -522,10 +573,12 @@ def serve(
         "access_log": log_level != "warning",
     }
     sock: socket.socket | None = None
+    socket_identity: tuple[int, int] | None = None
     if socket_path is not None:
         socket_path.parent.mkdir(parents=True, exist_ok=True)
         prepare_unix_socket(socket_path)
         sock = bind_unix_socket(socket_path)
+        socket_identity = _socket_identity(socket_path)
         kwargs["fd"] = sock.fileno()
     else:
         host, port = tcp  # type: ignore[misc]
@@ -536,11 +589,7 @@ def serve(
         if sock is not None:
             sock.close()
         if socket_path is not None:
-            try:
-                if socket_path.is_socket():
-                    socket_path.unlink()
-            except OSError:
-                pass
+            _unlink_socket_if_owned(socket_path, socket_identity)
 
     previous_sigterm = None
     if socket_path is not None and threading.current_thread() is threading.main_thread():
