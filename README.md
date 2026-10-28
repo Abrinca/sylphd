@@ -200,6 +200,16 @@ K-12 reads, `.sylsp` sketches) and include an in-process Starlette client and
 one real Unix-socket round trip against a `sylphd serve` subprocess. The large
 GTDB database is only needed for manual runs.
 
+## Credits
+
+- [sylph](https://github.com/bluenote-1577/sylph) by Jim Shaw and Yun William Yu
+  does the sketching and profiling (MIT).
+- [pysylph](https://github.com/althonos/pysylph) by Martin Larralde provides the
+  Python bindings (MIT). The test data in `tests/data` comes from pysylph's
+  test suite.
+- [GTDB](https://gtdb.ecogenomic.org/) provides the genome metadata, including
+  the NCBI fields, that `sylphd download` fetches.
+
 ## License
 
 AGPL-3.0-or-later, see `LICENSE`. We are open to negotiating more permissive terms: <https://abrinca.com/contact>.
