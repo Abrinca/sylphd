@@ -144,11 +144,11 @@ impl WasmSketcher {
 /// all behave the same; flate2 + zlib-rs inside).
 ///
 /// ```js
-/// const gz = new WasmGunzip(2 << 20);      // output chunk size
+/// const gz = new WasmGunzip(2 << 20, 'deferred');   // output chunk size, CRC mode
 /// gz.push(compressedChunk);
-/// let out; while ((out = gz.pull()) !== undefined) post(out);   // full chunks
+/// let out; while ((out = gz.pull()) !== undefined) post(out, gz.take_trailers());
 /// ...
-/// post(gz.finish());                        // last partial chunk; throws if truncated
+/// post(gz.finish(), gz.take_trailers());    // last partial chunk; throws if truncated
 /// ```
 #[wasm_bindgen]
 pub struct WasmGunzip {
@@ -157,22 +157,32 @@ pub struct WasmGunzip {
     pos: usize,
     out: Vec<u8>,
     chunk: usize,
+    trailers: Vec<(u64, u32, u32)>,
 }
 
 #[wasm_bindgen]
 impl WasmGunzip {
     /// `chunk_size`: size of the decompressed pieces `pull` returns (default
-    /// 2 MiB). `verify`: check CRC32 of every member (default true).
+    /// 2 MiB). `crc`: `"inline"` (default, check CRC32 while decoding),
+    /// `"deferred"` (do not compute it here; `take_trailers` gives what a
+    /// `WasmCrc` on another thread needs to check it) or `"off"`.
     #[wasm_bindgen(constructor)]
-    pub fn new(chunk_size: Option<usize>, verify: Option<bool>) -> WasmGunzip {
+    pub fn new(chunk_size: Option<usize>, crc: Option<String>) -> Result<WasmGunzip, JsError> {
         let chunk = chunk_size.unwrap_or(2 << 20).max(1);
-        WasmGunzip {
-            decoder: gzip::GzipDecoder::with_verify(verify.unwrap_or(true)),
+        let mode = match crc.as_deref() {
+            None | Some("inline") => gzip::CrcMode::Inline,
+            Some("deferred") => gzip::CrcMode::Deferred,
+            Some("off") => gzip::CrcMode::Off,
+            Some(other) => return Err(js_err(format!("unknown crc mode {other:?}"))),
+        };
+        Ok(WasmGunzip {
+            decoder: gzip::GzipDecoder::with_mode(mode),
             pending: Vec::new(),
             pos: 0,
             out: Vec::with_capacity(chunk + chunk / 4),
             chunk,
-        }
+            trailers: Vec::new(),
+        })
     }
 
     /// Queues compressed bytes.
@@ -191,6 +201,7 @@ impl WasmGunzip {
         let before = input.len();
         let result = self.decoder.decode(&mut input, &mut self.out, self.chunk);
         self.pos += before - input.len();
+        self.trailers.extend(self.decoder.take_trailers());
         result.map_err(js_err)?;
         if self.out.len() >= self.chunk {
             let full = std::mem::replace(
@@ -207,12 +218,66 @@ impl WasmGunzip {
     /// remaining decompressed bytes. Call after `pull` returned `undefined`
     /// for the last time.
     pub fn finish(&mut self) -> Result<Vec<u8>, JsError> {
+        self.trailers.extend(self.decoder.take_trailers());
         self.decoder.finish().map_err(js_err)?;
         Ok(std::mem::take(&mut self.out))
+    }
+
+    /// Deferred CRC mode: members completed since the last call, as flat
+    /// `[end offset in the decompressed file, crc32, isize]` triples (numbers).
+    /// Call right after the `pull` / `finish` whose chunk they belong to, and
+    /// send them along with that chunk.
+    pub fn take_trailers(&mut self) -> Vec<f64> {
+        std::mem::take(&mut self.trailers)
+            .into_iter()
+            .flat_map(|(end, crc, size)| [end as f64, crc as f64, size as f64])
+            .collect()
     }
 
     /// Number of gzip members completed so far.
     pub fn members(&self) -> u32 {
         self.decoder.members
+    }
+}
+
+/// Checks the CRC32 of gzip members on the other side of a pipeline:
+/// the decompressing worker only records `(end, crc, isize)` (deferred mode),
+/// the sketching worker, which has idle time, does the hashing.
+///
+/// ```js
+/// const crc = new WasmCrc();
+/// crc.update(chunkBytes, trailersOfThatChunk);   // throws on mismatch
+/// crc.end_file();
+/// ```
+#[wasm_bindgen]
+pub struct WasmCrc {
+    inner: gzip::Crc32Tracker,
+}
+
+#[wasm_bindgen]
+impl WasmCrc {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmCrc {
+        WasmCrc {
+            inner: gzip::Crc32Tracker::default(),
+        }
+    }
+
+    pub fn update(&mut self, data: &[u8], trailers: &[f64]) -> Result<(), JsError> {
+        let triples: Vec<(u64, u32, u32)> = trailers
+            .chunks_exact(3)
+            .map(|t| (t[0] as u64, t[1] as u32, t[2] as u32))
+            .collect();
+        self.inner.update(data, &triples).map_err(js_err)
+    }
+
+    pub fn end_file(&mut self) {
+        self.inner.reset();
+    }
+}
+
+impl Default for WasmCrc {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -5,7 +5,7 @@
 //   ./build.sh && cargo test --release && node tests/node_check.mjs [--big]
 import { readFileSync, createReadStream } from "node:fs";
 import { gunzipSync, createGunzip } from "node:zlib";
-import { initSync, WasmSketcher, WasmGunzip } from "../demo/pkg/sylph_sketch.js";
+import { initSync, WasmSketcher, WasmGunzip, WasmCrc } from "../demo/pkg/sylph_sketch.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -32,14 +32,21 @@ for (const c of cases) {
   // raw_gz cases go through WasmGunzip (the browser worker's path) instead of
   // sketcher.push_gz, so both gzip entry points are exercised
   const gunzipper = () => {
-    const gz = new WasmGunzip(1 << 16);
+    // deferred CRC: the browser pipeline checks it in the sketch worker
+    const gz = new WasmGunzip(1 << 16, "deferred");
+    const crc = new WasmCrc();
     return {
       feed(chunk, push) {
         gz.push(chunk);
         let out;
-        while ((out = gz.pull()) !== undefined) push(out);
+        while ((out = gz.pull()) !== undefined) { push(out); crc.update(out, gz.take_trailers()); }
       },
-      end(push) { push(gz.finish()); },
+      end(push) {
+        const rest = gz.finish();
+        push(rest);
+        crc.update(rest, gz.take_trailers());
+        crc.end_file();
+      },
     };
   };
   const read = (f) => (c.raw_gz ? readFileSync(abs(f)) : load(f));

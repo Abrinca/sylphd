@@ -19,15 +19,69 @@ enum Stage {
     Trailer,
 }
 
+/// What to do with each member's CRC32.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CrcMode {
+    /// Compute and compare while decoding (costs ~15 % of the decode time).
+    Inline,
+    /// Do not compute; record (end offset, expected CRC32, ISIZE) per member
+    /// in `GzipDecoder::trailers` so that another thread can check them
+    /// (`Crc32Tracker`).
+    Deferred,
+    /// Never check (ISIZE is still checked).
+    Off,
+}
+
+/// Running CRC32 of a decompressed stream, checked against the
+/// `GzipDecoder::trailers` of the decoder that produced it.
+#[derive(Default)]
+pub struct Crc32Tracker {
+    run: u32,
+    pos: u64,
+}
+
+impl Crc32Tracker {
+    /// `data` is the next piece of the decompressed stream; `trailers` are the
+    /// members completed within it, as flat `(end offset in the stream,
+    /// expected crc, isize)` triples.
+    pub fn update(&mut self, data: &[u8], trailers: &[(u64, u32, u32)]) -> Result<(), String> {
+        let mut cursor = 0usize;
+        for &(end, expected, _) in trailers {
+            let end = end
+                .checked_sub(self.pos)
+                .filter(|&e| e as usize >= cursor && e as usize <= data.len())
+                .ok_or("gzip member boundary outside the chunk (internal error)")?
+                as usize;
+            self.run = crc32(self.run, &data[cursor..end]);
+            if self.run != expected {
+                return Err("gzip CRC32 mismatch (corrupt data)".into());
+            }
+            self.run = 0;
+            cursor = end;
+        }
+        self.run = crc32(self.run, &data[cursor..]);
+        self.pos += data.len() as u64;
+        Ok(())
+    }
+
+    /// Start of the next file.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 pub struct GzipDecoder {
     stage: Stage,
     header: Vec<u8>,
     trailer: Vec<u8>,
     inflater: Decompress,
-    /// Verify CRC32 and ISIZE of every member.
-    verify: bool,
+    mode: CrcMode,
     crc: u32,
     isize: u32,
+    /// Decompressed bytes produced for the current file.
+    file_out: u64,
+    /// `CrcMode::Deferred`: members completed since the last `take_trailers`.
+    trailers: Vec<(u64, u32, u32)>,
     /// Completed members.
     pub members: u32,
     /// Bytes seen after the last member that were all zero (tape padding).
@@ -83,18 +137,25 @@ fn parse_header(h: &[u8]) -> Result<Option<usize>, String> {
 
 impl GzipDecoder {
     pub fn new() -> Self {
-        Self::with_verify(true)
+        Self::with_mode(CrcMode::Inline)
     }
 
-    pub fn with_verify(verify: bool) -> Self {
+    /// Completed members' `(end offset, crc, isize)` (deferred CRC mode).
+    pub fn take_trailers(&mut self) -> Vec<(u64, u32, u32)> {
+        std::mem::take(&mut self.trailers)
+    }
+
+    pub fn with_mode(mode: CrcMode) -> Self {
         Self {
             stage: Stage::Header,
             header: Vec::new(),
             trailer: Vec::new(),
             inflater: Decompress::new(false),
-            verify,
+            mode,
             crc: 0,
             isize: 0,
+            file_out: 0,
+            trailers: Vec::new(),
             members: 0,
             padding: false,
         }
@@ -171,10 +232,11 @@ impl GzipDecoder {
                     let consumed = (self.inflater.total_in() - in_before) as usize;
                     let produced = (self.inflater.total_out() - out_before) as usize;
                     *input = &input[consumed..];
-                    if self.verify {
+                    if self.mode == CrcMode::Inline {
                         self.crc = crc32(self.crc, &out[start..]);
                     }
                     self.isize = self.isize.wrapping_add(produced as u32);
+                    self.file_out += produced as u64;
                     match status {
                         Status::StreamEnd => self.stage = Stage::Trailer,
                         Status::Ok => {}
@@ -198,8 +260,11 @@ impl GzipDecoder {
                     if self.trailer.len() == 8 {
                         let crc = u32::from_le_bytes(self.trailer[..4].try_into().unwrap());
                         let size = u32::from_le_bytes(self.trailer[4..].try_into().unwrap());
-                        if (self.verify && crc != self.crc) || size != self.isize {
+                        if (self.mode == CrcMode::Inline && crc != self.crc) || size != self.isize {
                             return Err("gzip CRC or length check failed (corrupt data)".into());
+                        }
+                        if self.mode == CrcMode::Deferred {
+                            self.trailers.push((self.file_out, crc, size));
                         }
                         self.trailer.clear();
                         self.members += 1;
@@ -216,8 +281,8 @@ impl GzipDecoder {
     pub fn finish(&mut self) -> Result<(), String> {
         let complete =
             matches!(self.stage, Stage::Header) && (self.header.is_empty() || self.padding);
-        let (members, verify) = (self.members, self.verify);
-        *self = Self::with_verify(verify);
+        let (members, mode) = (self.members, self.mode);
+        *self = Self::with_mode(mode);
         if members == 0 {
             Err("empty or invalid gzip file".into())
         } else if complete {

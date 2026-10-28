@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
-use sylph_sketch_wasm::gzip::GzipDecoder;
+use sylph_sketch_wasm::gzip::{Crc32Tracker, CrcMode, GzipDecoder};
 
 fn payload(n: usize) -> Vec<u8> {
     let mut x = 12345u64;
@@ -138,4 +138,42 @@ fn decode_respects_the_output_limit() {
     decoder.finish().unwrap();
     assert_eq!(total, data.len());
     assert!(max_out < 3 << 20, "output piece of {max_out} bytes");
+}
+
+/// Deferred mode: the decoder records member trailers, a `Crc32Tracker` fed
+/// with the decompressed pieces (cut elsewhere than the members) checks them.
+fn deferred(gz: &[u8], piece: usize) -> Result<Vec<u8>, String> {
+    let mut decoder = GzipDecoder::with_mode(CrcMode::Deferred);
+    let mut tracker = Crc32Tracker::default();
+    let mut all = vec![];
+    let mut input = gz;
+    while !input.is_empty() {
+        let mut out = Vec::new();
+        decoder.decode(&mut input, &mut out, piece)?;
+        let trailers = decoder.take_trailers();
+        tracker.update(&out, &trailers)?;
+        all.extend(out);
+    }
+    decoder.finish()?;
+    Ok(all)
+}
+
+#[test]
+fn deferred_crc_is_checked_elsewhere() {
+    let parts = [payload(10), payload(300_000), payload(0), payload(5000)];
+    let mut gz = vec![];
+    let mut plain = vec![];
+    for part in &parts {
+        gz.extend(member(part, Compression::none()));
+        plain.extend_from_slice(part);
+    }
+    for piece in [1, 100, 4096, 1 << 20] {
+        assert_eq!(deferred(&gz, piece).unwrap(), plain, "piece {piece}");
+    }
+    // flip one payload byte inside a stored block: deflate stays valid, CRC does not
+    let mut bad = gz.clone();
+    let at = 10 + 5 + 100;
+    bad[at] ^= 1;
+    assert!(deferred(&bad, 4096).is_err());
+    assert!(decode(&bad, 4096).is_err());
 }

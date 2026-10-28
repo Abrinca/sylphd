@@ -19,7 +19,7 @@ async function run(name, fn) {
 }
 
 await run(`wasm zlib-rs (verify crc=${verify})`, async () => {
-  const gz = new WasmGunzip(2 << 20, verify);
+  const gz = new WasmGunzip(2 << 20, verify ? "inline" : "off");
   let inBytes = 0, outBytes = 0;
   for await (const chunk of createReadStream(file, { highWaterMark: 1 << 20 })) {
     inBytes += chunk.length;
