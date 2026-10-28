@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 
+import dnaio
 import pysylph
 import pytest
 
@@ -19,6 +20,7 @@ from sylphd.client import ClientError, connect
 from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
 
 from conftest import (
+    CLODF13_FASTA,
     ECOLI_TWO_STAGE,
     K12_PAIRED_SKETCH,
     K12_R1,
@@ -117,6 +119,110 @@ def metadata_server(tmp_path_factory):
     try:
         _wait_for_socket(socket_path)
         yield socket_path, process
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+GTDB_TAXONOMY = {
+    "GCA_111111111.1": (
+        "d__Bacteria;p__Bacillota;c__Clostridia;o__Clostridiales;"
+        "f__Clostridiaceae;g__Clostridium;s__Clostridium difficile"
+    ),
+    "GCA_222222222.1": (
+        "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;"
+        "o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;"
+        "s__Escherichia coli"
+    ),
+}
+NCBI_TAXONOMY = {
+    # Internal gaps must be filled with "unclassified <ancestor>".
+    "GCA_111111111.1": (
+        "d__Bacteria;p__Bacillota;c__Clostridia;o__;f__;"
+        "g__Candidatus Avispirillum;s__"
+    ),
+    "GCA_222222222.1": (
+        "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;"
+        "o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;"
+        "s__Escherichia coli"
+    ),
+}
+
+
+def _build_taxonomy_db(directory: Path) -> None:
+    """A two-genome database, two sample sketches and a metadata SQLite."""
+    with dnaio.open(CLODF13_FASTA) as handle:
+        sequence = next(iter(handle)).sequence
+    half = len(sequence) // 2
+    sketcher = pysylph.Sketcher(c=200, k=31)
+    genomes = [
+        sketcher.sketch_genome(f"{accession}_genomic.fna.gz", [part])
+        for accession, part in (
+            ("GCA_111111111.1", sequence[:half]),
+            ("GCA_222222222.1", sequence[half:]),
+        )
+    ]
+    pysylph.Database(genomes).dump(str(directory / "taxonomy.syldb"))
+
+    def sketch(name: str, sequence_part: str) -> None:
+        reads = [
+            sequence_part[start : start + 1000]
+            for start in range(0, len(sequence_part) - 1000, 1000)
+        ]
+        sample = sketcher.sketch_single(name, reads)
+        (directory / f"{name}.sylsp").write_bytes(sample.to_bytes())
+
+    sketch("one", sequence[:half])
+    sketch("two", sequence)
+
+    header = ["accession", *METADATA_COLUMNS]
+    lines = ["\t".join(header)]
+    for accession in GTDB_TAXONOMY:
+        values = {column: "none" for column in METADATA_COLUMNS}
+        values.update(
+            gtdb_taxonomy=GTDB_TAXONOMY[accession],
+            ncbi_taxonomy=NCBI_TAXONOMY[accession],
+            genome_size="42",
+        )
+        lines.append(
+            "\t".join([accession, *[values[column] for column in METADATA_COLUMNS]])
+        )
+    source = directory / "taxonomy-meta.tsv"
+    source.write_text("\n".join(lines) + "\n")
+    build_metadata_db([source], directory / "taxonomy-meta.sqlite", release=232)
+
+
+@pytest.fixture(scope="module")
+def taxonomy_server(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("taxonomy-server")
+    _build_taxonomy_db(directory)
+    socket_path = directory / "sylphd.sock"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "sylphd",
+            "serve",
+            "--db",
+            str(directory / "taxonomy.syldb"),
+            "--meta",
+            str(directory / "taxonomy-meta.sqlite"),
+            "--socket",
+            str(socket_path),
+            "--log-level",
+            "warning",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for_socket(socket_path)
+        yield socket_path, directory
     finally:
         process.terminate()
         try:
@@ -353,3 +459,190 @@ class TestLocalCLI:
         result = _run("serve", check=False)
         assert result.returncode == 2
         assert "--db" in result.stderr
+
+
+class TestTaxonomyOutputs:
+    def _profile(self, taxonomy_server, *args: str) -> subprocess.CompletedProcess[str]:
+        socket_path, directory = taxonomy_server
+        return _run(
+            "profile",
+            str(directory / "one.sylsp"),
+            str(directory / "two.sylsp"),
+            "--socket",
+            str(socket_path),
+            *args,
+            check=False,
+        )
+
+    def test_taxprof_and_taxmatrix(self, taxonomy_server) -> None:
+        _, directory = taxonomy_server
+        result = self._profile(
+            taxonomy_server,
+            "--fields",
+            "none",
+            "--taxprof",
+            str(directory / "taxprof-"),
+            "--taxmatrix",
+            str(directory / "matrix-"),
+        )
+        assert result.returncode == 0, result.stderr
+
+        # The main TSV is unchanged: no taxonomy columns unless --fields asks.
+        header = result.stdout.splitlines()[0].split("\t")
+        assert "accession" in header
+        assert "gtdb_taxonomy" not in header
+        assert "ncbi_taxonomy" not in header
+
+        for sample in ("one", "two"):
+            for taxonomy in ("gtdb", "ncbi"):
+                assert (directory / f"taxprof-{sample}.{taxonomy}.sylphmpa").is_file()
+        assert (directory / "matrix-gtdb.tsv").is_file()
+        assert (directory / "matrix-ncbi.tsv").is_file()
+
+        gtdb = (directory / "taxprof-one.gtdb.sylphmpa").read_text().splitlines()
+        assert gtdb[0] == "#SampleID\tone\tTaxonomies_used:['gtdb']"
+        assert gtdb[1].split("\t") == [
+            "clade_name",
+            "relative_abundance",
+            "sequence_abundance",
+            "ANI (if strain-level)",
+            "Coverage (if strain-level)",
+        ]
+        rows = {line.split("\t")[0]: line.split("\t") for line in gtdb[2:]}
+        root = rows["d__Bacteria"]
+        assert float(root[1]) == pytest.approx(100.0)
+        assert float(root[2]) == pytest.approx(100.0)
+        assert root[3:] == ["NA", "NA"]
+
+        species = (
+            "d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|"
+            "f__Clostridiaceae|g__Clostridium|s__Clostridium difficile"
+        )
+        strain = rows[species + "|t__GCA_111111111.1"]
+        assert float(strain[3]) > 90.0
+        assert float(strain[4]) == pytest.approx(1.0)
+
+        ncbi = (directory / "taxprof-one.ncbi.sylphmpa").read_text().splitlines()
+        assert (
+            "d__Bacteria|p__Bacillota|c__Clostridia|o__unclassified Clostridia"
+            in {line.split("\t")[0] for line in ncbi[2:]}
+        )
+
+        matrix = (directory / "matrix-gtdb.tsv").read_text().splitlines()
+        assert matrix[0] == "clade_name\tone\ttwo"
+        values = {line.split("\t")[0]: line.split("\t")[1:] for line in matrix[1:]}
+        assert [float(value) for value in values["d__Bacteria"]] == pytest.approx(
+            [100.0, 100.0]
+        )
+        assert [
+            float(value) for value in values["d__Bacteria|p__Pseudomonadota"]
+        ] == pytest.approx([0.0, 50.0])
+        # Rows below a missing taxon are present with zero.
+        assert (
+            "d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria"
+            in values
+        )
+
+    def test_taxonomy_selection_and_visible_fields(self, taxonomy_server) -> None:
+        _, directory = taxonomy_server
+        result = self._profile(
+            taxonomy_server,
+            "--taxonomy",
+            "gtdb",
+            "--fields",
+            "gtdb_taxonomy",
+            "--taxprof",
+            str(directory / "sel-"),
+            "--taxmatrix",
+            str(directory / "sel-"),
+        )
+        assert result.returncode == 0, result.stderr
+        header = result.stdout.splitlines()[0].split("\t")
+        assert "gtdb_taxonomy" in header
+        assert "ncbi_taxonomy" not in header
+        assert "d__Bacteria" in result.stdout
+
+        assert (directory / "sel-one.gtdb.sylphmpa").is_file()
+        assert (directory / "sel-gtdb.tsv").is_file()
+        assert not (directory / "sel-one.ncbi.sylphmpa").exists()
+        assert not (directory / "sel-ncbi.tsv").exists()
+
+    def test_sequence_matrix(self, taxonomy_server) -> None:
+        _, directory = taxonomy_server
+        result = self._profile(
+            taxonomy_server,
+            "--taxonomy",
+            "gtdb",
+            "--taxmatrix",
+            str(directory / "seq-"),
+            "--taxmatrix-value",
+            "sequence",
+        )
+        assert result.returncode == 0, result.stderr
+        matrix = (directory / "seq-gtdb.tsv").read_text().splitlines()
+        rows = {line.split("\t")[0]: line.split("\t")[1:] for line in matrix[1:]}
+        assert [float(value) for value in rows["d__Bacteria"]] == pytest.approx(
+            [100.0, 100.0], rel=0.01
+        )
+
+    def test_unknown_taxonomy(self, taxonomy_server) -> None:
+        _, directory = taxonomy_server
+        result = self._profile(
+            taxonomy_server, "--taxonomy", "kraken", "--taxprof", str(directory / "x-")
+        )
+        assert result.returncode == 1
+        assert "unknown taxonomy" in result.stderr
+
+    def test_requires_server_metadata(self, tmp_path: Path) -> None:
+        # A server without --meta: the taxonomy flags must fail clearly.
+        socket_path = tmp_path / "plain.sock"
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "sylphd",
+                "serve",
+                "--db",
+                str(ECOLI_TWO_STAGE),
+                "--socket",
+                str(socket_path),
+                "--log-level",
+                "warning",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            _wait_for_socket(socket_path)
+            result = _run(
+                "profile",
+                str(O157_SKETCH),
+                "--socket",
+                str(socket_path),
+                "--taxprof",
+                str(tmp_path / "p-"),
+                check=False,
+            )
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        assert result.returncode == 1
+        assert "no metadata database" in result.stderr
+
+    def test_query_has_no_taxonomy_flags(self) -> None:
+        result = _run(
+            "query",
+            str(O157_SKETCH),
+            "--taxprof",
+            "x-",
+            "--socket",
+            "/nonexistent.sock",
+            check=False,
+        )
+        assert result.returncode == 2
+        assert "unrecognized arguments" in result.stderr

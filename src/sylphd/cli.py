@@ -25,6 +25,14 @@ from .sketching import (
     check_sketch,
     sketch_sample,
 )
+from .taxonomy import (
+    MATRIX_VALUES,
+    TAXONOMIES,
+    TaxonomyError,
+    parse_taxonomies,
+    resolve_taxonomy_columns,
+    write_outputs,
+)
 
 PROG = "sylphd"
 
@@ -225,6 +233,13 @@ def cmd_contain(args: argparse.Namespace, mode: str) -> int:
         screen_ani=args.screen_ani,
     )
 
+    taxonomy_prefix = getattr(args, "taxprof", None)
+    matrix_prefix = getattr(args, "taxmatrix", None)
+    write_taxonomy = mode == "profile" and (
+        taxonomy_prefix is not None or matrix_prefix is not None
+    )
+    taxonomies: tuple[str, ...] = ()
+
     try:
         with _client_from_args(args) as client:
             info = client.info()
@@ -232,6 +247,11 @@ def cmd_contain(args: argparse.Namespace, mode: str) -> int:
             metadata = info.get("metadata")
             fields = _resolve_fields(args.fields, metadata)
             metadata_columns = list((metadata or {}).get("columns") or [])
+            if write_taxonomy:
+                taxonomies = parse_taxonomies(args.taxonomy)
+                request_fields = _request_fields(fields, taxonomies, metadata)
+            else:
+                request_fields = fields
             if args.verbose:
                 print(
                     f"{PROG}: database {database['name']} (c={database['c']}, "
@@ -257,14 +277,24 @@ def cmd_contain(args: argparse.Namespace, mode: str) -> int:
                     file=sys.stderr,
                 )
             if mode == "profile":
-                result = client.profile(sketches, params=params, fields=fields)
+                result = client.profile(sketches, params=params, fields=request_fields)
             else:
-                result = client.query(sketches, params=params, fields=fields)
-    except (ClientError, InputError, ProtocolError) as error:
+                result = client.query(sketches, params=params, fields=request_fields)
+    except (ClientError, InputError, ProtocolError, TaxonomyError) as error:
         _print_error(str(error))
         return 1
 
     _write_result(result, mode, params, fields, args, metadata_columns=metadata_columns)
+    if write_taxonomy:
+        written = write_outputs(
+            result,
+            taxonomies=taxonomies,
+            taxprof_prefix=taxonomy_prefix,
+            taxmatrix_prefix=matrix_prefix,
+            matrix_value=getattr(args, "taxmatrix_value", "relative"),
+        )
+        for path in written:
+            print(f"{PROG}: wrote {path}", file=sys.stderr)
     return 0
 
 
@@ -304,6 +334,20 @@ def _resolve_fields(text: str | None, metadata: dict[str, Any] | None) -> list[s
             + f" (available: {', '.join(available)})"
         )
     return requested
+
+
+def _request_fields(
+    fields: Sequence[str],
+    taxonomies: Sequence[str],
+    metadata: dict[str, Any] | None,
+) -> list[str]:
+    """Metadata columns to request: the displayed ones plus the taxonomies.
+
+    ``--taxprof``/``--taxmatrix`` need ``gtdb_taxonomy``/``ncbi_taxonomy`` even
+    when ``--fields`` hides them from the TSV, so ask for them explicitly.
+    """
+    extra = resolve_taxonomy_columns(taxonomies, metadata)
+    return list(dict.fromkeys([*fields, *extra]))
 
 
 def _sketch_all(
@@ -701,6 +745,41 @@ def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
         metavar="ANI",
         help="two-stage screen threshold, 0-100 [default: 85]",
     )
+    if mode == "profile":
+        parser.add_argument(
+            "--taxonomy",
+            default=",".join(TAXONOMIES),
+            metavar="LIST",
+            help=(
+                "taxonomies to aggregate, comma-separated from "
+                f"{', '.join(TAXONOMIES)} [default: {','.join(TAXONOMIES)}]"
+            ),
+        )
+        parser.add_argument(
+            "--taxprof",
+            metavar="PREFIX",
+            help=(
+                "write one sylph-tax-style .sylphmpa per sample and taxonomy as "
+                "'PREFIX<sample>.<taxonomy>.sylphmpa'"
+            ),
+        )
+        parser.add_argument(
+            "--taxmatrix",
+            metavar="PREFIX",
+            help=(
+                "write one clade x sample matrix per taxonomy as "
+                "'PREFIX<taxonomy>.tsv'"
+            ),
+        )
+        parser.add_argument(
+            "--taxmatrix-value",
+            choices=MATRIX_VALUES,
+            default="relative",
+            help=(
+                "abundance in --taxmatrix: 'relative' (Taxonomic_abundance) or "
+                "'sequence' (Sequence_abundance) [default: relative]"
+            ),
+        )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="progress messages on stderr"
     )
