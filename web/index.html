@@ -37,6 +37,8 @@
   </header>
 
   <main class="wrap">
+    <section id="server-banner" class="server-banner" aria-label="Server status" hidden></section>
+
     <section class="card" aria-labelledby="query-h">
       <h2 id="query-h">Your assembly</h2>
       <form id="form" novalidate>
@@ -77,6 +79,7 @@
         <div class="actions">
           <button type="submit" id="submit" class="btn btn-primary" disabled>Find closest genomes</button>
           <button type="button" id="cancel" class="btn" hidden>Cancel</button>
+          <span id="submit-hint" class="submit-hint" hidden></span>
           <span id="progress" class="progress" role="status" aria-live="polite" hidden>
             <span class="spinner" aria-hidden="true"></span>
             <span id="progress-text"></span>

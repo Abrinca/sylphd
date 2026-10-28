@@ -24,7 +24,7 @@
     top: $('top'), minAni: $('min-ani'), submit: $('submit'), cancel: $('cancel'),
     progress: $('progress'), progressText: $('progress-text'), results: $('results'),
     status: $('status'), statusText: document.querySelector('#status .status-text'),
-    statusDetail: $('status-detail'),
+    statusDetail: $('status-detail'), banner: $('server-banner'), submitHint: $('submit-hint'),
   };
 
   /* ----------------------------------------------------------- helpers */
@@ -79,6 +79,120 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     ui.statusText.textContent = text;
   }
 
+  // Why the server cannot be used right now: null (usable or not yet known),
+  // 'none' | 'invalid' | 'offline' | 'noassembly'. A running re-check keeps the
+  // previous value, so the banner never flashes during "Checking…".
+  let serverProblem = null;
+  let bannerKey = '';
+  const PROBLEM_HINT = {
+    none: 'No server', invalid: 'Invalid API URL', offline: 'Server offline',
+    noassembly: 'Server does not accept assemblies',
+  };
+
+  // Same page with ?api=<url> (nothing else preserved); no argument removes it.
+  function pageUrl(apiUrl) {
+    const u = new URL(location.href);
+    u.search = '';
+    u.hash = '';
+    if (apiUrl) u.searchParams.set('api', apiUrl);
+    return u.toString();
+  }
+
+  function resetLink() {
+    return el('a', { href: pageUrl(null), text: 'reset', title: 'Remove ?api= and use the default server' });
+  }
+
+  function connectForm() {
+    const input = el('input', {
+      type: 'text', id: 'other-api', placeholder: 'http://127.0.0.1:8765', spellcheck: 'false',
+      autocomplete: 'off', autocapitalize: 'off', inputmode: 'url', 'aria-label': 'API URL of another server',
+    });
+    const err = el('p', { class: 'detail connect-err', role: 'alert', hidden: true });
+    const form = el('form', { class: 'connect', novalidate: true },
+      el('label', { for: 'other-api', text: 'Use another server' }),
+      el('div', { class: 'connect-row' }, input, el('button', { type: 'submit', class: 'btn', text: 'Connect' })),
+      err,
+      el('p', { class: 'detail' },
+        'The server must allow this page\u2019s origin (start it with ', el('code', { text: `--cors-origin ${location.origin}` }),
+        ' or ', el('code', { text: "--cors-origin '*'" }), '). For a server on localhost, your browser may ask for permission to access devices on your local network.'));
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const v = input.value.trim().replace(/\/+$/, '');
+      let ok = false;
+      try { ok = /^https?:$/.test(new URL(v).protocol); } catch { /* invalid */ }
+      if (!ok) {
+        err.textContent = 'Enter a full http:// or https:// URL, e.g. http://127.0.0.1:8765';
+        err.hidden = false;
+        input.focus();
+        return;
+      }
+      location.assign(pageUrl(v));
+    });
+    return form;
+  }
+
+  function renderBanner() {
+    const key = `${serverProblem}|${API}`;
+    if (!serverProblem) {
+      ui.banner.hidden = true;
+      ui.banner.replaceChildren();
+      bannerKey = '';
+      return;
+    }
+    ui.banner.hidden = false;
+    if (key === bannerKey) return; // keep a half-typed URL in the connect form
+    bannerKey = key;
+    let cls = 'error';
+    let title;
+    let body;
+    let retry = false;
+    if (serverProblem === 'none') {
+      cls = 'info';
+      title = 'No public server yet';
+      body = [el('p', null, 'The public sylphd server is not available yet, so this page cannot search anything for now. ',
+        'You can use your own server instead (see ', el('a', { href: './docs/guides/public-server/', text: 'running a public server' }), ').')];
+    } else if (serverProblem === 'invalid') {
+      title = 'Invalid API URL';
+      body = [el('p', null, 'The API base URL ', el('code', { text: API || '(empty)' }), ' is not a valid URL.')];
+    } else if (serverProblem === 'noassembly') {
+      cls = 'warn';
+      title = 'This server does not accept assemblies';
+      body = [el('p', null, 'The server at ', el('code', { text: API }), ' is online, but its ',
+        el('code', { text: '/assembly' }), ' endpoint is disabled (it was started without ', el('code', { text: '--allow-sequences' }), '), so this page cannot submit sequences to it.')];
+    } else {
+      title = 'Could not reach the server';
+      const items = [
+        'the server is offline or restarting,',
+        `the server does not allow this page's origin ${location.origin} (CORS; start it with --cors-origin ${location.origin}, or --cors-origin '*'), or`,
+        'a network, firewall or proxy problem is blocking the connection.',
+      ];
+      if (location.protocol === 'https:' && API.startsWith('http:')) {
+        items.push('this page is served over HTTPS but the API URL is plain HTTP (blocked as mixed content).');
+      }
+      retry = true;
+      body = [el('p', null, 'Requests to ', el('code', { text: API }), ' failed before getting a response. Possible reasons:'),
+        el('ul', null, items.map((t) => el('li', { text: t })))];
+    }
+    const foot = retry
+      ? el('p', { class: 'detail retry' }, 'Retrying automatically every few seconds. ',
+        el('button', { type: 'button', class: 'btn btn-small', id: 'retry-now', text: 'Retry now', onclick: loadInfo }))
+      : null;
+    ui.banner.replaceChildren(el('div', { class: `notice ${cls}`, role: cls === 'error' ? 'alert' : 'status' },
+      el('h3', { text: title }), ...body, foot,
+      apiOverride ? el('p', { class: 'detail' }, 'Using ', el('code', { text: API || '(empty)' }), ' from the address. ', resetLink(), ' to go back to the default server.') : null,
+      connectForm()));
+  }
+
+  function setProblem(kind) {
+    serverProblem = kind;
+    renderBanner();
+    updateSubmit();
+  }
+
+  function overrideBits() {
+    return apiOverride ? [' · ', el('span', null, 'API: ', el('code', { text: API || '(empty)' }), ' ('), resetLink(), ')'] : [];
+  }
+
   async function loadInfo() {
     clearTimeout(infoTimer);
     if (!API) {
@@ -86,15 +200,19 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       setStatus('offline', 'No public server yet');
       ui.statusDetail.replaceChildren('The public server is not available yet. ',
         'To use your own server, add ', el('code', { text: '?api=https://…' }), ' to the address.');
+      setProblem('none');
       return;
     }
     setStatus('checking', 'Checking server…');
+    const retryBtn = $('retry-now');
+    if (retryBtn) { retryBtn.disabled = true; retryBtn.textContent = 'Checking…'; }
     try {
       new URL(API);
     } catch {
       serverInfo = null;
       setStatus('offline', 'No valid API URL');
-      ui.statusDetail.replaceChildren('The API base URL ', el('code', { text: API || '(empty)' }), ' is not a valid URL.');
+      ui.statusDetail.replaceChildren('The API base URL ', el('code', { text: API || '(empty)' }), ' is not a valid URL.', ...(apiOverride ? [' (', resetLink(), ')'] : []));
+      setProblem('invalid');
       return;
     }
     try {
@@ -117,18 +235,22 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       }
       const frag = [];
       parts.forEach((p, i) => { if (i) frag.push(' · '); frag.push(p); });
-      if (apiOverride) frag.push(' · ', el('span', null, 'API: ', el('code', { text: API })));
-      if (lim.allow_sequences === false) {
+      frag.push(...overrideBits());
+      const noAssembly = lim.allow_sequences === false || info.allow_sequences === false;
+      if (noAssembly) {
         frag.push(' · ', el('span', { class: 'warn', text: 'this server does not accept assemblies (/assembly disabled)' }));
       }
       ui.statusDetail.replaceChildren(...frag);
       infoTimer = setTimeout(loadInfo, 60000);
+      setProblem(noAssembly ? 'noassembly' : null);
       refreshInput();
     } catch (e) {
       serverInfo = null;
       setStatus('offline', 'Server offline');
-      ui.statusDetail.replaceChildren('Cannot reach ', el('code', { text: API }), '. ',
-        'Use ', el('code', { text: '?api=https://…' }), ' to point the page at another server.');
+      ui.statusDetail.replaceChildren('Cannot reach ', el('code', { text: API }), ...(apiOverride ? [' (', resetLink(), ')'] : ['.']));
+      setProblem('offline');
+      const rb = $('retry-now');
+      if (rb) { rb.disabled = false; rb.textContent = 'Retry now'; }
       infoTimer = setTimeout(loadInfo, 20000);
     }
   }
@@ -209,7 +331,10 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     const now = Date.now();
     const cooling = cooldownUntil > now;
     const ready = input.size > 0 && input.size <= limitBytes() && validateOptions().ok;
-    ui.submit.disabled = busy || cooling || !ready || !API;
+    const problem = API ? serverProblem : 'none';
+    ui.submit.disabled = busy || cooling || !ready || !!problem;
+    ui.submitHint.textContent = problem ? PROBLEM_HINT[problem] : '';
+    ui.submitHint.hidden = !problem;
     ui.clear.disabled = busy;
     ui.pick.disabled = busy;
     ui.example.disabled = busy;
@@ -408,19 +533,9 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
 
   function showNetworkError() {
-    const items = [
-      'the server is offline or restarting,',
-      `the server does not allow this page's origin ${location.origin} (CORS; start it with --cors-origin ${location.origin}, or --cors-origin local for development), or`,
-      'a proxy closed the connection (very large uploads).',
-    ];
-    if (location.protocol === 'https:' && API.startsWith('http:')) {
-      items.push('this page is served over HTTPS but the API URL is plain HTTP (blocked as mixed content).');
-    }
     ui.results.replaceChildren(el('div', { class: 'notice error', role: 'alert' },
       el('h3', { text: 'Could not reach the server' }),
-      el('p', null, 'The request to ', el('code', { text: API }), ' failed before getting a response. Possible reasons:'),
-      el('ul', null, items.map((t) => el('li', { text: t }))),
-      el('p', { class: 'detail', text: 'Check the status indicator at the top of the page, then try again.' })));
+      el('p', null, 'The request to ', el('code', { text: API }), ' failed before getting a response (a proxy may also have closed the connection on a very large upload). The server status is shown at the top of the page.')));
     loadInfo();
   }
 

@@ -104,3 +104,11 @@ python -m http.server 8000 -d web
 
 For local development start the server with `--cors-origin local`. The browser must be allowed by
 the server's CORS origins, and an HTTPS page can only call an HTTPS API (or localhost).
+
+When the page cannot use its server (none configured, unreachable, or one started without
+`--allow-sequences`) it shows a banner above the form, and the submit button is disabled. The
+banner has a **Use another server** form: enter the API URL of your own server (for example
+`http://127.0.0.1:8765`) and press *Connect*; the page reloads with `?api=<url>`. The header
+then shows the active URL with a *reset* link that removes `?api=`. The server must allow the
+page's origin (`--cors-origin https://abrinca.github.io`, or `--cors-origin '*'`), and for a
+server on localhost the browser may ask for permission to access devices on your local network.
