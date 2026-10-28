@@ -429,6 +429,28 @@ sylphd serve --db gtdb-r232-c200-dbv2.syl2db --meta gtdb-r232.sqlite \
 Caddy (or nginx) terminates TLS and forwards to `127.0.0.1:8765`; add
 `--trusted-proxy 127.0.0.1` so clients get individual rate-limit buckets.
 
+## Web page
+
+`web/` is a static page (plain HTML/CSS/JS, no build step, no external
+requests) that talks to a `sylphd serve --allow-sequences` instance through
+`GET /info` and `POST /assembly`. It takes a pasted or uploaded FASTA
+(plain or gzip, up to the server's `--max-sequence-mb`), shows the best hit as
+an ANI gauge and lists the closest GTDB genomes in a sortable table
+(downloadable as TSV or JSON). The workflow `.github/workflows/pages.yml`
+deploys it to GitHub Pages on pushes to `main` that touch `web/`.
+
+Local development, against a server started with
+`--cors-origin http://localhost:8000`:
+
+```console
+python -m http.server 8000 -d web
+# open http://localhost:8000/?api=http://127.0.0.1:8765
+```
+
+The default API base URL is set in `web/config.js`; the `?api=` query
+parameter overrides it per visit. The browser must be allowed by the server's
+CORS origin, and an HTTPS page can only call an HTTPS API (or localhost).
+
 ## Development
 
 ```console
