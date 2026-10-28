@@ -4,6 +4,33 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-10-28
+
+### Added
+
+- **`sylphd download --database NAME`** fetches pre-built sylph databases from a built-in
+  catalogue (`--list-databases`; GTDB r214–r232, GlobDB, UHGG, UHGV, IMG/VR, OceanDNA, SMAG,
+  RefSeq fungi) using all known mirrors. Uses `aria2c` when installed (parallel, multi-mirror,
+  resumable), otherwise a built-in resumable downloader. Checks the file size by default;
+  `--verify` also checks the MD5. `--url` adds or replaces sources.
+- **Deployment bundle** (`deploy/`): `setup-server.sh` (Caddy from the official COPR,
+  dnf-automatic, uv with a self-update timer, SELinux policy for the Caddy → sylphd socket),
+  `update.sh` (installs a GitHub release with checksum verification, health check and
+  automatic rollback), a hardened `sylphd.service` and a Caddyfile template.
+- **Docs**: "What does same species mean?" background page on the 95 % ANI species call, linked
+  from the web page.
+
+### Changed
+
+- **Web page**: the ANI gauge fills up to the value with zone colours (red and striped below
+  85 %, orange, green from 95 %), uses a stretched scale for the high range, and marks the
+  value with a clearly visible knob. The page now points at the public server.
+
+### Fixed
+
+- `deploy/sylphd.service`: `Environment=` values with spaces are quoted, and variables inside
+  paths are braced, so systemd passes all flags and finds the database.
+
 ## [0.1.0] - 2026-10-28
 
 The first release. `sylphd` is a long-running [sylph](https://github.com/bluenote-1577/sylph)
@@ -31,4 +58,5 @@ server with a sketching client: the database is loaded once and shared, clients 
   for Linux x86_64 and aarch64, CPython 3.14, so a production server can install without a Rust
   toolchain.
 
+[0.1.1]: https://github.com/Abrinca/sylphd/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Abrinca/sylphd/releases/tag/v0.1.0
