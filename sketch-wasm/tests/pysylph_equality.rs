@@ -9,7 +9,7 @@
 //! is found: set `SYLPHD_PYTHON`, or create `../.venv` with `uv sync`.
 
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -71,24 +71,41 @@ fn sketch_case(case: &serde_json::Value, chunk: usize) -> Vec<u8> {
         .iter()
         .map(|f| resolve(f.as_str().unwrap()))
         .collect();
+    let raw_gz = case["raw_gz"].as_bool().unwrap_or(false);
     let mut s = StreamSketcher::new(c, k, dedup).unwrap();
     match case["kind"].as_str().unwrap() {
         "single" => {
             for f in &files {
-                pump(&mut *open(f), chunk, &mut |b| s.push(b).unwrap());
+                if raw_gz {
+                    pump(&mut File::open(f).unwrap(), chunk, &mut |b| {
+                        s.push_gz(b).unwrap()
+                    });
+                } else {
+                    pump(&mut *open(f), chunk, &mut |b| s.push(b).unwrap());
+                }
                 s.end_file().unwrap();
             }
         }
         "paired" => {
             // alternate between the two streams, like the browser demo
-            let (mut r1, mut r2) = (open(&files[0]), open(&files[1]));
+            let raw = |p: &Path| -> Box<dyn Read> { Box::new(File::open(p).unwrap()) };
+            let (mut r1, mut r2) = if raw_gz {
+                (raw(&files[0]), raw(&files[1]))
+            } else {
+                (open(&files[0]), open(&files[1]))
+            };
             let mut b1 = vec![0u8; chunk];
             let mut b2 = vec![0u8; chunk];
             loop {
                 let n1 = r1.read(&mut b1).unwrap();
                 let n2 = r2.read(&mut b2).unwrap();
-                s.push_r1(&b1[..n1]).unwrap();
-                s.push_r2(&b2[..n2]).unwrap();
+                if raw_gz {
+                    s.push_r1_gz(&b1[..n1]).unwrap();
+                    s.push_r2_gz(&b2[..n2]).unwrap();
+                } else {
+                    s.push_r1(&b1[..n1]).unwrap();
+                    s.push_r2(&b2[..n2]).unwrap();
+                }
                 if n1 == 0 && n2 == 0 {
                     break;
                 }
@@ -106,11 +123,13 @@ fn sketch_case(case: &serde_json::Value, chunk: usize) -> Vec<u8> {
 /// fragments of 200-450 bp. Writes `target/synth/sim_R{1,2}.fq`.
 fn make_synth() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/synth");
+    fs::create_dir_all(&dir).unwrap();
+    make_gzip_fixtures(&dir);
     let (p1, p2) = (dir.join("sim_R1.fq"), dir.join("sim_R2.fq"));
     if p1.exists() && p2.exists() {
+        gzip_sim(&dir);
         return;
     }
-    fs::create_dir_all(&dir).unwrap();
     let mut genome_path = repo_root().join("ref/sylph/test_files/e.coli-K12.fasta.gz");
     if !genome_path.exists() {
         genome_path = repo_root().join("tests/data/clodf13.fna.gz");
@@ -173,8 +192,45 @@ fn make_synth() {
         }
         last = Some((r1, r2));
     }
-    fs::write(p1, o1).unwrap();
-    fs::write(p2, o2).unwrap();
+    fs::write(&p1, &o1).unwrap();
+    fs::write(&p2, &o2).unwrap();
+    gzip_sim(&dir);
+}
+
+fn gzip_sim(dir: &Path) {
+    for mate in ["R1", "R2"] {
+        let gz = dir.join(format!("sim_{mate}.fq.gz"));
+        if !gz.exists() {
+            let data = fs::read(dir.join(format!("sim_{mate}.fq"))).unwrap();
+            let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            enc.write_all(&data).unwrap();
+            fs::write(gz, enc.finish().unwrap()).unwrap();
+        }
+    }
+}
+
+/// Multi-member gzip fixtures made from the k12 reads: the file twice in a row
+/// (`cat a.gz a.gz`) and one member per 100 reads (BGZF-like).
+fn make_gzip_fixtures(dir: &Path) {
+    let original = fs::read(repo_root().join("tests/data/k12.R1.fq.gz")).unwrap();
+    let mut twice = original.clone();
+    twice.extend_from_slice(&original);
+    fs::write(dir.join("k12_twice.fq.gz"), twice).unwrap();
+
+    let mut plain = vec![];
+    open(&repo_root().join("tests/data/k12.R1.fq.gz"))
+        .read_to_end(&mut plain)
+        .unwrap();
+    let lines: Vec<&[u8]> = plain.split_inclusive(|&b| b == b'\n').collect();
+    let mut out = vec![];
+    for block in lines.chunks(400) {
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        for line in block {
+            enc.write_all(line).unwrap();
+        }
+        out.extend(enc.finish().unwrap());
+    }
+    fs::write(dir.join("k12_bgzf_like.fq.gz"), out).unwrap();
 }
 
 fn python() -> Option<PathBuf> {

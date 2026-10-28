@@ -29,24 +29,34 @@ for (const c of cases) {
   const expected = readFileSync(path.join(here, "../target/equality", c.name + ".sylsp"));
   const s = new WasmSketcher(c.c ?? 200, c.k ?? 31, c.deduplicate ?? true);
   const t0 = performance.now();
-  if (c.big) {
+  const gz = c.raw_gz ? "_gz" : "";
+  const read = (f) => (c.raw_gz ? readFileSync(abs(f)) : load(f));
+  if (c.big && !c.raw_gz) {
     // stream, like the browser does
     await new Promise((resolve, reject) => {
-      const gz = createGunzip();
-      createReadStream(abs(c.files[0])).pipe(gz);
-      gz.on("data", (b) => s.push(b));
-      gz.on("end", resolve);
-      gz.on("error", reject);
+      const gunzip = createGunzip();
+      createReadStream(abs(c.files[0])).pipe(gunzip);
+      gunzip.on("data", (b) => s.push(b));
+      gunzip.on("end", resolve);
+      gunzip.on("error", reject);
     });
+  } else if (c.big) {
+    await new Promise((resolve, reject) => {
+      const stream = createReadStream(abs(c.files[0]), { highWaterMark: 1 << 20 });
+      stream.on("data", (b) => s.push_gz(b));
+      stream.on("end", resolve);
+      stream.on("error", reject);
+    });
+    s.end_file();
   } else if (c.kind === "paired") {
-    const [a, b] = c.files.map((f) => chunks(load(f), 5000));
+    const [a, b] = c.files.map((f) => chunks(read(f), 5000));
     for (let i = 0; i < Math.max(a.length, b.length); i++) {
-      if (a[i]) s.push_r1(a[i]);
-      if (b[i]) s.push_r2(b[i]);
+      if (a[i]) s["push_r1" + gz](a[i]);
+      if (b[i]) s["push_r2" + gz](b[i]);
     }
   } else {
     for (const f of c.files) {
-      for (const piece of chunks(load(f), 4093)) s.push(piece);
+      for (const piece of chunks(read(f), 4093)) s["push" + gz](piece);
       s.end_file();
     }
   }

@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 wasm-bindgen = "=0.2.129"
 fxhash = "0.2"
 memchr = "2"
+miniz_oxide = "0.8"
+crc32fast = "1"
 rand = { version = "0.8", default-features = false }
 rand_xoshiro = "0.6"
 scalable_cuckoo_filter = "0.2"

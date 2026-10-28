@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sylph in the browser: local read sketching (spike)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font: 15px/1.45 system-ui, sans-serif; max-width: 62rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.3rem; }
+  #drop { border: 2px dashed #888; border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; }
+  #drop.over { background: #eef6ff; border-color: #2a6fdb; }
+  fieldset { border: 1px solid #ccc; margin: 1rem 0; }
+  label { margin-right: 1rem; white-space: nowrap; }
+  input[type=text], input[type=number] { font: inherit; }
+  progress { width: 100%; height: 1rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { border-bottom: 1px solid #ddd; padding: .25rem .5rem; text-align: left; vertical-align: top; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  pre { background: #f5f5f5; padding: .6rem; overflow: auto; }
+  .err { color: #b00020; }
+  .muted { color: #666; }
+</style>
+</head>
+<body>
+<h1>sylph read sketching in the browser <span class="muted">(spike)</span></h1>
+<p>Drop FASTQ / FASTA reads (plain or <code>.gz</code>). The reads are sketched
+<b>locally</b> (WebAssembly, in a Web Worker); only the sketch (a few MB) is sent to the sylphd server.</p>
+
+<fieldset>
+  <legend>Settings</legend>
+  <label>API <input id="api" type="text" size="38" value="https://140-238-213-53.sslip.io"></label>
+  <label>c <input id="c" type="number" value="200" min="1" style="width:5rem"></label>
+  <label>k <select id="k"><option>31</option><option>21</option></select></label>
+  <label><input id="dedup" type="checkbox" checked> deduplicate</label>
+  <label><input id="paired" type="checkbox"> two files = paired R1/R2</label>
+  <label><input id="send" type="checkbox" checked> send to server</label>
+</fieldset>
+
+<div id="drop">Drop files here or <u>choose files</u>
+  <input id="file" type="file" multiple hidden accept=".fastq,.fq,.fasta,.fa,.fna,.gz">
+</div>
+
+<p><progress id="bar" value="0" max="1" hidden></progress></p>
+<pre id="status" class="muted">idle</pre>
+<p id="download"></p>
+<div id="result"></div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const fmtMB = (n) => (n / 1e6).toFixed(1) + ' MB';
+const fmtInt = (n) => Math.round(n).toLocaleString('en-US');
+const fmtS = (ms) => (ms / 1000).toFixed(1) + ' s';
+
+let worker = null;
+
+// c and k of the database the server profiles against
+async function syncParams() {
+  try {
+    const info = await (await fetch(`${$('api').value}/info`)).json();
+    $('c').value = info.database.c;
+    $('k').value = String(info.database.k);
+    $('status').textContent = `server database: ${info.database.name}, c=${info.database.c}, k=${info.database.k}`;
+  } catch (e) {
+    $('status').textContent = `could not read ${$('api').value}/info: ${e}`;
+  }
+}
+$('api').addEventListener('change', syncParams);
+syncParams();
+
+const drop = $('drop');
+drop.addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', () => start([...$('file').files]));
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); start([...e.dataTransfer.files]); });
+
+function start(files) {
+  if (!files.length) return;
+  if (worker) worker.terminate();
+  $('result').replaceChildren();
+  $('download').replaceChildren();
+  $('bar').hidden = false;
+  $('bar').value = 0;
+  const paired = $('paired').checked && files.length === 2;
+  worker = new Worker('./worker.js', { type: 'module' });
+  worker.onmessage = ({ data }) => {
+    if (data.type === 'progress') progress(data);
+    else if (data.type === 'done') done(data);
+    else if (data.type === 'error') {
+      $('status').innerHTML = '';
+      const p = document.createElement('span');
+      p.className = 'err';
+      p.textContent = 'Error: ' + data.message;
+      $('status').append(p);
+    }
+  };
+  worker.onerror = (e) => { $('status').textContent = 'worker error: ' + e.message; };
+  worker.postMessage({
+    files, paired,
+    c: Number($('c').value), k: Number($('k').value), deduplicate: $('dedup').checked,
+  });
+}
+
+function progress(p) {
+  $('bar').value = p.total ? p.read / p.total : 0;
+  $('status').textContent =
+    `read ${fmtMB(p.read)} / ${fmtMB(p.total)} (compressed)  |  ${fmtMB(p.decompressed)} decompressed\n` +
+    `${fmtInt(p.reads)} reads, ${fmtInt(p.bases)} bases, ${fmtInt(p.kmers)} sketch k-mers\n` +
+    `elapsed ${fmtS(p.elapsed)}  |  wasm memory ${fmtMB(p.wasmMemory)}`;
+}
+
+async function done({ sketch, stats }) {
+  $('bar').value = 1;
+  window.__lastStats = stats;
+  $('status').textContent =
+    `sketched ${stats.name}: ${fmtInt(stats.reads)} reads, ${fmtInt(stats.bases)} bases -> ` +
+    `${fmtInt(stats.kmers)} k-mers, sketch ${fmtMB(stats.sketchBytes)}\n` +
+    `total ${fmtS(stats.totalMs)} (of which wasm sketching ${fmtS(stats.sketchMs)}, ` +
+    `read+gunzip ${fmtS(stats.totalMs - stats.sketchMs - stats.initMs)}, wasm init ${stats.initMs.toFixed(0)} ms)\n` +
+    `wasm memory ${fmtMB(stats.wasmMemory)}`;
+  const blob = new Blob([sketch], { type: 'application/octet-stream' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = stats.name + '.sylsp';
+  link.textContent = `download ${stats.name}.sylsp (${fmtMB(sketch.byteLength)})`;
+  $('download').replaceChildren(link);
+  if ($('send').checked) await profile(blob, stats);
+}
+
+async function profile(blob, stats) {
+  const t = performance.now();
+  $('result').textContent = 'sending sketch to server...';
+  const form = new FormData();
+  form.append('sketch', blob, stats.name + '.sylsp');
+  let response;
+  try {
+    response = await fetch(`${$('api').value}/profile`, { method: 'POST', body: form });
+  } catch (e) {
+    $('result').innerHTML = '<span class="err">request failed: </span>';
+    $('result').append(String(e));
+    return;
+  }
+  const ms = performance.now() - t;
+  const body = await response.text();
+  window.__lastProfile = { status: response.status, ms, body };
+  if (!response.ok) {
+    $('result').innerHTML = '<span class="err">server said ' + response.status + ': </span>';
+    $('result').append(body);
+    return;
+  }
+  const rows = (JSON.parse(body)[0] || {}).rows || [];
+  rows.sort((a, b) => b.Taxonomic_abundance - a.Taxonomic_abundance);
+  const species = (tax) => ((tax || '').match(/s__([^;]*)/) || [])[1] || '';
+  const table = document.createElement('table');
+  table.innerHTML = '<tr><th>genome</th><th class="num">taxonomic abundance %</th><th class="num">ANI %</th><th>species</th></tr>';
+  for (const r of rows.slice(0, 10)) {
+    const tr = table.insertRow();
+    const cells = [r.Genome_file, r.Taxonomic_abundance.toFixed(2), r.Adjusted_ANI.toFixed(2), species(r.gtdb_taxonomy)];
+    cells.forEach((text, i) => {
+      const td = tr.insertCell();
+      td.textContent = text;
+      if (i === 1 || i === 2) td.className = 'num';
+    });
+  }
+  const head = document.createElement('p');
+  head.textContent = `${rows.length} genomes in profile; /profile took ${fmtS(ms)} ` +
+    `(upload of ${fmtMB(blob.size)} included).`;
+  $('result').replaceChildren(head, table);
+}
+</script>
+</body>
+</html>

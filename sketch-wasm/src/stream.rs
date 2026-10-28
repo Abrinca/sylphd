@@ -9,6 +9,7 @@
 
 use std::collections::VecDeque;
 
+use crate::gzip::GzipDecoder;
 use crate::parser::RecordParser;
 use crate::seeding::Seeding;
 use crate::sketch::{SketchBuilder, DEFAULT_FPR};
@@ -21,6 +22,24 @@ enum Mode {
     Interleaved,
 }
 
+#[derive(Clone, Copy)]
+enum Stream {
+    Single,
+    R1,
+    R2,
+    Interleaved,
+}
+
+impl Stream {
+    fn mode(self) -> Mode {
+        match self {
+            Stream::Single => Mode::Single,
+            Stream::R1 | Stream::R2 => Mode::TwoStream,
+            Stream::Interleaved => Mode::Interleaved,
+        }
+    }
+}
+
 pub struct StreamSketcher {
     builder: SketchBuilder,
     mode: Mode,
@@ -30,6 +49,9 @@ pub struct StreamSketcher {
     queue2: VecDeque<Vec<u8>>,
     /// Interleaved mode: first mate waiting for its partner.
     held: Option<Vec<u8>>,
+    /// Gzip decoders, for `push*_gz` (stream 1 / stream 2).
+    gz1: Option<GzipDecoder>,
+    gz2: Option<GzipDecoder>,
 }
 
 impl StreamSketcher {
@@ -52,6 +74,8 @@ impl StreamSketcher {
             queue1: VecDeque::new(),
             queue2: VecDeque::new(),
             held: None,
+            gz1: None,
+            gz2: None,
         })
     }
 
@@ -68,36 +92,82 @@ impl StreamSketcher {
     }
 
     pub fn push(&mut self, data: &[u8]) -> Result<(), String> {
-        self.set_mode(Mode::Single)?;
-        let builder = &mut self.builder;
-        self.parser1.feed(data, &mut |seq| builder.add_single(seq))
+        self.push_stream(Stream::Single, data)
     }
 
     pub fn push_r1(&mut self, data: &[u8]) -> Result<(), String> {
-        self.set_mode(Mode::TwoStream)?;
-        let queue = &mut self.queue1;
-        self.parser1
-            .feed(data, &mut |seq| queue.push_back(seq.to_vec()))?;
-        self.drain_pairs();
-        Ok(())
+        self.push_stream(Stream::R1, data)
     }
 
     pub fn push_r2(&mut self, data: &[u8]) -> Result<(), String> {
-        self.set_mode(Mode::TwoStream)?;
-        let queue = &mut self.queue2;
-        self.parser2
-            .feed(data, &mut |seq| queue.push_back(seq.to_vec()))?;
-        self.drain_pairs();
-        Ok(())
+        self.push_stream(Stream::R2, data)
     }
 
     pub fn push_interleaved(&mut self, data: &[u8]) -> Result<(), String> {
-        self.set_mode(Mode::Interleaved)?;
-        let (builder, held) = (&mut self.builder, &mut self.held);
-        self.parser1.feed(data, &mut |seq| match held.take() {
-            Some(first) => builder.add_pair(&first, seq),
-            None => *held = Some(seq.to_vec()),
-        })
+        self.push_stream(Stream::Interleaved, data)
+    }
+
+    /// Like `push`, but `data` is a chunk of a (possibly multi-member) gzip file.
+    pub fn push_gz(&mut self, data: &[u8]) -> Result<(), String> {
+        self.push_stream_gz(Stream::Single, data)
+    }
+
+    pub fn push_r1_gz(&mut self, data: &[u8]) -> Result<(), String> {
+        self.push_stream_gz(Stream::R1, data)
+    }
+
+    pub fn push_r2_gz(&mut self, data: &[u8]) -> Result<(), String> {
+        self.push_stream_gz(Stream::R2, data)
+    }
+
+    pub fn push_interleaved_gz(&mut self, data: &[u8]) -> Result<(), String> {
+        self.push_stream_gz(Stream::Interleaved, data)
+    }
+
+    fn push_stream_gz(&mut self, stream: Stream, data: &[u8]) -> Result<(), String> {
+        self.set_mode(stream.mode())?;
+        let mut decoder = self.gz_slot(stream).take().unwrap_or_default();
+        let result = decoder.push(data, &mut |plain| self.push_stream(stream, plain));
+        *self.gz_slot(stream) = Some(decoder);
+        result
+    }
+
+    fn gz_slot(&mut self, stream: Stream) -> &mut Option<GzipDecoder> {
+        match stream {
+            Stream::R2 => &mut self.gz2,
+            _ => &mut self.gz1,
+        }
+    }
+
+    fn push_stream(&mut self, stream: Stream, data: &[u8]) -> Result<(), String> {
+        self.set_mode(stream.mode())?;
+        match stream {
+            Stream::Single => {
+                let builder = &mut self.builder;
+                self.parser1.feed(data, &mut |seq| builder.add_single(seq))
+            }
+            Stream::R1 => {
+                let queue = &mut self.queue1;
+                self.parser1
+                    .feed(data, &mut |seq| queue.push_back(seq.to_vec()))?;
+                self.drain_pairs();
+                Ok(())
+            }
+            Stream::R2 => {
+                let queue = &mut self.queue2;
+                self.parser2
+                    .feed(data, &mut |seq| queue.push_back(seq.to_vec()))?;
+                self.drain_pairs();
+                Ok(())
+            }
+            Stream::Interleaved => {
+                let (builder, held) = (&mut self.builder, &mut self.held);
+                self.parser1.feed(data, &mut |seq| match held.take() {
+                    Some(first) => builder.add_pair(&first, seq),
+                    None => *held = Some(seq.to_vec()),
+                })
+            }
+        }
     }
 
     fn drain_pairs(&mut self) {
@@ -115,6 +185,12 @@ impl StreamSketcher {
     /// pushed into one sketch, like `sylph sketch a.fq b.fq`. For a
     /// single-file sample calling `finish` alone is enough.
     pub fn end_file(&mut self) -> Result<(), String> {
+        // a file that was pushed as gzip must end on a member boundary
+        for decoder in [&mut self.gz1, &mut self.gz2] {
+            if let Some(mut decoder) = decoder.take() {
+                decoder.finish()?;
+            }
+        }
         match self.mode {
             Mode::Unset => Ok(()),
             Mode::Single => {

@@ -9,6 +9,7 @@
 //! const sylsp = s.finish("sample");   // Uint8Array, a .sylsp file
 //! ```
 
+pub mod gzip;
 pub mod parser;
 pub mod seeding;
 pub mod sketch;
@@ -90,6 +91,27 @@ impl WasmSketcher {
     /// Paired-end, one interleaved stream (R1, R2, R1, R2, ...).
     pub fn push_interleaved(&mut self, data: &[u8]) -> Result<(), JsError> {
         self.inner.push_interleaved(data).map_err(js_err)
+    }
+
+    /// Like `push`, for raw chunks of a gzip file; multi-member files (BGZF,
+    /// concatenated gzips) are fine, unlike with `DecompressionStream`.
+    pub fn push_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
+        self.inner.push_gz(data).map_err(js_err)
+    }
+
+    /// Gzip variant of `push_r1`.
+    pub fn push_r1_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
+        self.inner.push_r1_gz(data).map_err(js_err)
+    }
+
+    /// Gzip variant of `push_r2`.
+    pub fn push_r2_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
+        self.inner.push_r2_gz(data).map_err(js_err)
+    }
+
+    /// Gzip variant of `push_interleaved`.
+    pub fn push_interleaved_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
+        self.inner.push_interleaved_gz(data).map_err(js_err)
     }
 
     /// Ends the current file so another can follow (same sample).

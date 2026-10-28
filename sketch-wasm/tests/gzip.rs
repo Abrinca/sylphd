@@ -1,0 +1,121 @@
+//! The wasm build cannot use `DecompressionStream` for multi-member gzip, so
+//! it carries its own decoder; compare it with flate2's `MultiGzDecoder`.
+
+use std::io::{Read, Write};
+
+use flate2::read::MultiGzDecoder;
+use flate2::write::GzEncoder;
+use flate2::{Compression, GzBuilder};
+use sylph_sketch_wasm::gzip::GzipDecoder;
+
+fn payload(n: usize) -> Vec<u8> {
+    let mut x = 12345u64;
+    (0..n)
+        .map(|i| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            // compressible, but not trivially
+            if i % 7 < 4 {
+                b"ACGT"[(x % 4) as usize]
+            } else {
+                b"ACGTTGCA"[i % 8]
+            }
+        })
+        .collect()
+}
+
+fn member(data: &[u8], level: Compression) -> Vec<u8> {
+    let mut enc = GzEncoder::new(Vec::new(), level);
+    enc.write_all(data).unwrap();
+    enc.finish().unwrap()
+}
+
+fn decode(gz: &[u8], chunk: usize) -> Result<Vec<u8>, String> {
+    let mut decoder = GzipDecoder::new();
+    let mut out = vec![];
+    for piece in gz.chunks(chunk) {
+        decoder.push(piece, &mut |b| {
+            out.extend_from_slice(b);
+            Ok(())
+        })?;
+    }
+    decoder.finish()?;
+    Ok(out)
+}
+
+#[test]
+fn multi_member_any_chunking() {
+    let parts = [
+        payload(0),
+        payload(1),
+        payload(300_000),
+        payload(77),
+        payload(1_000_000),
+    ];
+    let mut gz = vec![];
+    let mut plain = vec![];
+    for (i, part) in parts.iter().enumerate() {
+        let level = [
+            Compression::none(),
+            Compression::fast(),
+            Compression::best(),
+        ][i % 3];
+        gz.extend(member(part, level));
+        plain.extend_from_slice(part);
+    }
+    // sanity: the reference decoder agrees on what the right answer is
+    let mut reference = vec![];
+    MultiGzDecoder::new(&gz[..])
+        .read_to_end(&mut reference)
+        .unwrap();
+    assert_eq!(reference, plain);
+    for chunk in [1, 2, 3, 10, 11, 4093, 65_536, usize::MAX / 2] {
+        assert!(decode(&gz, chunk).unwrap() == plain, "chunk size {chunk}");
+    }
+}
+
+#[test]
+fn header_fields() {
+    let data = payload(5000);
+    let mut enc = GzBuilder::new()
+        .filename("reads.fastq")
+        .comment("hello")
+        .extra(vec![b'B', b'C', 2, 0, 1, 2])
+        .write(Vec::new(), Compression::default());
+    enc.write_all(&data).unwrap();
+    let gz = enc.finish().unwrap();
+    for chunk in [1, 5, 1000] {
+        assert_eq!(decode(&gz, chunk).unwrap(), data);
+    }
+}
+
+#[test]
+fn trailing_zero_padding_is_ignored_but_junk_is_not() {
+    let data = payload(1000);
+    let mut gz = member(&data, Compression::default());
+    gz.extend([0u8; 100]);
+    assert_eq!(decode(&gz, 7).unwrap(), data);
+    gz.extend(b"junk");
+    assert!(decode(&gz, 7).is_err());
+}
+
+#[test]
+fn corruption_and_truncation_are_errors() {
+    let data = payload(100_000);
+    let gz = member(&data, Compression::default());
+    assert!(
+        decode(&gz[..gz.len() - 1], 100).is_err(),
+        "truncated trailer"
+    );
+    assert!(decode(&gz[..gz.len() / 2], 100).is_err(), "truncated body");
+    let mut bad_crc = gz.clone();
+    let n = bad_crc.len();
+    bad_crc[n - 8] ^= 1;
+    assert!(decode(&bad_crc, 100).is_err(), "bad crc");
+    let mut bad_body = gz.clone();
+    bad_body[gz.len() / 2] ^= 0xff;
+    assert!(decode(&bad_body, 100).is_err(), "bad body");
+    assert!(decode(b"not gzip at all", 4).is_err());
+    assert!(decode(b"", 4).is_err());
+}
