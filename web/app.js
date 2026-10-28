@@ -428,34 +428,43 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
 
   let current = null; // { data, hits, sortKey, sortDir, thr, elapsed }
 
-  function classify(ani, thr) {
-    if (ani >= thr.species) return 'species';
-    if (ani >= thr.genus) return 'genus';
-    return 'distant';
-  }
-  const CLASS_LABEL = { species: 'same species', genus: 'same genus', distant: 'distant' };
+  // Depth of the shared GTDB rank: drives badge colours and sorting.
+  const DEPTH = { species: 0, genus: 1, family: 2, order: 3, class: 4, phylum: 5, domain: 6 };
+  const NONE_DEPTH = 7;
 
-  function decorate(h, thr) {
+  // CSS class suffix for a hit: relation colour by shared rank, 'closest' for the best hit
+  // when nothing reaches the species threshold, 'plain' when there is no lineage to go by.
+  function relClass(h) {
+    if (h.relation === 'closest relative') return 'closest';
+    if (h.relation === 'related' || h.relation === 'unknown lineage') return 'plain';
+    return h.shared_rank && h.shared_rank in DEPTH ? h.shared_rank : 'none';
+  }
+  const relDepth = (h) => {
+    if (h.relation === 'closest relative') return -1;
+    if (h.relation === 'related' || h.relation === 'unknown lineage') return NONE_DEPTH + 1;
+    return h.shared_rank in DEPTH ? DEPTH[h.shared_rank] : NONE_DEPTH;
+  };
+  const hitKey = (h) => h.accession || h.genome_file || `#${h.rank}`;
+
+  function decorate(h) {
     const lin = parseLineage(h.gtdb_taxonomy);
-    const species = lineageName(lin, 's');
-    const genus = lineageName(lin, 'g');
     return Object.assign({}, h, {
-      _lin: lin, _species: species, _genus: genus,
-      _cls: classify(h.ani, thr),
+      _lin: lin, _species: lineageName(lin, 's'), _genus: lineageName(lin, 'g'),
+      _rel: relClass(h),
       _frac: Array.isArray(h.containment) && h.containment[1] > 0 ? h.containment[0] / h.containment[1] : (h.containment_fraction ?? null),
     });
   }
 
   function renderResults(data, clientMs) {
-    const thr = Object.assign({ species: 95, genus: 85 }, data.thresholds || {});
-    const hits = data.hits.map((h) => decorate(h, thr));
-    current = { data, hits, thr, sortKey: 'rank', sortDir: 'asc', clientMs };
+    const thr = Object.assign({ species: 95, imprecise_below: 85 }, data.thresholds || {});
+    const hits = data.hits.map((h) => decorate(h));
+    current = { data, hits, thr, sortKey: 'rank', sortDir: 'asc', clientMs, open: new Set() };
     const out = [];
     out.push(summaryCard(data, clientMs));
     if (!hits.length) {
       out.push(emptyCard(data));
     } else {
-      out.push(bestCard(hits[0], thr));
+      out.push(bestCard(data, hits, thr));
       out.push(tableCard());
     }
     ui.results.replaceChildren(...out);
@@ -491,7 +500,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
 
   /* gauge */
-  function gauge(ani, thr, cls) {
+  function gauge(ani, thr, species) {
     const W = 360, H = 212, cx = 180, cy = 170, R = 125;
     const min = Math.min(75, Math.floor(ani / 5) * 5), max = 100;
     const ang = (v) => Math.PI * (1 - (Math.min(max, Math.max(min, v)) - min) / (max - min));
@@ -500,33 +509,40 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       const [x1, y1] = pt(v1, R), [x2, y2] = pt(v2, R);
       return `M${x1.toFixed(2)} ${y1.toFixed(2)}A${R} ${R} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
     };
+    const imp = thr.imprecise_below;
+    // 'below' is everything under the species threshold; under ~85 % it is drawn dashed (imprecise).
     const zones = [
-      { a: min, b: thr.genus, c: 'distant' },
-      { a: thr.genus, b: thr.species, c: 'genus' },
+      { a: min, b: Math.min(imp, thr.species), c: 'below', dash: true },
+      { a: Math.max(min, imp), b: thr.species, c: 'below' },
       { a: thr.species, b: max, c: 'species' },
     ].filter((z) => z.b > z.a);
+    const color = species ? 'species' : 'below';
     const g = svg('svg', {
       class: 'gauge', viewBox: `0 0 ${W} ${H}`, role: 'img',
-      'aria-label': `ANI ${ani.toFixed(2)} percent, ${CLASS_LABEL[cls]}`,
+      'aria-label': `ANI ${ani.toFixed(2)} percent, ${species ? 'species level' : 'below the species threshold'}`,
     });
-    const color = (c) => `var(--${c})`;
     for (const z of zones) {
-      g.append(svg('path', { d: arc(z.a, z.b), class: 'track zone-dim', stroke: color(z.c) }));
-      if (ani > z.a) g.append(svg('path', { d: arc(z.a, Math.min(z.b, ani)), class: 'track', stroke: color(z.c) }));
+      const attrs = (extra) => Object.assign({ class: 'track' + (z.dash ? ' imprecise' : ''), stroke: `var(--${z.c})` }, extra);
+      g.append(svg('path', attrs({ d: arc(z.a, z.b), class: 'track zone-dim' + (z.dash ? ' imprecise' : '') })));
+      if (ani > z.a) g.append(svg('path', attrs({ d: arc(z.a, Math.min(z.b, ani)) })));
     }
-    for (const [v, label] of [[thr.genus, 'genus'], [thr.species, 'species']]) {
-      const [x1, y1] = pt(v, R - 14), [x2, y2] = pt(v, R + 13), [lx, ly] = pt(v, R + 20);
+    // hard marker: species threshold; soft, dashed marker: imprecise below ~85 %
+    const marks = [];
+    if (imp > min && imp < thr.species) marks.push([imp, `${imp}`, true]);
+    marks.push([thr.species, `species ${thr.species}`, false]);
+    for (const [v, label, soft] of marks) {
+      const [x1, y1] = pt(v, R - 14), [x2, y2] = pt(v, R + (soft ? 9 : 13)), [lx, ly] = pt(v, R + 20);
       const cos = Math.cos(ang(v));
-      g.append(svg('line', { x1, y1, x2, y2, class: 'tick' }));
+      g.append(svg('line', { x1, y1, x2, y2, class: soft ? 'tick soft' : 'tick' }));
       g.append(svg('text', {
-        x: lx, y: ly, class: 'thr',
+        x: lx, y: ly, class: soft ? 'thr soft' : 'thr',
         'text-anchor': cos > 0.25 ? 'start' : cos < -0.25 ? 'end' : 'middle',
-      }, `${label} ${v}`));
+      }, label));
     }
     g.append(svg('text', { x: cx - R, y: cy + 36, 'text-anchor': 'middle' }, String(min)));
     g.append(svg('text', { x: cx + R, y: cy + 36, 'text-anchor': 'middle' }, String(max)));
     const [kx, ky] = pt(ani, R);
-    g.append(svg('circle', { cx: kx, cy: ky, r: 11, class: 'knob', stroke: color(cls) }));
+    g.append(svg('circle', { cx: kx, cy: ky, r: 11, class: 'knob', stroke: `var(--${color})` }));
     g.append(svg('text', { x: cx, y: cy - 22, 'text-anchor': 'middle', class: 'value' }, ani.toFixed(2)));
     g.append(svg('text', { x: cx, y: cy - 2, 'text-anchor': 'middle', class: 'unit' }, 'k-mer ANI, %'));
     return g;
@@ -536,39 +552,74 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     return h._species || h.ncbi_organism_name || h.accession || 'the top hit';
   }
 
-  function bestCard(h, thr) {
-    const cls = h._cls;
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const article = (word) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
+
+  function lineageTrail(lin) {
+    // Phylum down to genus, as a breadcrumb; the domain is rarely informative.
+    const parts = lin.filter((e) => e.name && ['p', 'c', 'o', 'f', 'g'].includes(e.rank));
+    if (!parts.length) return null;
+    return el('p', { class: 'trail', title: 'GTDB lineage' }, parts.flatMap((e, i) => [
+      i ? el('span', { class: 'sep', 'aria-hidden': 'true', text: '›' }) : '',
+      el('span', { title: RANKS[e.rank] }, e.rank === 'g' ? el('i', { text: e.name }) : e.name)]));
+  }
+
+  const LEGEND = [
+    ['species', 'same species'], ['genus', 'genus'], ['family', 'family'], ['order', 'order'],
+    ['class', 'class'], ['phylum', 'phylum'], ['domain', 'domain'], ['none', 'different domain'],
+  ];
+
+  function bestCard(data, hits, thr) {
+    const h = hits[0];
+    const asg = data.assignment || null;
+    const species = !!asg;
+    const taxon = asg && asg.taxon;
     let verdict;
-    if (cls === 'species') {
-      verdict = ['Same species as ', el('i', { text: nameFragment(h) })];
-    } else if (cls === 'genus') {
-      verdict = ['Same genus', h._genus ? [' (', el('i', { text: h._genus }), ')'] : '',
-        ' – closest relative: ', el('i', { text: nameFragment(h) })];
+    let sub = null;
+    if (species) {
+      verdict = ['Same species as ', taxon ? el('i', { text: taxon }) : el('span', { class: 'mono', text: asg.accession || 'the best hit' })];
     } else {
-      verdict = ['Distant – closest relative: ', el('i', { text: nameFragment(h) })];
+      verdict = ['No species-level match'];
+      sub = el('p', { class: 'closest' }, 'Closest relative: ', el('i', { text: nameFragment(h) }),
+        ` (${h.ani.toFixed(1)} % ANI)`);
     }
     const [a, b] = Array.isArray(h.containment) ? h.containment : [null, null];
     const notes = [];
-    notes.push(el('p', null, 'Best hit ', accessionLinks(h.accession),
+    if (sub) notes.push(sub);
+    notes.push(el('p', null, species ? 'Assigned from ' : 'Best hit ', accessionLinks(h.accession),
       has(h.ncbi_organism_name) ? [' · ', h.ncbi_organism_name] : '',
       has(h.ncbi_strain_identifiers) ? ` (${h.ncbi_strain_identifiers})` : ''));
+    const trail = lineageTrail(h._lin);
+    if (trail) notes.push(trail);
+    if (!species) {
+      const genus = h._genus, family = lineageName(h._lin, 'f');
+      let hint = `Below ${thr.species} % ANI the assembly is probably not the same species as any database genome.`;
+      if (h.ani >= thr.imprecise_below && genus) {
+        hint += ` It is likely a different species (closest genus: ${genus}${family ? `, family ${family}` : ''}) and may belong to a related, possibly novel, genus.`;
+      } else if (h.ani < thr.imprecise_below) {
+        hint += ` k-mer ANI below ~${thr.imprecise_below} % is imprecise, so read the number as “distantly related” rather than an exact value.`;
+      }
+      notes.push(el('p', null, hint));
+    }
+    const boundary = hits.filter((x, i) => i > 0 && x.ani_species_level && x.shared_rank !== 'species');
+    if (species && boundary.length) {
+      notes.push(el('p', null, `${plural(boundary.length, 'other hit reaches', 'other hits reach')} ${thr.species} % ANI but ${boundary.length === 1 ? 'belongs' : 'belong'} to a different GTDB species (a species-boundary case).`));
+    }
     if (isNum(a) && isNum(b) && b > 0) {
       notes.push(el('p', { title: 'Fraction of the query sketch k-mers that are also present in this genome' },
         `${fmtInt(a)} of ${fmtInt(b)} query k-mers shared (${(100 * a / b).toFixed(1)} %).`));
     }
-    if (cls === 'distant') {
-      notes.push(el('p', null, 'The ANI is below the genus threshold, and k-mer ANI below ~85 % is imprecise, so read the number as “distantly related” rather than an exact value.'));
-    }
-    return el('section', { class: 'card', 'aria-label': 'Best hit' },
+    const legendHead = species ? 'Relation to the assigned species:' : 'Relation to the closest relative:';
+    return el('section', { class: 'card', 'aria-label': 'Result' },
       el('div', { class: 'best' },
-        gauge(h.ani, thr, cls),
+        gauge(h.ani, thr, species),
         el('div', null,
-          el('p', { class: `verdict verdict-${cls}` }, verdict),
+          el('p', { class: `verdict ${species ? 'verdict-species' : 'verdict-below'}` }, verdict),
           el('div', { class: 'best-meta' }, notes),
-          el('ul', { class: 'legend' },
-            el('li', null, el('i', { style: 'background:var(--distant)' }), `distant < ${thr.genus}`),
-            el('li', null, el('i', { style: 'background:var(--genus)' }), `same genus ${thr.genus}–${thr.species}`),
-            el('li', null, el('i', { style: 'background:var(--species)' }), `same species ≥ ${thr.species}`)))));
+          el('ul', { class: 'legend', 'aria-label': legendHead },
+            el('li', { class: 'legend-head', text: legendHead }),
+            LEGEND.map(([k, label]) => el('li', null, el('i', { class: `sw rel-${k}` }), label)),
+            el('li', null, el('i', { class: 'sw-dash' }), `k-mer ANI < ~${thr.imprecise_below} % is imprecise`)))));
   }
 
   /* links */
@@ -587,11 +638,10 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
 
   /* table */
-  const CLS_ORDER = { species: 0, genus: 1, distant: 2 };
   const COLS = [
     { key: 'rank', label: '#', get: (h) => h.rank, dir: 'asc' },
     { key: 'ani', label: 'ANI %', get: (h) => h.ani, dir: 'desc' },
-    { key: 'cls', label: 'Class', get: (h) => CLS_ORDER[h._cls], dir: 'asc' },
+    { key: 'rel', label: 'Relation', hint: 'relation (closest first)', get: (h) => relDepth(h), dir: 'asc' },
     { key: 'cont', label: 'Containment', get: (h) => h._frac, dir: 'desc' },
     { key: 'species', label: 'GTDB species', get: (h) => h._species, dir: 'asc' },
     { key: 'ncbi', label: 'NCBI organism', get: (h) => h.ncbi_organism_name, dir: 'asc' },
@@ -638,7 +688,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
 
   function mobileSort(table) {
     const sel = el('select', { id: 'sort-select', 'aria-label': 'Sort hits by' },
-      COLS.map((c) => el('option', { value: c.key, text: c.hint ? 'Quality' : c.label })));
+      COLS.map((c) => el('option', { value: c.key, text: c.key === 'quality' ? 'Quality' : c.label })));
     const dirBtn = el('button', { type: 'button', class: 'btn', 'aria-label': 'Toggle sort direction' });
     const sync = () => {
       sel.value = current.sortKey;
@@ -662,6 +712,10 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       if (c.key === current.sortKey) th.setAttribute('aria-sort', current.sortDir === 'asc' ? 'ascending' : 'descending');
       else th.removeAttribute('aria-sort');
     });
+    // Remember which lineages are expanded across re-sorts, keyed by accession.
+    for (const d of table.tBodies[0].querySelectorAll('details.lineage')) {
+      if (d.open) current.open.add(d.dataset.key); else current.open.delete(d.dataset.key);
+    }
     table.tBodies[0].replaceChildren(...sortedHits().map((h) => hitRow(h)));
   }
 
@@ -670,10 +724,10 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   function aniCell(h) {
     const thr = current.thr;
     const pct = Math.max(0, Math.min(100, ((h.ani - 70) / 30) * 100));
-    const tick = (v) => el('i', { style: `left:${((v - 70) / 30) * 100}%` });
+    const tick = (v, cls) => el('i', { class: cls, style: `left:${((v - 70) / 30) * 100}%` });
     return el('div', { class: 'anibar' }, el('b', { text: h.ani.toFixed(2) }),
-      el('div', { class: `bar bar-${h._cls}`, 'aria-hidden': 'true' },
-        el('span', { style: `width:${pct.toFixed(1)}%` }), tick(thr.genus), tick(thr.species)));
+      el('div', { class: `bar rel-${h._rel}`, 'aria-hidden': 'true' },
+        el('span', { style: `width:${pct.toFixed(1)}%` }), tick(thr.imprecise_below, 'soft'), tick(thr.species)));
   }
 
   function speciesCell(h) {
@@ -681,7 +735,18 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     const label = h._species || '(no species)';
     const list = el('ol', null, h._lin.map((e) => el('li', null,
       el('b', { text: RANKS[e.rank] || e.rank || '' }), el('span', { text: e.name || '–' }))));
-    return el('details', { class: 'lineage' }, el('summary', { title: 'Show the full GTDB lineage' }, el('i', { text: label })), list);
+    const key = hitKey(h);
+    return el('details', { class: 'lineage', 'data-key': key, open: current.open.has(key) ? '' : null }, el('summary', { title: 'Show the full GTDB lineage' }, el('i', { text: label })), list);
+  }
+
+  function relationBadge(h) {
+    if (!has(h.relation)) return dash();
+    const title = h.shared_rank ? `Deepest GTDB rank shared: ${h.shared_rank}` : 'No shared GTDB rank';
+    return el('div', { class: 'rel' },
+      el('span', { class: `badge badge-rel rel-${h._rel}`, title, text: h.relation }),
+      h.ani_species_level && h.shared_rank !== 'species'
+        ? el('div', { class: 'sub', title: 'The ANI reaches the species threshold, but GTDB places this genome in a different species', text: `ANI ≥ ${current.thr.species}, other species` })
+        : null);
   }
 
   function ncbiCell(h) {
@@ -713,7 +778,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     return el('tr', { class: h.rank === 1 ? 'top-row' : null },
       cellTd('#', 'num rank', String(h.rank)),
       cellTd('ANI %', null, aniCell(h)),
-      cellTd('Class', null, el('span', { class: `badge badge-${h._cls}`, text: CLASS_LABEL[h._cls] })),
+      cellTd('Relation', null, relationBadge(h)),
       cellTd('Containment', 'num', isNum(a) && isNum(b)
         ? [`${fmtInt(a)} / ${fmtInt(b)}`, el('div', { class: 'sub', text: isNum(h._frac) ? `${(h._frac * 100).toFixed(1)} %` : '' })] : dash()),
       cellTd('GTDB species', null, speciesCell(h)),
@@ -742,15 +807,15 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
   function downloadTsv() {
     const hits = sortedHits();
-    const lead = ['rank', 'ani', 'containment_hits', 'containment_total', 'containment_fraction', 'interpretation'];
-    const skip = new Set(['rank', 'ani', 'containment', 'containment_fraction', 'interpretation']);
+    const lead = ['rank', 'ani', 'containment_hits', 'containment_total', 'containment_fraction', 'relation', 'shared_rank', 'ani_species_level'];
+    const skip = new Set(['rank', 'ani', 'containment', 'containment_fraction', 'relation', 'shared_rank', 'ani_species_level']);
     const keys = [];
     for (const h of hits) for (const k of Object.keys(h)) if (!k.startsWith('_') && !skip.has(k) && !keys.includes(k)) keys.push(k);
     const cell = (v) => (v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' '));
     const rows = [lead.concat(keys).join('\t')];
     for (const h of hits) {
       const c = Array.isArray(h.containment) ? h.containment : [null, null];
-      rows.push([h.rank, h.ani, c[0], c[1], h.containment_fraction, h.interpretation]
+      rows.push([h.rank, h.ani, c[0], c[1], h.containment_fraction, h.relation, h.shared_rank, h.ani_species_level]
         .concat(keys.map((k) => h[k])).map(cell).join('\t'));
     }
     download(`${baseName()}.tsv`, rows.join('\n') + '\n', 'text/tab-separated-values');
