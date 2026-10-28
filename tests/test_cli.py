@@ -666,6 +666,26 @@ class TestTaxonomyOutputs:
         assert result.returncode == 1
         assert "no metadata database" in result.stderr
 
+    def test_query_no_adjust(self, metadata_server) -> None:
+        socket_path, _ = metadata_server
+        result = _run(
+            "query",
+            str(O157_SKETCH),
+            "--socket",
+            str(socket_path),
+            "--fields",
+            "none",
+            "--no-adjust",
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        lines = [line for line in result.stdout.splitlines() if line]
+        header = lines[0].split("\t")
+        row = dict(zip(header, lines[1].split("\t")))
+        assert float(row["Adjusted_ANI"]) == pytest.approx(96.02, abs=0.01)
+        assert row["Adjusted_ANI"] == row["Naive_ANI"]
+        assert row["ANI_5-95_percentile"] == ""
+
     def test_query_has_no_taxonomy_flags(self) -> None:
         result = _run(
             "query",

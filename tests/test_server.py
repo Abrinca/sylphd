@@ -51,40 +51,6 @@ def client():
         yield test_client
 
 
-@pytest.fixture(scope="module")
-def tiny_database(tmp_path_factory) -> Path:
-    directory = tmp_path_factory.mktemp("tiny")
-    contigs = []
-    with dnaio.open(Path(__file__).parent / "data" / "clodf13.fna.gz") as reader:
-        contigs.extend(record.sequence for record in reader)
-    genome = pysylph.Sketcher(c=200, k=31).sketch_genome(
-        "GCA_000000001.1_genomic.fna.gz", contigs
-    )
-    database = pysylph.Database([genome])
-    path = directory / "tiny.syldb"
-    database.dump(str(path))
-    return path
-
-
-@pytest.fixture(scope="module")
-def tiny_metadata(tmp_path_factory, tiny_database) -> Path:
-    directory = tmp_path_factory.mktemp("meta")
-    source = directory / "tiny.tsv"
-    header = ["accession", *METADATA_COLUMNS]
-    values = {column: "none" for column in METADATA_COLUMNS}
-    values.update(
-        gtdb_taxonomy="d__Bacteria;p__Test;c__Test",
-        genome_size="9957",
-        gc_percentage="51.5",
-        mimag_high_quality="t",
-    )
-    row = ["GCA_000000001.1", *[values[column] for column in METADATA_COLUMNS]]
-    source.write_text("\t".join(header) + "\n" + "\t".join(row) + "\n")
-    output = directory / "meta.sqlite"
-    build_metadata_db([source], output, release=232)
-    return output
-
-
 class TestBasics:
     def test_health(self, client: TestClient) -> None:
         response = client.get("/health")
