@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# setup-server.sh — first-time setup / reconciliation of the sylphd host.
+# setup-server.sh — first-time setup / reconciliation of a sylphd host.
 #
-#   sudo ./setup-server.sh
+#   sudo DOMAIN=sylphd.example.org ./setup-server.sh
+#   sudo ./setup-server.sh sylphd.example.org
+#   sudo ./setup-server.sh            # DOMAIN from ./site.env
+#
+# DOMAIN is the public name Caddy serves (an A/AAAA record must already point
+# at the host).  It can also come from an optional, unversioned `site.env`
+# next to this script (see below), or from $SYLPHD_SITE_ENV.
 #
 # Idempotent: every step checks the current state first, so it is also the
 # way to re-apply configuration after a change.  It lays out the service
@@ -24,6 +30,30 @@ log() { printf '%s setup-server: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
 die() { log "error: $*"; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "run as root (sudo $0)"
+
+# ---------------------------------------------------------------------------
+# 0. site settings
+# ---------------------------------------------------------------------------
+# `site.env` (never committed — it names a real host) is sourced when present.
+# Recognised keys, all optional except DOMAIN:
+#
+#   DOMAIN=            public name Caddy serves and gets a certificate for
+#   SYLPH_DB=          database file name in /srv/sylphd/db
+#   SYLPH_META=        metadata SQLite file name in /srv/sylphd/db
+#   SYLPH_SERVE_ARGS=  site policy flags appended to `sylphd serve`, one
+#                      whitespace-separated string (see deploy/sylphd.service)
+#   SYLPH_HTTP_MAX=    Caddy request_body max_size (e.g. 64MB)
+site_env="${SYLPHD_SITE_ENV:-$HERE/site.env}"
+if [[ -f $site_env ]]; then
+    log "reading site settings from $site_env"
+    # shellcheck disable=SC1090
+    . "$site_env"
+fi
+DOMAIN=${DOMAIN:-${1:-}}
+[[ -n ${DOMAIN:-} ]] ||
+    die "no DOMAIN — pass it as an argument, set DOMAIN=..., or create $HERE/site.env"
+[[ $DOMAIN =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] ||
+    die "DOMAIN does not look like a host name: $DOMAIN"
 
 # ---------------------------------------------------------------------------
 # 1. service account and directory layout
@@ -158,8 +188,35 @@ install -m 0755 "$HERE/update.sh" /usr/local/sbin/sylphd-update
 # sudo's secure_path on Oracle Linux is /sbin:/bin:/usr/sbin:/usr/bin, so
 # expose the script there as well to make `sudo sylphd-update` work as-is.
 ln -sfn /usr/local/sbin/sylphd-update /usr/sbin/sylphd-update
+
+# Site policy from site.env goes into a drop-in so the shipped unit stays
+# generic.  Environment= from a drop-in wins over the unit's own assignment.
+dropin_dir=/etc/systemd/system/sylphd.service.d
+install -d -m 0755 "$dropin_dir"
+site_conf=$(mktemp)
+{
+    echo "# Managed by sylphd setup-server.sh from $site_env."
+    echo "# Edit site.env and re-run setup-server.sh instead of this file."
+    echo "[Service]"
+    [[ -n ${SYLPH_DB:-} ]] && echo "Environment=SYLPH_DB=$SYLPH_DB"
+    [[ -n ${SYLPH_META:-} ]] && echo "Environment=SYLPH_META=$SYLPH_META"
+    [[ -n ${SYLPH_SERVE_ARGS:-} ]] && echo "Environment=SYLPH_SERVE_ARGS=$SYLPH_SERVE_ARGS"
+} >"$site_conf"
+if [[ $(wc -l <"$site_conf") -le 3 ]]; then
+    # Nothing site-specific: make sure a stale drop-in cannot linger.
+    if [[ -f $dropin_dir/10-site.conf ]]; then
+        rm -f "$dropin_dir/10-site.conf"
+        log "removed stale $dropin_dir/10-site.conf"
+    fi
+elif ! cmp -s "$site_conf" "$dropin_dir/10-site.conf"; then
+    install -m 0644 "$site_conf" "$dropin_dir/10-site.conf"
+    log "wrote $dropin_dir/10-site.conf"
+fi
+rm -f "$site_conf"
+
 systemctl daemon-reload
 systemctl enable sylphd.service >/dev/null 2>&1
+log "sylphd flags: ${SYLPH_SERVE_ARGS:-(unit defaults)}"
 
 # ---------------------------------------------------------------------------
 # 8. SELinux: label the socket directory and grant httpd_t connectto
@@ -204,22 +261,48 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Caddyfile
+# 9. Caddyfile, site address and request-body limit
 # ---------------------------------------------------------------------------
+# The shipped Caddyfile is generic: the site address comes from the
+# {$SYLPHD_DOMAIN} placeholder.  caddy.service gets it through a drop-in, so a
+# domain change is `site.env` + re-run (a restart, not a reload: the running
+# process holds the old environment).
+caddy_dropin=/etc/systemd/system/caddy.service.d
+install -d -m 0755 "$caddy_dropin"
+caddy_conf=$(mktemp)
+{
+    echo "# Managed by sylphd setup-server.sh from $site_env."
+    echo "[Service]"
+    echo "Environment=SYLPHD_DOMAIN=$DOMAIN"
+    echo "Environment=SYLPH_HTTP_MAX=${SYLPH_HTTP_MAX:-64MB}"
+} >"$caddy_conf"
+
 if [[ -f $HERE/Caddyfile ]]; then
-    log "Caddyfile"
-    if cmp -s "$HERE/Caddyfile" /etc/caddy/Caddyfile; then
-        log "Caddyfile unchanged"
-    else
+    log "Caddyfile for $DOMAIN"
+    SYLPHD_DOMAIN="$DOMAIN" SYLPH_HTTP_MAX="${SYLPH_HTTP_MAX:-64MB}" \
+        /usr/bin/caddy validate --config "$HERE/Caddyfile" --adapter caddyfile ||
+        die "Caddyfile is invalid (domain: $DOMAIN)"
+    changed=0
+    if ! cmp -s "$caddy_conf" "$caddy_dropin/10-site.conf"; then
+        install -m 0644 "$caddy_conf" "$caddy_dropin/10-site.conf"
+        changed=1
+    fi
+    if ! cmp -s "$HERE/Caddyfile" /etc/caddy/Caddyfile; then
         if [[ -f /etc/caddy/Caddyfile ]]; then
             cp -a /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.$(date -u +%Y%m%dT%H%M%SZ).bak"
         fi
         install -m 0644 -o root -g root "$HERE/Caddyfile" /etc/caddy/Caddyfile
-        /usr/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile ||
-            die "Caddyfile is invalid"
+        changed=1
+    fi
+    if [[ $changed -eq 1 ]]; then
+        systemctl daemon-reload
         systemctl restart caddy
+        log "caddy restarted for $DOMAIN"
+    else
+        log "caddy configuration unchanged"
     fi
 fi
+rm -f "$caddy_conf"
 systemctl is-active --quiet caddy || systemctl start caddy
 
 log "done — next: sudo sylphd-update${SYLPHD_VERSION:+ $SYLPHD_VERSION}"

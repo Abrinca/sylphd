@@ -1,0 +1,9 @@
+# Local site settings for setup-server.sh — never commit this file.
+#
+# Copy to site.env next to setup-server.sh on the box you administer (or point
+# SYLPHD_SITE_ENV at it), fill in, then:
+#
+#   sudo ./setup-server.sh
+#
+# Every key is optional except DOMAIN.
+site.env

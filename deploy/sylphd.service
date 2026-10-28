@@ -1,4 +1,4 @@
-# sylphd.service — the public sylphd server on the production host.
+# sylphd.service — a public sylphd server behind a reverse proxy.
 #
 # Installed to /etc/systemd/system/sylphd.service by setup-server.sh.
 # /srv/sylphd/current is a symlink switched by sylphd-update; the unit always
@@ -7,6 +7,18 @@
 # The Unix socket is created with mode 0660 (sylphd:sylphd) by sylphd itself;
 # Caddy runs as user caddy, which is a member of group sylphd, and proxies to
 # unix//srv/sylphd/run/sylphd.sock.
+#
+# Site policy lives in SYLPH_SERVE_ARGS below (and in SYLPH_DB / SYLPH_META):
+# those are the switches a "public instance" adds on top of the local defaults.
+# setup-server.sh overrides them from deploy/site.env when that file exists
+# (it is not in this repository — keep your own copy out of version control if
+# it names a real host).  Override by hand with a drop-in:
+#
+#   /etc/systemd/system/sylphd.service.d/10-site.conf
+#   [Service]
+#   Environment=SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 4 ...
+#
+# Values are split on whitespace, so no quoting inside them.
 [Unit]
 Description=sylphd — long-running sylph server
 Documentation=https://abrinca.github.io/sylphd/docs/guides/public-server.html
@@ -22,19 +34,30 @@ Environment=HOME=/srv/sylphd
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/srv/sylphd/current/bin:/usr/local/bin:/usr/bin:/bin
 
-ExecStart=/srv/sylphd/current/bin/sylphd serve \
-    --db /srv/sylphd/db/gtdb-r232-c200-dbv2.syl2db \
-    --meta /srv/sylphd/db/meta-r232-reps.sqlite \
-    --socket /srv/sylphd/run/sylphd.sock \
-    --allow-sequences \
-    --max-jobs 2 \
-    --max-queue 16 \
-    --rate-limit 10/min \
-    --trusted-proxy unix \
-    --cors-origin '*' \
-    --terms-url https://abrinca.github.io/sylphd/terms.html
+# Database files (in /srv/sylphd/db, installed by hand — never by this unit).
+Environment=SYLPH_DB=gtdb-r232-c200-dbv2.syl2db
+Environment=SYLPH_META=meta-r232-reps.sqlite
 
-# Loading the 20 GB database takes a few seconds; uvicorn then serves.
+# Example public-instance policy, not a requirement:
+#   --allow-sequences        enable POST /assembly (needed by the web app)
+#   --max-jobs 2             profiling jobs running at once
+#   --max-queue 16           requests allowed to wait for a job slot
+#   --rate-limit 10/min      per-client limit on the three POST endpoints
+#   --trusted-proxy unix     believe X-Forwarded-For from the local socket
+#   --cors-origin *          any origin may call the API from a browser
+#   --terms-url URL          advertise a terms-of-use page in /info
+# Drop any of them, raise the limits, or narrow CORS to your own page.
+# `--cors-origin *` is written unquoted: systemd splits the value on
+# whitespace and passes the asterisk through literally.
+Environment=SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin * --terms-url https://example.org/terms
+
+ExecStart=/srv/sylphd/current/bin/sylphd serve \
+    --db /srv/sylphd/db/$SYLPH_DB \
+    --meta /srv/sylphd/db/$SYLPH_META \
+    --socket /srv/sylphd/run/sylphd.sock \
+    $SYLPH_SERVE_ARGS
+
+# Loading a multi-GB database takes a few seconds; uvicorn then serves.
 TimeoutStartSec=180
 TimeoutStopSec=30
 Restart=on-failure

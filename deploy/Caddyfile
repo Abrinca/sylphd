@@ -1,8 +1,16 @@
-# Caddyfile — TLS front end for the public sylphd instance.
+# Caddyfile — TLS front end for a public sylphd instance.
 #
-# Installed to /etc/caddy/Caddyfile by setup-server.sh.  Replace the site
-# address with your own domain (Caddy obtains and renews the certificate via
-# Let's Encrypt automatically; HTTP is redirected to HTTPS).
+# Installed to /etc/caddy/Caddyfile by setup-server.sh, which also writes the
+# site address into a systemd drop-in (Environment=SYLPHD_DOMAIN=...) for
+# caddy.service.  Without that variable the site falls back to `example.org`,
+# so this file is always a valid Caddyfile you can test by hand:
+#
+#   SYLPHD_DOMAIN=sylphd.example.org caddy validate --config ./Caddyfile \
+#       --adapter caddyfile
+#
+# Point the name at the host first (an A/AAAA record, or an sslip.io /
+# nip.io name that encodes the IP).  Caddy obtains and renews the certificate
+# via Let's Encrypt automatically; HTTP is redirected to HTTPS.
 #
 # Caddy runs confined as httpd_t from the @caddy/caddy package.  Talking to
 # sylphd's Unix socket therefore needs two SELinux bits (both installed by
@@ -13,16 +21,17 @@
 # The socket is 0660 sylphd:sylphd; user caddy is in group sylphd.  Caddy
 # buffers nothing: request_body guards the upload path (well above the 20 MB
 # /assembly limit and a typical batch of sketches), while sylphd enforces its
-# own per-endpoint limits and returns the JSON 413.
+# own per-endpoint limits and returns the JSON 413.  Raise max_size only if you
+# raise sylphd's --max-upload-mb.
 #
 # Access logs go to stderr, which systemd collects in the journal
 # (journalctl -u caddy).
 
-140-238-213-53.sslip.io {
+{$SYLPHD_DOMAIN:example.org} {
 	encode zstd gzip
 
 	request_body {
-		max_size 64MB
+		max_size {$SYLPH_HTTP_MAX:64MB}
 	}
 
 	reverse_proxy unix//srv/sylphd/run/sylphd.sock {

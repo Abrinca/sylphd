@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sylphd-update — install or upgrade sylphd on the production host.
+# sylphd-update — install or upgrade sylphd on a server.
 #
 #   sudo sylphd-update              # newest GitHub release
 #   sudo sylphd-update v0.1.0       # a specific release (the "v" is optional)
