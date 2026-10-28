@@ -90,12 +90,16 @@ are one example.
 ## Using the web app against your server
 
 The web app is a static page in `web/` that calls `GET /info` and `POST /assembly` of a server
-started with `--allow-sequences`. Its default API address is set in `web/config.js`, and the
-`?api=` query parameter overrides it per visit:
+started with `--allow-sequences`. `web/config.js` holds two addresses: `apiBase`, the public
+server used by the published page (empty until one exists, so the page contacts nothing), and
+`devApiBase` (`http://127.0.0.1:8765`), used only when the page itself is opened from localhost.
+The published page never contacts the visitor's own machine by default, because browsers ask
+for "local network access" permission when a public site does that. The `?api=` query parameter
+overrides both per visit:
 
 ```bash
 python -m http.server 8000 -d web
-# open http://localhost:8000/?api=http://127.0.0.1:8765
+# open http://localhost:8000 (uses devApiBase), or add ?api=http://host:port
 ```
 
 For local development start the server with `--cors-origin local`. The browser must be allowed by

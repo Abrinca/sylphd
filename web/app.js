@@ -7,7 +7,10 @@
   const cfg = window.SYLPHD_CONFIG || {};
   const params = new URLSearchParams(location.search);
   const apiOverride = params.get('api');
-  const API = (apiOverride || cfg.apiBase || '').trim().replace(/\/+$/, '');
+  const pageIsLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/.test(location.hostname)
+    || location.protocol === 'file:';
+  const configured = pageIsLocal ? (cfg.devApiBase || cfg.apiBase) : cfg.apiBase;
+  const API = (apiOverride || configured || '').trim().replace(/\/+$/, '');
   const DEFAULT_LIMIT_MB = 20;
   const COMPRESS_OVER = 1 << 20; // compress pasted text above 1 MiB
   const EXAMPLE_URL = 'example/mycoplasma_genitalium_G37.fna.gz';
@@ -78,6 +81,13 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
 
   async function loadInfo() {
     clearTimeout(infoTimer);
+    if (!API) {
+      serverInfo = null;
+      setStatus('offline', 'No public server yet');
+      ui.statusDetail.replaceChildren('The public server is not available yet. ',
+        'To use your own server, add ', el('code', { text: '?api=https://…' }), ' to the address.');
+      return;
+    }
     setStatus('checking', 'Checking server…');
     try {
       new URL(API);
@@ -199,7 +209,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     const now = Date.now();
     const cooling = cooldownUntil > now;
     const ready = input.size > 0 && input.size <= limitBytes() && validateOptions().ok;
-    ui.submit.disabled = busy || cooling || !ready;
+    ui.submit.disabled = busy || cooling || !ready || !API;
     ui.clear.disabled = busy;
     ui.pick.disabled = busy;
     ui.example.disabled = busy;
