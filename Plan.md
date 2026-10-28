@@ -35,7 +35,8 @@ Managed by uv. Python >= 3.14, tested on 3.14 only.
 - **Server** (`sylphd serve --db X.syl2db --meta X.sqlite [--socket PATH | --tcp HOST:PORT]`): loads the database at startup. Endpoints:
   - `GET /health`;
   - `GET /info`: database name, size, number of genomes, `c`, `k`, `screen_c`, metadata DB info, versions of sylphd/pysylph;
-  - `POST /profile` and `POST /query`: one or more uploaded sketches plus the usual sylph thresholds (`minimum_ani`, `seq_id`, `estimate_unknown`, `min_number_kmers`, `min_contain`, `screen_ani`).
+  - `POST /profile` and `POST /query`: one or more uploaded sketches plus the usual sylph thresholds (`minimum_ani`, `seq_id`, `estimate_unknown`, `min_number_kmers`, `min_contain`, `screen_ani`, `no_adjust`);
+  - `POST /assembly` (only with `--allow-sequences`): one raw FASTA/FASTQ assembly, sketched and profiled server-side with `no_adjust=True`.
 - **Client library and CLI:**
   - asks the server for `c`/`k`, then sketches locally;
   - inputs: single-end reads (also long reads, assemblies) `-r`, paired `-1/-2`, interleaved paired `--interleaved`, several files per sample (concatenated into one sketch), and existing `.sylsp` files (sent as they are);
@@ -66,3 +67,21 @@ Each result row combines:
 2. sylphd: package skeleton, `download`, `setup`, server, client, CLI, tests; push to `MrTomRod/sylphd` (public).
 3. Manual end-to-end run against GTDB r232 c200.
 4. Stretch: `merge` (sum taxonomic abundance per GTDB or NCBI rank).
+5. Web front end: a public GitHub Pages page where a visitor pastes one
+   assembly and gets its closest GTDB genomes, with no install and no
+   sketching on the client.
+   - Server: opt-in `POST /assembly` (raw FASTA/FASTQ, plain or gzip, one
+     sample; size caps for the body and its decompressed form; `top`/`min_ani`
+     query parameters; flat metadata in each hit and a
+     `same species`/`same genus`/`distant` label) plus `sylphd assembly` as a
+     client for testing. `Profiler(no_adjust=True)` gives the naive
+     containment ANI, which is the meaningful ANI for a genome.
+   - Public-deployment flags: `--allow-sequences`, `--max-sequence-mb`,
+     `--rate-limit N/min`, `--max-queue N`, `--trusted-proxy IP|unix`,
+     `--cors-origin ORIGIN`. Local behaviour stays unchanged: everything is
+     off by default and `/assembly` is a 404 without `--allow-sequences`.
+   - Reverse proxy (Caddy) terminates TLS on a small host; a scheduled job
+     keeps the GTDB database and metadata current.
+   - The static page (MrTomRod.github.io) calls the API directly from the
+     browser with `fetch`, so the server needs the CORS origin and a rate
+     limit per client IP.

@@ -61,7 +61,10 @@ group with `chgrp` if needed).
 
 ```
 sylphd serve --db PATH [--meta PATH] [--socket PATH | --tcp HOST:PORT]
-             [--max-jobs N] [--max-upload-mb N] [--hash] [--log-level LEVEL]
+             [--max-jobs N] [--max-upload-mb N] [--allow-sequences]
+             [--max-sequence-mb N] [--rate-limit N/min] [--max-queue N]
+             [--trusted-proxy IP] [--cors-origin ORIGIN]
+             [--hash] [--log-level LEVEL]
 ```
 
 - `--db`: database to load at startup. `.syl2db` files are read as two-stage
@@ -73,6 +76,23 @@ sylphd serve --db PATH [--meta PATH] [--socket PATH | --tcp HOST:PORT]
   responsive. Default `2`.
 - `--max-upload-mb`: request body limit. Default `512`. Sketches are also
   checked structurally before they are decoded; see Wire format.
+- `--allow-sequences`: enable `POST /assembly`, which takes raw FASTA/FASTQ
+  instead of a sketch. Off by default: without it the endpoint is a 404.
+- `--max-sequence-mb`: upload limit of `/assembly`, before decompression.
+  Default `20`. Gzip bodies are decompressed up to 5× this limit.
+- `--rate-limit N/min`: per-client limit on the POST endpoints (`/assembly`,
+  `/profile`, `/query`), e.g. `10/min`; also `N/s`. Off by default, for local
+  use. Replies are `429` with `Retry-After`.
+- `--max-queue N`: how many requests may wait for a job slot; beyond that the
+  server answers `503` with `Retry-After` instead of queueing. Unlimited by
+  default.
+- `--trusted-proxy IP`: a peer whose `X-Forwarded-For` header is believed;
+  repeatable. Use `--trusted-proxy unix` when a reverse proxy talks to the
+  server over the default Unix socket. Without it the header is ignored and
+  the socket peer is the client identity.
+- `--cors-origin ORIGIN`: allowed CORS origin for a browser front end;
+  repeatable, none by default. `GET`/`POST` and the `Content-Type` header are
+  allowed, and `Retry-After` is exposed.
 - `--hash`: compute the database SHA-256 at startup (off by default, slow on a
   20 GB database). Reported by `/info`.
 - Exactly one worker process runs: sharing the in-memory index is the point.
@@ -105,6 +125,12 @@ Inputs (each file or group is one sample):
 - `-t/--threads` sketches samples in parallel locally (default `4`).
 - Thresholds: `--minimum-ani`, `--seq-id`, `--estimate-unknown`,
   `--min-number-kmers`, `--min-contain`, `--screen-ani` (sylph's defaults).
+- `--no-adjust`: report the naive containment ANI (sylph's `Naive_ANI`)
+  instead of the coverage-adjusted ANI. Use it when the sample is an assembly
+  or a genome: every k-mer then occurs once, the coverage-based correction is
+  meaningless and inflates ANI to 100. `Adjusted_ANI` then equals
+  `Naive_ANI`, and the `ANI_5-95_percentile` column is left empty because the
+  interval still belongs to the adjusted estimate.
 - `--fields` selects metadata columns (comma-separated, `all` by default,
   `none` to omit them); `--format json` prints the server payload.
 - Output is TSV on stdout, or `-o FILE`.
@@ -198,6 +224,28 @@ The matrix columns are sample names in request order; rows are all clades seen
 in any sample, in first-seen order (the same order sylph-tax merge produces
 when joining its profiles in that order).
 
+### `sylphd assembly`
+
+```
+sylphd assembly FILE [--top N] [--min-ani ANI] [--name NAME] [--json] [-o FILE]
+```
+
+Sends one assembly (FASTA or FASTQ, plain or gzip) to `POST /assembly` and
+prints a compact table of its closest database genomes:
+
+```
+rank  ani   interpretation  accession        gtdb_species  ncbi_organism_name  ncbi_taxid
+1     99.53 same species    GCA_000005845.2  Escherichia coli  Escherichia coli K-12  562
+```
+
+- `--top` is 1-50 (default `10`), `--min-ani` is 70-100 (default `80`).
+- `--name` sets the query name (default: the file base name).
+- `--json` prints the raw response, `-o FILE` writes the table to a file.
+- The ANI is the naive containment ANI (`no_adjust`), which is the meaningful
+  measure for an assembly; the server also labels each hit as
+  `same species`, `same genus` or `distant`.
+- The server must run with `--allow-sequences`.
+
 ### `sylphd download`
 
 ```
@@ -262,8 +310,8 @@ Genome names such as `.../GCA_964372435.1_genomic.fna.gz` map to
   `pysylph.SampleSketch` (a `.sylsp` file);
 - an optional `params` field with a JSON object:
   `minimum_ani`, `seq_id`, `estimate_unknown`, `min_number_kmers`,
-  `min_contain`, `screen_ani`, `names` (one name per sketch), `fields`
-  (metadata columns), `mode` (optional, must match the endpoint).
+  `min_contain`, `screen_ani`, `no_adjust`, `names` (one name per sketch),
+  `fields` (metadata columns), `mode` (optional, must match the endpoint).
 
 The response is a JSON list with one object per sample, in request order:
 
@@ -273,7 +321,13 @@ The response is a JSON list with one object per sample, in request order:
 
 Errors are JSON objects `{"error": "..."}` with a 4xx/5xx status: 400 for bad
 parameters, sketches with the wrong `c`/`k` or malformed sketches; 413 when the
-body or sketch count exceeds the limit; 415 for non-multipart requests.
+body or sketch count exceeds the limit; 415 for non-multipart requests; 429
+when rate limited and 503 when the job queue is full (both with a
+`Retry-After` header).
+
+With `no_adjust`, `Adjusted_ANI` is the naive containment ANI and
+`ANI_5-95_percentile` is `null`: the confidence interval still describes the
+(disabled) adjustment.
 
 Clients sketch with the server's `c`/`k`; existing sketches must match `k`
 exactly and must not be sparser than the database (`c <= db.c`).
@@ -287,6 +341,93 @@ upload declaring 100 million k-mers would abort the process. Malformed
 sketches are rejected with a 400 before any such allocation can happen. The
 layout is tied to the pinned sylph version (`ref/sylph/src/types.rs`); the test
 suite compares the parsed header against a decoded sketch to catch drift.
+
+## Web API
+
+A browser front end needs to send sequences, not sketches, so `sylphd serve
+--allow-sequences` adds one endpoint for exactly that case. Everything is
+opt-in; without the flag `POST /assembly` is a 404.
+
+### `POST /assembly`
+
+Body: one assembly, raw FASTA or FASTQ, plain or gzip (the gzip magic bytes
+`\x1f\x8b` select decompression; the `Content-Type` header is otherwise
+informational). All records of the body form one sample.
+
+```
+Content-Type: text/plain | application/octet-stream | application/gzip
+```
+
+| Query parameter | Meaning |
+|---|---|
+| `top` | number of hits, 1-50 (default `10`) |
+| `min_ani` | minimum ANI in percent, 70-100 (default `80`) |
+| `name` | query name (default `assembly`, max 1024 characters) |
+
+The server sketches the assembly with the database's `c`/`k`, runs
+`Profiler(db, no_adjust=True)` and keeps the `top` hits sorted by ANI. The
+response is:
+
+```json
+{"query": {"name": "assembly", "records": 1, "length": 6013491,
+           "gc": 50.76, "sketch_kmers": 200},
+ "database": {"name": "gtdb-r232-c200-dbv2.syl2db", "genomes": 199937,
+              "c": 200, "k": 31},
+ "params": {"top": 10, "min_ani": 80.0},
+ "thresholds": {"species": 95.0, "genus": 85.0},
+ "elapsed_ms": 412.7,
+ "hits": [{"rank": 1, "ani": 98.65, "containment": [7096, 10826],
+           "containment_fraction": 0.655, "interpretation": "same species",
+           "genome_file": "/db/GCA_000005845.2_genomic.fna.gz",
+           "accession": "GCF_000005845.2",
+           "gtdb_taxonomy": "d__Bacteria;...;s__Escherichia coli",
+           "ncbi_organism_name": "Escherichia coli K-12", "...": null}]}
+```
+
+- `ani` is the naive containment ANI (`no_adjust=True`); the coverage-adjusted
+  ANI is meaningless for assemblies, so there is no confidence interval here.
+- `containment` is `[contained k-mers, sample k-mers]` and
+  `containment_fraction` is their ratio.
+- `interpretation` comes from one pair of thresholds, also returned in the
+  response: `ani >= 95` is `same species`, `85 <= ani < 95` is `same genus`,
+  everything else is `distant`.
+- Every metadata column of the server's metadata database is added flat to each
+  hit, or `null` when the accession has no metadata. A server without `--meta`
+  returns all columns as `null`, so the shape is stable.
+- Errors: `400` for an empty, malformed or non-ACGTN body and for bad query
+  parameters; `413` when the body exceeds `--max-sequence-mb` or its
+  decompressed size exceeds five times that limit; `415` for an unsupported
+  `Content-Type`; `429`/`503` with `Retry-After` from the abuse limits below.
+- Uploads are never logged: only sizes, timings and request outcomes appear in
+  the server log.
+
+### Abuse limits
+
+`--rate-limit`, `--max-queue`, `--trusted-proxy` and `--cors-origin` apply to
+`/assembly`, `/profile` and `/query`; `/health` and `/info` are always served.
+A rate-limited request gets `429` and a `Retry-After` in seconds; a request
+that would wait behind `--max-queue` others gets `503` and `Retry-After: 1`.
+
+The client identity is the socket peer. Only with `--trusted-proxy <ip>` (or
+`--trusted-proxy unix` for a Unix-socket peer, e.g. Caddy) is
+`X-Forwarded-For` read, and then the rightmost address that is not itself a
+trusted proxy is used. Unix-socket peers without a trusted proxy all share one
+bucket called `unix`.
+
+CORS is off unless `--cors-origin` is given. Preflights allow `GET`/`POST` and
+the `Content-Type` request header, and `Retry-After` is exposed to JavaScript.
+
+Example public deployment behind a reverse proxy:
+
+```console
+sylphd serve --db gtdb-r232-c200-dbv2.syl2db --meta gtdb-r232.sqlite \
+    --tcp 127.0.0.1:8765 --allow-sequences --max-jobs 4 --max-queue 16 \
+    --rate-limit 10/min \
+    --cors-origin https://mrtomrod.github.io
+```
+
+Caddy (or nginx) terminates TLS and forwards to `127.0.0.1:8765`; add
+`--trusted-proxy 127.0.0.1` so clients get individual rate-limit buckets.
 
 ## Development
 
