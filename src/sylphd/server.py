@@ -776,15 +776,24 @@ def create_app(
             trusted=frozenset(config.trusted_proxies),
         )
     if config.cors_origins:
+        origins = [o for o in config.cors_origins if o != "local"]
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=list(config.cors_origins),
+            allow_origins=origins,
+            allow_origin_regex=(
+                LOCAL_ORIGIN_REGEX if "local" in config.cors_origins else None
+            ),
             allow_methods=["GET", "POST"],
             allow_headers=["Content-Type"],
             expose_headers=["Retry-After"],
             max_age=600,
         )
     return app
+
+
+#: Origins accepted by ``--cors-origin local``: loopback hosts on any port,
+#: for developing the web page against a local server.
+LOCAL_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?"
 
 
 def _socket_identity(path: Path) -> tuple[int, int] | None:

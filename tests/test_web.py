@@ -446,6 +446,25 @@ class TestCORS:
             )
             assert "access-control-allow-origin" not in response.headers
 
+    @pytest.mark.parametrize(
+        ("origin", "allowed"),
+        [
+            ("http://localhost:8000", True),
+            ("http://127.0.0.1:5173", True),
+            ("http://0.0.0.0:8000", True),
+            ("http://[::1]:8000", True),
+            ("http://localhost", True),
+            ("http://localhost.evil.example", False),
+            ("http://127.0.0.1.evil.example:8000", False),
+            ("https://example.org", False),
+        ],
+    )
+    def test_local_origins(self, origin: str, allowed: bool) -> None:
+        app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, cors_origins=("local",)))
+        with TestClient(app) as test_client:
+            response = test_client.get("/health", headers={"origin": origin})
+            assert ("access-control-allow-origin" in response.headers) == allowed
+
 
 def _wait_for_socket(path: Path, timeout: float = 120.0) -> None:
     deadline = time.monotonic() + timeout

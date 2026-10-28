@@ -712,7 +712,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="ORIGIN",
-        help="allowed CORS origin; repeatable (none by default)",
+        help=(
+            "allowed CORS origin; repeatable (none by default). 'local' allows "
+            "localhost, 127.0.0.1, 0.0.0.0 and [::1] on any port"
+        ),
     )
     serve_parser.add_argument(
         "--log-level",

@@ -92,7 +92,8 @@ sylphd serve --db PATH [--meta PATH] [--socket PATH | --tcp HOST:PORT]
   the socket peer is the client identity.
 - `--cors-origin ORIGIN`: allowed CORS origin for a browser front end;
   repeatable, none by default. `GET`/`POST` and the `Content-Type` header are
-  allowed, and `Retry-After` is exposed.
+  allowed, and `Retry-After` is exposed. `--cors-origin local` allows
+  `localhost`, `127.0.0.1`, `0.0.0.0` and `[::1]` on any port, for development.
 - `--hash`: compute the database SHA-256 at startup (off by default, slow on a
   20 GB database). Reported by `/info`.
 - Exactly one worker process runs: sharing the in-memory index is the point.
@@ -478,8 +479,9 @@ requests) that talks to a `sylphd serve --allow-sequences` instance through
 (downloadable as TSV or JSON). The workflow `.github/workflows/pages.yml`
 deploys it to GitHub Pages on pushes to `main` that touch `web/`.
 
-Local development, against a server started with
-`--cors-origin http://localhost:8000`:
+Local development, against a server started with `--cors-origin local`
+(allows any loopback origin, whether you open the page as `localhost`,
+`127.0.0.1` or `0.0.0.0`):
 
 ```console
 python -m http.server 8000 -d web

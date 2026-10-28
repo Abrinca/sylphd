@@ -400,7 +400,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   function showNetworkError() {
     const items = [
       'the server is offline or restarting,',
-      'the server does not allow this page\'s origin (CORS), or',
+      `the server does not allow this page's origin ${location.origin} (CORS; start it with --cors-origin ${location.origin}, or --cors-origin local for development), or`,
       'a proxy closed the connection (very large uploads).',
     ];
     if (location.protocol === 'https:' && API.startsWith('http:')) {
