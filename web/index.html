@@ -4,21 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>sylphd – closest GTDB genomes for an assembly</title>
-  <meta name="description" content="Find the closest GTDB genomes to a bacterial or archaeal assembly using sylph k-mer ANI.">
+  <title>sylphd – identify assemblies and profile reads against GTDB</title>
+  <meta name="description" content="Find the closest GTDB genomes to a bacterial or archaeal assembly, or profile sequencing reads (sketched locally in your browser) with sylph k-mer ANI.">
   <link rel="icon" type="image/svg+xml" href="img/sylphd-icon-tile.svg">
   <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
   <script src="config.js"></script>
   <script src="app.js" defer></script>
+  <script src="taxonomy.js" defer></script>
+  <script src="reads.js" defer></script>
 </head>
 <body>
   <header class="site-header">
     <div class="wrap">
       <div class="header-row">
         <div class="brand">
-          <h1><picture class="logo"><source media="(prefers-color-scheme: dark)" srcset="img/sylphd-icon-tile.svg"><img src="img/sylphd-icon.svg" alt="" width="44" height="44"></picture>sylphd</h1>
-          <p class="tagline">Find the closest <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a> genomes to a bacterial or archaeal assembly using <a href="https://github.com/bluenote-1577/sylph" rel="noopener">sylph</a> k-mer ANI. <a href="./docs/">Docs</a>.</p>
+          <h1><a href="#" id="home-link" title="Back to the start"><picture class="logo"><source media="(prefers-color-scheme: dark)" srcset="img/sylphd-icon-tile.svg"><img src="img/sylphd-icon.svg" alt="" width="44" height="44"></picture>sylphd</a></h1>
+          <p class="tagline">Identify bacterial and archaeal genomes against <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a> with <a href="https://github.com/bluenote-1577/sylph" rel="noopener">sylph</a> k-mer ANI: the closest genomes of an assembly, or a taxonomic profile of your reads. <a href="./docs/">Docs</a>.</p>
         </div>
         <button type="button" id="status" class="status" data-state="checking" title="Click to re-check the server">
           <span class="dot" aria-hidden="true"></span>
@@ -26,21 +28,79 @@
         </button>
       </div>
       <p id="status-detail" class="status-detail" role="status"></p>
-      <p class="privacy">
+      <p class="privacy" data-modes="landing">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1 2 3.5v4.2c0 3.4 2.4 6.1 6 7.3 3.6-1.2 6-3.9 6-7.3V3.5L8 1Zm-1 9.6L4.6 8.2l1-1L7 8.6l3.4-3.4 1 1L7 10.6Z"/></svg>
+        <span><strong>Privacy:</strong> an assembly is sent to the server for sketching; <strong>reads never leave your computer</strong>, they are sketched in your browser and only the sketch is sent. Nothing you send is stored or logged. Only sizes, timings and request outcomes are recorded.</span>
+      </p>
+      <p class="privacy" data-modes="assembly" hidden>
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1 2 3.5v4.2c0 3.4 2.4 6.1 6 7.3 3.6-1.2 6-3.9 6-7.3V3.5L8 1Zm-1 9.6L4.6 8.2l1-1L7 8.6l3.4-3.4 1 1L7 10.6Z"/></svg>
         <span><strong>Privacy:</strong> your sequence is sent to the server for sketching and is not stored or logged. Only sizes, timings and request outcomes are recorded.</span>
+      </p>
+      <p class="privacy" data-modes="reads" hidden>
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1 2 3.5v4.2c0 3.4 2.4 6.1 6 7.3 3.6-1.2 6-3.9 6-7.3V3.5L8 1Zm-1 9.6L4.6 8.2l1-1L7 8.6l3.4-3.4 1 1L7 10.6Z"/></svg>
+        <span><strong>Privacy:</strong> your reads stay on your computer. They are sketched in your browser; only the sketch (k-mer hashes and counts, a few MB) is sent to the server, which does not store or log it. Only sizes, timings and request outcomes are recorded.</span>
       </p>
       <p class="privacy terms-note">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 2.2a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM7 6.5h2V12H7V6.5Z"/></svg>
         <span><strong>Terms:</strong> free for academic use via this web page. For other uses (including programmatic/API access or commercial use), please contact us first: <a href="https://abrinca.com/contact" rel="noopener">https://abrinca.com/contact</a>. See the <a href="terms.html">terms of use</a>.</span>
       </p>
+      <nav class="tabs" id="tabs" aria-label="Mode" data-modes="assembly reads" hidden>
+        <a class="tab" href="#assembly" data-tab="assembly">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><use href="#i-assembly"/></svg>Assembly</a>
+        <a class="tab" href="#reads" data-tab="reads">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><use href="#i-reads"/></svg>Reads<span class="tab-busy" aria-hidden="true" hidden></span></a>
+      </nav>
     </div>
   </header>
+
+  <!-- icons shared by the landing cards and the tabs -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <g id="i-assembly" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+        <path d="M12 3.5a8.5 8.5 0 0 1 7.3 4.2"/><path d="M20.4 11a8.5 8.5 0 0 1-1.6 6.6"/>
+        <path d="M16 20.1a8.5 8.5 0 0 1-8.2-.1"/><path d="M5.2 17.4A8.5 8.5 0 0 1 3.7 10"/>
+        <path d="M6 6.1A8.5 8.5 0 0 1 9.2 4.2" opacity=".55"/>
+        <circle cx="12" cy="12" r="2.4" stroke-width="1.5" opacity=".7"/>
+      </g>
+      <g id="i-reads" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M4 5.5h9"/><path d="M9 9.5h10"/><path d="M3.5 13.5h7"/><path d="M12 13.5h8.5"/>
+        <path d="M6 17.5h6.5"/><path d="M15 17.5h4"/><path d="M5 21h11" opacity=".6"/>
+      </g>
+    </defs>
+  </svg>
 
   <main class="wrap">
     <section id="server-banner" class="server-banner" aria-label="Server status" hidden></section>
 
-    <aside class="teaser" aria-label="Interpreting results">
+    <section id="landing" class="landing" data-modes="landing" aria-labelledby="landing-h">
+      <h2 id="landing-h">What would you like to do?</h2>
+      <div class="mode-cards">
+        <a class="mode-card" href="#assembly" id="card-assembly">
+          <span class="mode-icon"><svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><use href="#i-assembly"/></svg></span>
+          <h3>Identify an assembly</h3>
+          <p class="mode-lead">Find the closest GTDB genomes of a bacterial or archaeal genome and get a species call.</p>
+          <ul class="mode-facts">
+            <li>Paste FASTA or upload a file (gzip is fine), up to <span data-limit-mb>20</span>&nbsp;MB</li>
+            <li>Species call at 95&nbsp;% ANI, with the lineage relation of every hit</li>
+            <li>The sequence is sent to the server, which sketches it</li>
+          </ul>
+          <span class="mode-cta">Identify an assembly <span aria-hidden="true">→</span></span>
+        </a>
+        <a class="mode-card" href="#reads" id="card-reads">
+          <span class="mode-icon"><svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><use href="#i-reads"/></svg></span>
+          <h3>Profile reads</h3>
+          <p class="mode-lead">Find out which bacteria and archaea are in a sequencing run, with their abundances.</p>
+          <ul class="mode-facts">
+            <li>Drop FASTQ or FASTA reads (<code>.gz</code> is fine): short, long or paired</li>
+            <li><strong>Sketched locally in your browser:</strong> reads never leave your computer, only a sketch of a few MB is uploaded</li>
+            <li>Abundance by species up to phylum, GTDB or NCBI taxonomy, downloads</li>
+          </ul>
+          <span class="mode-cta">Profile reads <span aria-hidden="true">→</span></span>
+        </a>
+      </div>
+    </section>
+
+    <aside class="teaser" aria-label="Interpreting results" data-modes="landing assembly">
       <svg class="teaser-icon" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 4.2a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6ZM10.7 10.5h2.6V18h-2.6v-7.5Z"/></svg>
       <div class="teaser-text">
         <strong>What does "same species" mean?</strong>
@@ -49,6 +109,7 @@
       <a class="teaser-link" href="docs/species-and-ani/">Read how to interpret your result →</a>
     </aside>
 
+    <div id="mode-assembly" class="mode" data-modes="assembly" hidden>
     <section class="card" aria-labelledby="query-h">
       <h2 id="query-h">Your assembly</h2>
       <form id="form" novalidate>
@@ -99,6 +160,11 @@
     </section>
 
     <section id="results" class="results" aria-live="polite"></section>
+    </div>
+
+    <div id="mode-reads" class="mode" data-modes="reads" hidden>
+      <!-- built by reads.js -->
+    </div>
   </main>
 
   <section class="wrap cite" aria-labelledby="cite-h">

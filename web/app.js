@@ -70,6 +70,55 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
   const has = (v) => v != null && v !== '' && v !== 'none' && v !== 'na';
 
+  /* ------------------------------------------------------------- modes */
+  // One page, three views selected by the hash: '' (landing), '#assembly', '#reads'.
+  const MODES = { assembly: 'Assembly', reads: 'Reads' };
+  const TITLES = {
+    landing: 'sylphd – identify assemblies and profile reads against GTDB',
+    assembly: 'sylphd – identify an assembly',
+    reads: 'sylphd – profile reads',
+  };
+  let mode = 'landing';
+  const modeListeners = [];
+  const infoListeners = [];
+  const notifyInfo = () => infoListeners.forEach((f) => f(serverInfo));
+
+  function modeFromHash() {
+    const h = location.hash.replace(/^#/, '').toLowerCase();
+    return h in MODES ? h : 'landing';
+  }
+
+  // Show what belongs to the current mode (elements list theirs in data-modes).
+  function applyMode() {
+    for (const n of document.querySelectorAll('[data-modes]')) {
+      n.hidden = !n.dataset.modes.split(' ').includes(mode);
+    }
+    document.body.dataset.mode = mode;
+    for (const a of document.querySelectorAll('.tab')) {
+      if (a.dataset.tab === mode) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    }
+  }
+
+  function route() {
+    const next = modeFromHash();
+    const changed = next !== mode;
+    mode = next;
+    document.title = TITLES[mode];
+    applyMode();
+    renderBanner();
+    updateSubmit();
+    if (changed) {
+      window.scrollTo(0, 0);
+      modeListeners.forEach((f) => f(mode));
+    }
+  }
+  window.addEventListener('hashchange', route);
+  $('home-link').addEventListener('click', (ev) => {
+    ev.preventDefault();
+    if (location.hash) history.pushState(null, '', location.pathname + location.search);
+    route();
+  });
+
   /* -------------------------------------------------------- server info */
   let serverInfo = null;
   let infoTimer = null;
@@ -131,9 +180,12 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     return form;
   }
 
+  // 'noassembly' only concerns the assembly mode; everything else (offline, invalid URL) is shared.
+  const shownProblem = () => (serverProblem === 'noassembly' && mode !== 'assembly' ? null : serverProblem);
+
   function renderBanner() {
-    const key = `${serverProblem}|${API}`;
-    if (!serverProblem) {
+    const key = `${shownProblem()}|${API}`;
+    if (!shownProblem()) {
       ui.banner.hidden = true;
       ui.banner.replaceChildren();
       bannerKey = '';
@@ -142,18 +194,19 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     ui.banner.hidden = false;
     if (key === bannerKey) return; // keep a half-typed URL in the connect form
     bannerKey = key;
+    const problem = shownProblem();
     let cls = 'error';
     let title;
     let body;
     let retry = false;
-    if (serverProblem === 'none') {
+    if (problem === 'none') {
       title = 'Public server offline';
       body = [el('p', null, 'The public sylphd server is offline, so this page cannot search anything right now. ',
         'You can use your own server instead (see ', el('a', { href: './docs/guides/public-server/', text: 'running a public server' }), ').')];
-    } else if (serverProblem === 'invalid') {
+    } else if (problem === 'invalid') {
       title = 'Invalid API URL';
       body = [el('p', null, 'The API base URL ', el('code', { text: API || '(empty)' }), ' is not a valid URL.')];
-    } else if (serverProblem === 'noassembly') {
+    } else if (problem === 'noassembly') {
       cls = 'warn';
       title = 'This server does not accept assemblies';
       body = [el('p', null, 'The server at ', el('code', { text: API }), ' is online, but its ',
@@ -200,6 +253,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       ui.statusDetail.replaceChildren('The public server is offline. ',
         'To use your own server, add ', el('code', { text: '?api=https://…' }), ' to the address.');
       setProblem('none');
+      notifyInfo();
       return;
     }
     setStatus('checking', 'Checking server…');
@@ -212,6 +266,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       setStatus('offline', 'No valid API URL');
       ui.statusDetail.replaceChildren('The API base URL ', el('code', { text: API || '(empty)' }), ' is not a valid URL.', ...(apiOverride ? [' (', resetLink(), ')'] : []));
       setProblem('invalid');
+      notifyInfo();
       return;
     }
     try {
@@ -223,13 +278,13 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       const meta = info.metadata || {};
       setStatus('online', 'Server online');
       const lim = info.limits || {};
-      const fact = (label, value, title) => el('span', { class: 'fact', title: title || null },
+      const fact = (label, value, title, modes) => el('span', { class: 'fact', title: title || null, 'data-modes': modes || null },
         el('span', { class: 'fact-label', text: label }), el('span', { class: 'fact-value', text: value }));
       const facts = [];
       facts.push(fact('Database', meta.release ? `GTDB r${meta.release}` : (db.name || '?'), db.name || null));
       if (isNum(db.genomes)) facts.push(fact('Genomes', fmtInt(db.genomes)));
       if (isNum(db.c) && isNum(db.k)) facts.push(fact('Sketch', `c=${db.c} · k=${db.k}`, 'sylph subsampling rate c and k-mer size k'));
-      if (isNum(lim.max_sequence_mb)) facts.push(fact('Upload', `≤ ${lim.max_sequence_mb} MB`, 'maximum assembly size'));
+      if (isNum(lim.max_sequence_mb)) facts.push(fact('Upload', `≤ ${lim.max_sequence_mb} MB`, 'maximum assembly size', 'landing assembly'));
       if (lim.rate_limit && isNum(lim.rate_limit.count)) {
         const w = Math.round(lim.rate_limit.window_seconds);
         facts.push(fact('Rate', `${lim.rate_limit.count} / ${w === 60 ? 'min' : `${w} s`}`, 'requests per client'));
@@ -244,14 +299,18 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
         frag.push(' · ', el('span', { class: 'warn', text: 'this server does not accept assemblies (/assembly disabled)' }));
       }
       ui.statusDetail.replaceChildren(...frag);
+      applyMode(); // facts carry data-modes
       infoTimer = setTimeout(loadInfo, 60000);
+      for (const s of document.querySelectorAll('[data-limit-mb]')) s.textContent = String(limitMb());
       setProblem(noAssembly ? 'noassembly' : null);
       refreshInput();
+      notifyInfo();
     } catch (e) {
       serverInfo = null;
       setStatus('offline', 'Server offline');
       ui.statusDetail.replaceChildren('Cannot reach ', el('code', { text: API }), ...(apiOverride ? [' (', resetLink(), ')'] : ['.']));
       setProblem('offline');
+      notifyInfo();
       const rb = $('retry-now');
       if (rb) { rb.disabled = false; rb.textContent = 'Retry now'; }
       infoTimer = setTimeout(loadInfo, 20000);
@@ -334,7 +393,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     const now = Date.now();
     const cooling = cooldownUntil > now;
     const ready = input.size > 0 && input.size <= limitBytes() && validateOptions().ok;
-    const problem = API ? serverProblem : 'none';
+    const problem = API ? shownProblem() : 'none';
     ui.submit.disabled = busy || cooling || !ready || !!problem;
     ui.submitHint.textContent = problem ? PROBLEM_HINT[problem] : '';
     ui.submitHint.hidden = !problem;
@@ -985,7 +1044,20 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     download(`${baseName()}.tsv`, rows.join('\n') + '\n', 'text/tab-separated-values');
   }
 
+  /* ----------------------------------------------- shared with the other scripts */
+  window.Sylphd = {
+    el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtSecs, fmtDur, isNum, has, notice, download,
+    accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal,
+    api: API, apiOverride,
+    info: () => serverInfo,
+    problem: () => (API ? serverProblem : 'none'),
+    mode: () => mode,
+    onInfo: (f) => infoListeners.push(f),
+    onMode: (f) => modeListeners.push(f),
+  };
+
   /* -------------------------------------------------------------- init */
+  route();
   refreshInput();
   loadInfo();
 })();
