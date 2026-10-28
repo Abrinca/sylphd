@@ -262,5 +262,9 @@ next to the **Assembly** mode.
 * `c`/`k` come from `/info`; paired detection, memory guard (warn at 1.5 GB, abort at 3.6 GB of
   wasm memory), cancellation, `429`/`503`/network retry with the sketch kept in memory and the
   progress UI are in `web/reads.js`.
+* The Assembly tab uses the same pipeline (`web/sketching.js`): single-end sketching of a pasted
+  FASTA or a file, plus a G/C counter in the sketch worker (`gc: true`) for the GC% of the summary,
+  and sends `application/vnd.sylph.sketch` to `POST /assembly`. Verified identical to the server
+  sketching the same FASTA (hits, assignment, closest, records, length, GC).
 * Still open: Safari, `wasm-opt` in CI, keeping the equality tests (`cargo test`, needs the sylphd
   venv) in CI, a time/size warning for files over a few GB.

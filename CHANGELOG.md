@@ -16,6 +16,24 @@ All notable changes to `sylphd` are documented here. The format follows
   downloads (TSV, JSON, `.sylphmpa`, `.sylsp`). See *Profiling reads in the browser* in the docs.
 - The Pages workflow and `scripts/preview-pages.sh` build the WebAssembly sketcher into
   `web/wasm/` (not committed).
+- **Assemblies are sketched locally too.** `POST /assembly` accepts a precomputed sketch
+  (`Content-Type: application/vnd.sylph.sketch`, the bytes of a `.sylsp`), validated like
+  `/profile` sketches and bounded by `--max-upload-mb`, with optional informational `records`,
+  `length` and `gc` query parameters. It always works, so a server started without
+  `--allow-sequences` can never receive a sequence. `GET /info` reports `assembly.sketch` and
+  `assembly.sequences`. The response gains `query.input` (`sketch` or `sequence`).
+- **Web page, Assembly mode**: sketches in the browser (any size, no 20 MB limit) and sends only the
+  sketch, with a *sketched locally* badge on the result; falls back to the raw upload for servers
+  without sketch support and browsers that cannot run the sketcher.
+- **`sylphd assembly`** sketches locally by default when the server takes sketches
+  (`--local-sketch` / `--no-local-sketch`).
+
+### Changed
+
+- `--allow-sequences` now only gates *raw sequence* uploads to `/assembly`; the endpoint itself is
+  always served (`/info` lists `/assembly` in `endpoints`). Without the flag a raw upload is still a
+  404, now with an explanatory message. `--max-sequence-mb` applies to raw sequences only.
+- The rate limit covers `/assembly` on every server.
 
 ## [0.1.1] - 2026-10-28
 

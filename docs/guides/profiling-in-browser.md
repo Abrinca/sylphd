@@ -1,9 +1,10 @@
 # Profiling reads in the browser
 
-The [web app](https://abrinca.github.io/sylphd/#reads) has two equal modes: **Assembly** (see
-[Identifying an assembly](assembly.md)) and **Reads**. In *Reads* mode you drop sequencing reads on
-the page and get a taxonomic profile against GTDB, with nothing but a small sketch leaving your
-computer.
+The [web app](https://abrinca.github.io/sylphd/#reads) has two equal modes, and both sketch in your
+browser: **Assembly** finds the closest genomes of an assembly (see
+[Identifying an assembly](assembly.md#sketching-in-the-browser)) and **Reads** gives a taxonomic
+profile of sequencing reads. In *Reads* mode you drop the reads on the page and nothing but a small
+sketch leaves your computer.
 
 !!! note "Reads never leave your computer"
     The reads are read, decompressed and sketched **inside your browser** (WebAssembly in Web
@@ -72,6 +73,19 @@ of the k-mer entries.
   HTTP headers.
 - The sketcher uses sylph's seeding as it behaves on x86-64 with AVX2, like the pysylph the server
   runs; sketches from other CPUs can differ by up to three k-mers per read.
+
+## The Assembly mode sketches the same way { #assembly-mode }
+
+The Assembly tab uses the same WebAssembly sketcher: a pasted FASTA goes straight to it, a file
+(plain or `.gz`, any size, up to a 2 GB sanity cap) through the same decompress and sketch workers.
+The page counts the records, length and GC content while sketching, sends only the sketch to
+[`POST /assembly`](../reference/http-api.md#post-assembly) (`Content-Type:
+application/vnd.sylph.sketch`) and marks the result *sketched locally*. A 2.8 Mb assembly takes
+about half a second, a 120 Mb pool of corrected reads about 2.5 s including the search. Results are
+identical to uploading the sequence: the page checks `GET /info` for `assembly.sketch`, and falls
+back to the raw upload (limited by `--max-sequence-mb`, 20 MB by default) only for servers that do not
+take sketches yet, or when the browser cannot run the sketcher and the server allows sequences.
+If the server accepts both, a checkbox *Sketch in my browser* (on by default) lets you choose.
 
 ## Building the sketcher
 

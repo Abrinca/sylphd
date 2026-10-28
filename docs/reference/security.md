@@ -42,13 +42,15 @@ sylph changes.
 |---|---|---|
 | request body (`--max-upload-mb`) | 512 MB | rejected with `413`, also from the declared `Content-Length` |
 | sketches per request | 4096 | `413` above it |
-| `/assembly` body (`--max-sequence-mb`) | 20 MB | before decompression |
+| raw-sequence `/assembly` body (`--max-sequence-mb`) | 20 MB | before decompression; sketch bodies use `--max-upload-mb` |
 | decompressed `/assembly` body | 5 × `--max-sequence-mb` | bounded gunzip, `413` above it |
 | concurrent jobs (`--max-jobs`) | 2 | other requests wait |
 | waiting requests (`--max-queue`) | unlimited | `503` with `Retry-After: 1` when set and full |
 | request rate (`--rate-limit`) | off | `429` with `Retry-After`; checked before the body is read |
 
-Sequences uploaded to `/assembly` are checked (FASTA or FASTQ, only `ACGTN`) and error messages say
+Sketches uploaded to `/assembly` go through the same structural header check as those of `/profile`
+(see above). Without `--allow-sequences` a server never receives sequence data at all. Raw sequences
+uploaded to `/assembly` are checked (FASTA or FASTQ, only `ACGTN`) and error messages say
 where a problem is, never what the sequence or its headers contain. Uploads are never logged.
 
 ## The rate limit trusts only what you tell it to

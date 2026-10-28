@@ -22,11 +22,12 @@ self.onmessage = async ({ data }) => {
   }
 };
 
-async function run({ module, ports, paired, interleaved = false, c, k, deduplicate, name }) {
+async function run({ module, ports, paired, interleaved = false, c, k, deduplicate, name, gc = false }) {
   const t0 = performance.now();
   const wasm = await init({ module_or_path: module });
   const sketcher = new WasmSketcher(c, k, deduplicate);
 
+  const gcCounter = gc && !paired ? makeGcCounter() : null;
   const queues = ports.map(() => []);
   const crcs = ports.map(() => new WasmCrc());
   const stats = { sketchMs: 0, crcMs: 0, idleMs: 0, chunks: 0, maxQueued: 0, decompressedBytes: 0 };
@@ -55,6 +56,7 @@ async function run({ module, ports, paired, interleaved = false, c, k, deduplica
     const bytes = new Uint8Array(item.buf);
     let t = performance.now();
     sketcher[method](bytes);
+    if (gcCounter) gcCounter.scan(bytes);
     stats.sketchMs += performance.now() - t;
     if (item.trailers) {
       // gzip CRC32 check, deferred from the decompress worker (see WasmGunzip 'deferred')
@@ -107,6 +109,7 @@ async function run({ module, ports, paired, interleaved = false, c, k, deduplica
       name,
       paired,
       interleaved,
+      gcBases: gcCounter ? gcCounter.gc() : null,
       sketchBytes: sketch.byteLength,
       reads: sketcher.reads(),
       bases: sketcher.bases(),
@@ -133,4 +136,33 @@ async function run({ module, ports, paired, interleaved = false, c, k, deduplica
     };
   });
   self.postMessage({ type: 'ready' });
+}
+
+// Counts G/C (either case) in the sequence lines of FASTA (any line not starting with '>') or 4-line
+// FASTQ (line 2 of every record), for the GC percentage of an assembly. Chunks split anywhere.
+function makeGcCounter() {
+  const GC = new Uint8Array(256);
+  for (const ch of 'GCgc') GC[ch.charCodeAt(0)] = 1;
+  let fmt = 0; // 1 = FASTA, 2 = FASTQ, 0 = not decided yet
+  let atStart = true;
+  let skip = false;
+  let lineNo = 0;
+  let count = 0;
+  return {
+    gc: () => count,
+    scan(bytes) {
+      for (let i = 0; i < bytes.length; i++) {
+        const b = bytes[i];
+        if (b === 10) { atStart = true; lineNo++; continue; }
+        if (atStart) {
+          if (b === 13 || b === 32) continue;
+          if (fmt === 0) fmt = b === 62 ? 1 : b === 64 ? 2 : 0;
+          atStart = false;
+          skip = fmt === 1 ? b === 62 : fmt === 2 ? lineNo % 4 !== 1 : true;
+          if (skip) continue;
+        } else if (skip) continue;
+        count += GC[b];
+      }
+    },
+  };
 }

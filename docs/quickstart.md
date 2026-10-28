@@ -70,12 +70,14 @@ TSV with sylph's columns followed by `accession` and the metadata columns. More 
 
 ## Identify an assembly
 
-Start the server with `--allow-sequences`, which enables the endpoint behind `sylphd assembly` and
-the [web app](https://abrinca.github.io/sylphd/):
+The endpoint behind `sylphd assembly` and the [web app](https://abrinca.github.io/sylphd/) takes
+the sketch of an assembly, which both make locally, so a plain server is enough:
 
 ```bash
-sylphd serve --db data/gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite --allow-sequences
+sylphd serve --db data/gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite
 ```
+
+(`--allow-sequences` is only needed if raw FASTA uploads from older clients should work too.)
 
 ```bash
 sylphd assembly assembly.fasta --top 5

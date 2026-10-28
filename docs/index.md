@@ -6,8 +6,8 @@ resident. Clients sketch their samples locally and send only the sketches, then 
 taxonomic profiles back as TSV or JSON, joined with GTDB metadata.
 
 A [web app](https://abrinca.github.io/sylphd/) built on the same server needs no install and has two
-modes: it finds the closest GTDB genomes of a pasted assembly, and it profiles sequencing reads that
-are sketched [in your browser](guides/profiling-in-browser.md), so the reads never leave your computer.
+modes: it finds the closest GTDB genomes of an assembly, and it profiles sequencing reads. Both are
+sketched [in your browser](guides/profiling-in-browser.md), so the sequences never leave your computer.
 
 ## Why a server
 
@@ -27,12 +27,13 @@ flowchart LR
     S -->|"JSON rows"| T["TSV, JSON, .sylphmpa<br/>(written by the client)"]
     DB[("sylph database<br/>.syl2db")] --> S
     MD[("metadata<br/>SQLite")] --> S
-    W["web app,<br/>sylphd assembly"] -.->|"raw FASTA"| S
-    B["web app, reads<br/>(sketched in the browser)"] -->|"sketch"| S
+    B["web app<br/>(sketched in the browser)"] -->|"sketch"| S
+    W["old clients, curl"] -.->|"raw FASTA<br/>(--allow-sequences)"| S
 ```
 
-The `assembly` path is the exception: it sends raw sequences because the server does the sketching.
-It is opt-in (`--allow-sequences`) and exists for the web app.
+Assemblies are sketched locally too (`sylphd assembly`, and the web app in the browser), so a server
+started without `--allow-sequences` never receives a sequence. The flag only adds support for raw
+FASTA uploads by clients that cannot sketch.
 
 ## What it does
 
