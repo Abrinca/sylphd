@@ -198,9 +198,9 @@ site_conf=$(mktemp)
     echo "# Managed by sylphd setup-server.sh from $site_env."
     echo "# Edit site.env and re-run setup-server.sh instead of this file."
     echo "[Service]"
-    [[ -n ${SYLPH_DB:-} ]] && echo "Environment=SYLPH_DB=$SYLPH_DB"
-    [[ -n ${SYLPH_META:-} ]] && echo "Environment=SYLPH_META=$SYLPH_META"
-    [[ -n ${SYLPH_SERVE_ARGS:-} ]] && echo "Environment=SYLPH_SERVE_ARGS=$SYLPH_SERVE_ARGS"
+    [[ -n ${SYLPH_DB:-} ]] && echo "Environment=\"SYLPH_DB=$SYLPH_DB\""
+    [[ -n ${SYLPH_META:-} ]] && echo "Environment=\"SYLPH_META=$SYLPH_META\""
+    [[ -n ${SYLPH_SERVE_ARGS:-} ]] && echo "Environment=\"SYLPH_SERVE_ARGS=$SYLPH_SERVE_ARGS\""
     true
 } >"$site_conf"
 if ! grep -q '^Environment=' "$site_conf"; then
@@ -274,8 +274,8 @@ caddy_conf=$(mktemp)
 {
     echo "# Managed by sylphd setup-server.sh from $site_env."
     echo "[Service]"
-    echo "Environment=SYLPHD_DOMAIN=$DOMAIN"
-    echo "Environment=SYLPH_HTTP_MAX=${SYLPH_HTTP_MAX:-64MB}"
+    echo "Environment=\"SYLPHD_DOMAIN=$DOMAIN\""
+    echo "Environment=\"SYLPH_HTTP_MAX=${SYLPH_HTTP_MAX:-64MB}\""
 } >"$caddy_conf"
 
 if [[ -f $HERE/Caddyfile ]]; then

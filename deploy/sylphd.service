@@ -16,7 +16,7 @@
 #
 #   /etc/systemd/system/sylphd.service.d/10-site.conf
 #   [Service]
-#   Environment=SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 4 ...
+#   Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 4 ..."  (quotes required: Environment= splits on spaces)
 #
 # Values are split on whitespace, so no quoting inside them.
 [Unit]
@@ -49,11 +49,11 @@ Environment=SYLPH_META=meta-r232-reps.sqlite
 # Drop any of them, raise the limits, or narrow CORS to your own page.
 # `--cors-origin *` is written unquoted: systemd splits the value on
 # whitespace and passes the asterisk through literally.
-Environment=SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin * --terms-url https://example.org/terms
+Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin * --terms-url https://example.org/terms"
 
 ExecStart=/srv/sylphd/current/bin/sylphd serve \
-    --db /srv/sylphd/db/$SYLPH_DB \
-    --meta /srv/sylphd/db/$SYLPH_META \
+    --db /srv/sylphd/db/${SYLPH_DB} \
+    --meta /srv/sylphd/db/${SYLPH_META} \
     --socket /srv/sylphd/run/sylphd.sock \
     $SYLPH_SERVE_ARGS
 
