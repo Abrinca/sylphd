@@ -213,21 +213,32 @@ verified and reused unless `--force` is given. `--base-url` points at a mirror.
 ### `sylphd setup`
 
 ```
-sylphd setup -m FILE... -o PATH [--release N] [--force] [-q]
+sylphd setup -m FILE... -o PATH [--release N] [--reps-only] [--force] [-q]
 ```
 
 Streams GTDB metadata TSV files (gzip or plain) into a SQLite file:
 
-- table `metadata`, primary key `accession` (the `RS_`/`GB_` prefix is stripped,
-  so `RS_GCF_000005845.2` becomes `GCF_000005845.2`);
-- table `info` with the source files, release, build date and `sylphd` version;
+- view `metadata` with the columns below, primary key `accession` (the
+  `RS_`/`GB_` prefix is stripped, so `RS_GCF_000005845.2` becomes
+  `GCF_000005845.2`);
+- table `info` with the source files, release, build date, `sylphd` version,
+  format version and whether the file is representatives-only;
 - `none`, `na` and empty values become `NULL`;
 - booleans `t`/`f` become integers `1`/`0`;
 - numeric columns are `INTEGER`/`REAL`.
 
-All ~900k GTDB genomes are stored, not only species representatives. When two
-input files contain the same accession, the later row wins. Re-run with
-`--force` to replace an existing file.
+The repetitive text columns (both taxonomies, organism names, assembly
+metadata, …) are dictionary-encoded into `dict_<column>` tables; the base table
+`metadata_data` stores ids and is keyed by `accession` `WITHOUT ROWID`, and the
+`metadata` view joins the two back to the original columns and values. That is
+~200 MB for the full release instead of ~630 MB, with lookups still in the low
+milliseconds. Files from older `sylphd` versions (a plain `metadata` table)
+remain readable.
+
+All ~900k GTDB genomes are stored by default. `--reps-only` stores only rows
+with `gtdb_representative` true (~200k, ~80 MB); lookups of other accessions
+then find no metadata. When two input files contain the same accession, the
+later row wins. Re-run with `--force` to replace an existing file.
 
 Columns: `gtdb_taxonomy`, `gtdb_representative`,
 `gtdb_genome_representative`, `gtdb_type_species_of_genus`,

@@ -52,7 +52,7 @@ Each result row combines:
 ## Metadata DB
 
 - `sylphd download [--release 232]`: fetches `bac120_metadata_r232.tsv.gz` and `ar53_metadata_r232.tsv.gz` from `data.gtdb.ecogenomic.org` and checks them against `MD5SUM.txt`.
-- `sylphd setup`: builds a SQLite file (table `metadata`, primary key `accession`) from those files. It stores all ~900k genomes (not only reps). GTDB's `none`/`na` become NULL.
+- `sylphd setup`: builds a SQLite file (view `metadata` over a `WITHOUT ROWID` base table keyed by `accession`; repetitive text is dictionary-encoded in `dict_*` tables) from those files. It stores all ~900k genomes unless `--reps-only` is given. GTDB's `none`/`na` become NULL.
 - Accession key: strip `RS_`/`GB_` from GTDB accessions. Sylph genome names (`.../GCA_964372435.1_genomic.fna.gz`) map to their file name without `_genomic.fna.gz`.
 - Columns:
   - GTDB: `gtdb_taxonomy`, `gtdb_representative`, `gtdb_genome_representative`, `gtdb_type_species_of_genus`, `gtdb_type_designation_ncbi_taxa`
