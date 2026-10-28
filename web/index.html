@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>sylphd – closest GTDB genomes for an assembly</title>
+  <meta name="description" content="Find the closest GTDB genomes to a bacterial or archaeal assembly using sylph k-mer ANI.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%232563eb'/%3E%3Cpath d='M6 20a10 10 0 0 1 20 0' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <div class="header-row">
+        <div class="brand">
+          <h1>sylphd</h1>
+          <p class="tagline">Find the closest <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a> genomes to a bacterial or archaeal assembly using <a href="https://github.com/bluenote-1577/sylph" rel="noopener">sylph</a> k-mer ANI.</p>
+        </div>
+        <button type="button" id="status" class="status" data-state="checking" title="Click to re-check the server">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="status-text">Checking server…</span>
+        </button>
+      </div>
+      <p id="status-detail" class="status-detail" role="status"></p>
+      <p class="privacy">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1 2 3.5v4.2c0 3.4 2.4 6.1 6 7.3 3.6-1.2 6-3.9 6-7.3V3.5L8 1Zm-1 9.6L4.6 8.2l1-1L7 8.6l3.4-3.4 1 1L7 10.6Z"/></svg>
+        <span><strong>Privacy:</strong> your sequence is sent to the server for sketching and is not stored or logged. Only sizes, timings and request outcomes are recorded.</span>
+      </p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card" aria-labelledby="query-h">
+      <h2 id="query-h">Your assembly</h2>
+      <form id="form" novalidate>
+        <div id="drop" class="drop">
+          <label for="fasta" class="sr-only">FASTA sequence</label>
+          <textarea id="fasta" spellcheck="false" autocomplete="off" autocapitalize="off"
+            placeholder="Paste FASTA here (&gt;contig1 …), or drop a .fasta / .fa / .fna / .gz file"></textarea>
+          <div id="file-chip" class="file-chip" hidden>
+            <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M3 1h6l4 4v10H3V1Zm6 1.5V5h2.5L9 2.5Z"/></svg>
+            <span class="file-name" id="file-name"></span>
+            <span class="file-meta" id="file-meta"></span>
+            <button type="button" id="file-remove" class="link-btn" aria-label="Remove file">remove</button>
+          </div>
+          <div class="drop-overlay" aria-hidden="true">Drop file to load</div>
+        </div>
+
+        <div class="toolbar">
+          <button type="button" id="pick" class="btn">Choose file…</button>
+          <input type="file" id="file" class="sr-only" tabindex="-1"
+            accept=".fasta,.fa,.fna,.fas,.fastq,.fq,.gz,.txt,text/plain,application/gzip">
+          <button type="button" id="example" class="btn">Load example</button>
+          <button type="button" id="clear" class="btn btn-ghost">Clear</button>
+          <span id="size" class="size" aria-live="polite"></span>
+        </div>
+        <p id="input-msg" class="input-msg" role="alert" hidden></p>
+
+        <div class="options">
+          <label class="field">
+            <span>Top hits</span>
+            <input type="number" id="top" min="1" max="50" step="1" value="10" inputmode="numeric">
+          </label>
+          <label class="field">
+            <span>Minimum ANI (%)</span>
+            <input type="number" id="min-ani" min="70" max="100" step="0.1" value="80" inputmode="decimal">
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="submit" id="submit" class="btn btn-primary" disabled>Find closest genomes</button>
+          <button type="button" id="cancel" class="btn" hidden>Cancel</button>
+          <span id="progress" class="progress" role="status" aria-live="polite" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="progress-text"></span>
+          </span>
+        </div>
+      </form>
+    </section>
+
+    <section id="results" class="results" aria-live="polite"></section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>
+        <a href="https://github.com/MrTomRod/sylphd" rel="noopener">sylphd on GitHub</a> ·
+        k-mer containment ANI by
+        <a href="https://github.com/bluenote-1577/sylph" rel="noopener">sylph</a> (Jim Shaw &amp; Yun William Yu) ·
+        Python bindings by <a href="https://github.com/althonos/pysylph" rel="noopener">pysylph</a> (Martin Larralde) ·
+        taxonomy and genome metadata from <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a>.
+      </p>
+      <p class="muted">Example genome: <i>Mycoplasmoides genitalium</i> G37, NCBI RefSeq
+        <a href="https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_000027325.1/" rel="noopener">GCF_000027325.1</a>.</p>
+    </div>
+  </footer>
+</body>
+</html>
