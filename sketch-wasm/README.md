@@ -2,7 +2,8 @@
 
 Feasibility spike: sketch FASTQ/FASTA(.gz) reads **locally in the browser**
 (WebAssembly, in Web Workers) and send only the sketch to the existing sylphd
-`POST /profile` endpoint. Nothing here touches `web/` (the production page).
+`POST /profile` endpoint. The spike is integrated into the production page (`web/`, "Reads" mode, see
+below); `demo/` stays as the bench and test page.
 
 **Result: it works.** The sketches are byte-identical to pysylph's (after
 sorting the k-mer entries), a 1.55 GB ONT file is sketched in Chromium in **9.7 s** with a
@@ -247,11 +248,19 @@ chunk into wasm memory (1.5 GB, ~0.1-0.2 s); below the 0.5 s threshold.
 * Not done: Safari, `wasm-opt`, HTTP error UX, cancellation, retry/rate-limit handling, a memory
   guard, re-measuring peak RSS for the pipeline.
 
-## Next steps for integrating into `web/`
+## Integration into `web/`
 
-1. Build `sylph_sketch_bg.wasm` + glue in CI and ship them next to `web/app.js` (about 200 KB, cacheable); copy the `decompress-worker.js` / `sketch-worker.js` pair and the credit protocol from `index.html` (no fallback paths needed).
-2. Read `c`/`k` from `/info` (the demo already does) and refuse files when `max_upload_mb` would be exceeded (sketch size is roughly 12 bytes x k-mers).
-3. Add a "sketch in your browser" path next to the existing assembly upload: pick files (R1/R2 or interleaved), show progress, POST to `/profile`, reuse the existing result renderer.
-4. Decide on paired UX (name-based R1/R2 detection as in `sylphd.sketching.sample_name_from_path`) and the memory guard (`kmers()` limit, message).
-5. Pin the sylph/pysylph revision in the crate docs and keep the equality tests in CI (`cargo test`, needs the sylphd venv) so a pysylph bump that changes seeding or the bincode layout is noticed.
-6. Optionally: a size/time warning for files > a few GB, `wasm-opt`, and dropping `simd128` if the browser baseline matters (gain is ~2-4 %).
+Done on branch `wasm-sketch`: the web page has a **Reads** mode (`web/reads.js`, `web/taxonomy.js`)
+next to the **Assembly** mode.
+
+* Build: `./build.sh ../web/wasm` writes the module and glue into `web/wasm/` (gitignored).
+  `scripts/preview-pages.sh` and `.github/workflows/pages.yml` run it (Rust toolchain and
+  `wasm-bindgen-cli` pinned there; the CLI is the prebuilt release binary, checked by sha256).
+* The workers are copies of `demo/decompress-worker.js` / `demo/sketch-worker.js` in `web/`
+  (module path `./wasm/`; the sketch worker additionally supports interleaved input). Keep them in
+  sync when the protocol changes.
+* `c`/`k` come from `/info`; paired detection, memory guard (warn at 1.5 GB, abort at 3.6 GB of
+  wasm memory), cancellation, `429`/`503`/network retry with the sketch kept in memory and the
+  progress UI are in `web/reads.js`.
+* Still open: Safari, `wasm-opt` in CI, keeping the equality tests (`cargo test`, needs the sylphd
+  venv) in CI, a time/size warning for files over a few GB.
