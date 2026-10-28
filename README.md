@@ -30,7 +30,7 @@ uv run sylphd --help
 or, in another project:
 
 ```console
-uv add "sylphd @ git+https://github.com/MrTomRod/sylphd"
+uv add "sylphd @ git+https://github.com/Abrinca/sylphd"
 ```
 
 ## Quick start
@@ -463,7 +463,7 @@ Example public deployment behind a reverse proxy:
 sylphd serve --db gtdb-r232-c200-dbv2.syl2db --meta gtdb-r232.sqlite \
     --tcp 127.0.0.1:8765 --allow-sequences --max-jobs 4 --max-queue 16 \
     --rate-limit 10/min \
-    --cors-origin https://mrtomrod.github.io
+    --cors-origin https://abrinca.github.io
 ```
 
 Caddy (or nginx) terminates TLS and forwards to `127.0.0.1:8765`; add

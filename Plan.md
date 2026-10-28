@@ -1,6 +1,6 @@
 # Plan: sylph server and client (`sylphd`)
 
-A small standalone, public repo and Python package (`sylphd`, GitHub `MrTomRod/sylphd`). A long-running server keeps one sylph database loaded in memory. Clients sketch their samples locally, send the sketches, and get rich result rows back.
+A small standalone, public repo and Python package (`sylphd`, GitHub `Abrinca/sylphd`). A long-running server keeps one sylph database loaded in memory. Clients sketch their samples locally, send the sketches, and get rich result rows back.
 
 Managed by uv. Python >= 3.14, tested on 3.14 only.
 
@@ -64,7 +64,7 @@ Each result row combines:
 ## Phases
 
 1. pysylph: `SampleSketch.to_bytes()/from_bytes()` on `multi-db`, with tests; push.
-2. sylphd: package skeleton, `download`, `setup`, server, client, CLI, tests; push to `MrTomRod/sylphd` (public).
+2. sylphd: package skeleton, `download`, `setup`, server, client, CLI, tests; push to `Abrinca/sylphd` (public).
 3. Manual end-to-end run against GTDB r232 c200.
 4. Stretch: `merge` (sum taxonomic abundance per GTDB or NCBI rank).
 5. Web front end: a public GitHub Pages page where a visitor pastes one
@@ -82,6 +82,6 @@ Each result row combines:
      off by default and `/assembly` is a 404 without `--allow-sequences`.
    - Reverse proxy (Caddy) terminates TLS on a small host; a scheduled job
      keeps the GTDB database and metadata current.
-   - The static page (MrTomRod.github.io) calls the API directly from the
+   - The static page (abrinca.github.io) calls the API directly from the
      browser with `fetch`, so the server needs the CORS origin and a rate
      limit per client IP.

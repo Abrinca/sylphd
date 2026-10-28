@@ -405,7 +405,7 @@ class TestQueueLimit:
 
 class TestCORS:
     def test_preflight_and_response_headers(self) -> None:
-        origin = "https://mrtomrod.github.io"
+        origin = "https://abrinca.github.io"
         app = create_app(
             ServerConfig(db_path=ECOLI_TWO_STAGE, cors_origins=(origin,))
         )
