@@ -1,0 +1,74 @@
+# sylphd.service — the public sylphd server on the production host.
+#
+# Installed to /etc/systemd/system/sylphd.service by setup-server.sh.
+# /srv/sylphd/current is a symlink switched by sylphd-update; the unit always
+# starts whatever release it points at.
+#
+# The Unix socket is created with mode 0660 (sylphd:sylphd) by sylphd itself;
+# Caddy runs as user caddy, which is a member of group sylphd, and proxies to
+# unix//srv/sylphd/run/sylphd.sock.
+[Unit]
+Description=sylphd — long-running sylph server
+Documentation=https://abrinca.github.io/sylphd/docs/guides/public-server.html
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sylphd
+Group=sylphd
+WorkingDirectory=/srv/sylphd
+Environment=HOME=/srv/sylphd
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/srv/sylphd/current/bin:/usr/local/bin:/usr/bin:/bin
+
+ExecStart=/srv/sylphd/current/bin/sylphd serve \
+    --db /srv/sylphd/db/gtdb-r232-c200-dbv2.syl2db \
+    --meta /srv/sylphd/db/meta-r232-reps.sqlite \
+    --socket /srv/sylphd/run/sylphd.sock \
+    --allow-sequences \
+    --max-jobs 2 \
+    --max-queue 16 \
+    --rate-limit 10/min \
+    --trusted-proxy unix \
+    --cors-origin '*' \
+    --terms-url https://abrinca.github.io/sylphd/terms.html
+
+# Loading the 20 GB database takes a few seconds; uvicorn then serves.
+TimeoutStartSec=180
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+
+# The database (~2–4 GB resident, plus page cache) is the main user of memory;
+# no MemoryMax on purpose, the kernel counts page cache separately and a hard
+# cap would only produce OOM kills under profiling load.
+OOMScoreAdjust=-200
+
+# Hardening.  The server only needs its own tree (read) and run/ (socket).
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+ReadWritePaths=/srv/sylphd/run
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

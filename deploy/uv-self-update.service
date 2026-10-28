@@ -1,0 +1,10 @@
+[Unit]
+Description=Update uv (standalone install in /usr/local/bin)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/uv self update
+# uv replaces itself via a temp file, which would keep a tmp SELinux label
+ExecStartPost=/usr/sbin/restorecon /usr/local/bin/uv /usr/local/bin/uvx

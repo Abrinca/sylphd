@@ -1,0 +1,22 @@
+module sylphd_httpd_uds 1.0;
+
+require {
+    type httpd_t;
+    type httpd_var_run_t;
+    type unconfined_service_t;
+    class unix_stream_socket connectto;
+}
+
+# Caddy runs confined as httpd_t (its binary is httpd_exec_t) and proxies to
+# sylphd's Unix socket /srv/sylphd/run/sylphd.sock.
+#
+# The socket file is labelled httpd_var_run_t (setup-server.sh sets that
+# fcontext), which is the type httpd_t may open and write.  An AF_UNIX socket,
+# however, keeps the *creating process's* context as its peer SID: sylphd runs
+# as unconfined_service_t, so the connectto check is against that type, not the
+# file label.  Confining sylphd in its own domain just to rename the socket SID
+# would mean re-creating unconfined_service_t under a new name, so instead we
+# grant the two connectto permissions Caddy needs.  Both are limited to the
+# proxy direction (only httpd_t gains anything) and to Unix sockets.
+allow httpd_t httpd_var_run_t:unix_stream_socket connectto;
+allow httpd_t unconfined_service_t:unix_stream_socket connectto;
