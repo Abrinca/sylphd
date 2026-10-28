@@ -8,9 +8,11 @@ version = "0.1.0"
 description = "A long-running sylph server with a sketching client, for shared database and profiling."
 readme = "README.md"
 requires-python = ">=3.14"
-license = { file = "LICENSE" }
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [
   { name = "Thomas Roder" },
+  { name = "Abrinca Genomics" },
 ]
 keywords = ["bioinformatics", "genomics", "ani", "taxonomy", "profiling", "sylph"]
 classifiers = [
@@ -31,7 +33,9 @@ dependencies = [
 ]
 
 [project.urls]
-"Source" = "https://github.com/MrTomRod/sylphd"
+Homepage = "https://abrinca.github.io/sylphd/"
+Documentation = "https://abrinca.github.io/sylphd/docs/"
+Repository = "https://github.com/Abrinca/sylphd"
 
 [project.scripts]
 sylphd = "sylphd.cli:main"

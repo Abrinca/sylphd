@@ -509,7 +509,7 @@ You are using sylphd. If it helps your research, please cite:
 
 - **sylphd**: this web page and its API server. Thomas Roder at
   [Abrinca Genomics](https://abrinca.com).
-  [GitHub](https://github.com/MrTomRod/sylphd), [Docs](https://github.com/MrTomRod/sylphd#readme)
+  [GitHub](https://github.com/Abrinca/sylphd), [Docs](https://abrinca.github.io/sylphd/docs/)
 - **pysylph**: Python bindings used by the server. Martin Larralde. PyO3
   bindings and Python interface to sylph.
   [GitHub](https://github.com/althonos/pysylph), [Docs](https://pysylph.readthedocs.io/)
@@ -534,4 +534,6 @@ pysylph's test suite. The web page shows the same list at the bottom.
 
 ## License
 
-AGPL-3.0-or-later, see `LICENSE`. We are open to negotiating more permissive terms: <https://abrinca.com/contact>.
+sylphd is licensed under the GNU Affero General Public License, version 3 or
+later (AGPL-3.0-or-later); see [`LICENSE`](LICENSE). We are open to negotiating
+more permissive terms: <https://abrinca.com/contact>.
