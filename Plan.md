@@ -11,7 +11,7 @@ Managed by uv. Python >= 3.14, tested on 3.14 only.
 
 ## Target
 
-- Database: `gtdb-r232-c200-dbv2.syl2db` (GTDB r232, two-stage, ~200k species representatives). Copy from `/home/thomas/Projects/mindtherest/db/gtdb-r232-c200-dbv2.syl2db` (CoW filesystem).
+- Database: `gtdb-r232-c200-dbv2.syl2db` (GTDB r232, two-stage, ~200k species representatives). Copy from a local copy (CoW filesystem).
 - One database per server process.
 - pysylph: fork `MrTomRod/pysylph` branch `multi-db` (local checkout `ref/pysylph`), which depends on `MrTomRod/sylph` branch `expose-library-api` (`ref/sylph`). uv git dependency (builds with Rust at install time).
 
