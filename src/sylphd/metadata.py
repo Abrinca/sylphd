@@ -1,8 +1,12 @@
 """GTDB metadata: download, SQLite build, and lookup.
 
-The metadata table keeps every GTDB genome (not only species representatives),
-keyed by NCBI accession with the ``RS_``/``GB_`` prefix stripped.  Taxonomy
-strings are stored as one column each; no per-rank split happens here.
+The metadata database keeps every GTDB genome (not only species
+representatives), keyed by NCBI accession with the ``RS_``/``GB_`` prefix
+stripped.  Repetitive text columns are dictionary-encoded into
+``dict_<column>`` tables; the base table (``metadata_data``, ``WITHOUT ROWID``,
+keyed by accession) stores integer ids and a view named ``metadata`` exposes
+the original columns.  Taxonomy strings are stored as one column each; no
+per-rank split happens here.
 """
 
 from __future__ import annotations
@@ -23,7 +27,16 @@ from . import __version__
 
 #: Schema version of the generated SQLite file.  Bump when the column layout
 #: or the meaning of the ``info`` table changes.
-METADATA_FORMAT_VERSION = "1"
+#:
+#: 1: plain ``metadata`` table, every value stored verbatim.
+#: 2: dictionary-encoded columns, ``metadata_data`` base table and
+#:    ``metadata`` view (readers accept both layouts).
+METADATA_FORMAT_VERSION = "2"
+
+#: Page size of the generated file.  8 KiB trims the b-tree page slack of the
+#: dictionary-encoded layout (~2 % smaller, see scratch/sqlite-size/REPORT.md);
+#: larger pages buy <1 % more and cost lookup time.
+METADATA_PAGE_SIZE = 8192
 
 #: Null markers used by GTDB for "no value".  Compared case-insensitively
 #: after stripping whitespace.  ``not type material`` and friends are *values*.
@@ -79,6 +92,29 @@ COLUMNS: tuple[Column, ...] = (
 
 #: Names of the metadata columns in output order.
 METADATA_COLUMNS: tuple[str, ...] = tuple(column.name for column in COLUMNS)
+
+#: Repetitive text columns stored as integer ids into ``dict_<column>`` tables.
+#: These are the long/low-cardinality strings measured in
+#: scratch/sqlite-size/REPORT.md; they account for most of the file size.
+DICT_ENCODED_COLUMNS: tuple[str, ...] = (
+    "gtdb_taxonomy",
+    "gtdb_genome_representative",
+    "ncbi_taxonomy",
+    "ncbi_taxonomy_unfiltered",
+    "ncbi_organism_name",
+    "ncbi_genome_category",
+    "ncbi_assembly_level",
+    "ncbi_refseq_category",
+    "ncbi_type_material_designation",
+    "ncbi_bioproject",
+)
+
+#: ``(column position in COLUMNS, column name)`` for dictionary-encoded columns.
+_DICT_POSITIONS: tuple[tuple[int, str], ...] = tuple(
+    (position, column.name)
+    for position, column in enumerate(COLUMNS)
+    if column.name in DICT_ENCODED_COLUMNS
+)
 
 _ACCESSION_PREFIX_RE = re.compile(r"^(?:RS_|GB_)", re.IGNORECASE)
 #: ``GCA_964372435.1`` / ``GCF_000005845.2`` optionally with an ``RS_``/``GB_``
@@ -177,24 +213,62 @@ def open_text(path: str | os.PathLike[str]) -> IO[str]:
     return open(path, "rt", newline="", encoding="utf-8")
 
 
-def _table_sql() -> str:
+def _base_table_sql() -> str:
+    """DDL for the base table.
+
+    ``WITHOUT ROWID`` is only a win once the rows are dictionary-encoded: the
+    accession becomes the b-tree key, saving the separate primary-key index.
+    """
     columns = ",\n    ".join(
         [f"accession TEXT PRIMARY KEY"]
-        + [f"{column.name} {column.sql_type}" for column in COLUMNS]
+        + [
+            f"{column.name} "
+            f"{'INTEGER' if column.name in DICT_ENCODED_COLUMNS else column.sql_type}"
+            for column in COLUMNS
+        ]
     )
-    return f"CREATE TABLE metadata (\n    {columns}\n)"
+    return f"CREATE TABLE metadata_data (\n    {columns}\n) WITHOUT ROWID"
+
+
+def _dict_table_sql(name: str) -> str:
+    # Values are unique by construction: ids are assigned from a dict of the
+    # distinct strings seen in the input.  A ``UNIQUE`` declaration would add a
+    # second b-tree that stores every string again (~67 MiB on r232), so it is
+    # deliberately left out; ``NOT NULL`` documents that ids are never NULL.
+    return f"CREATE TABLE dict_{name} (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
+
+
+def _view_sql() -> str:
+    """DDL for the ``metadata`` view: the original columns in the original order.
+
+    A missing id (``NULL`` cell) joins to no dictionary row, so the view yields
+    ``NULL`` exactly where the plain table did.
+    """
+    select = ["m.accession AS accession"]
+    joins: list[str] = []
+    for column in COLUMNS:
+        if column.name in DICT_ENCODED_COLUMNS:
+            select.append(f'dict_{column.name}.value AS "{column.name}"')
+            joins.append(
+                f"LEFT JOIN dict_{column.name} "
+                f'ON dict_{column.name}.id = m."{column.name}"'
+            )
+        else:
+            select.append(f'm."{column.name}" AS "{column.name}"')
+    return (
+        "CREATE VIEW metadata AS\nSELECT "
+        + ",\n       ".join(select)
+        + "\nFROM metadata_data AS m\n"
+        + "\n".join(joins)
+    )
 
 
 def _create_schema(connection: sqlite3.Connection) -> None:
-    connection.execute(_table_sql())
+    connection.execute(_base_table_sql())
+    for name in DICT_ENCODED_COLUMNS:
+        connection.execute(_dict_table_sql(name))
     connection.execute("CREATE TABLE info (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-    connection.execute(
-        "CREATE INDEX metadata_gtdb_representative ON metadata (gtdb_representative)"
-    )
-    connection.execute(
-        "CREATE INDEX metadata_gtdb_genome_representative "
-        "ON metadata (gtdb_genome_representative)"
-    )
+    connection.execute(_view_sql())
 
 
 def _iter_rows(path: Path) -> Iterator[tuple[str, list[object]]]:
@@ -231,13 +305,15 @@ def build_metadata_db(
     *,
     release: int | str | None = None,
     force: bool = False,
+    reps_only: bool = False,
     progress: object = None,
 ) -> dict[str, object]:
     """Build a SQLite metadata database from GTDB metadata TSV files.
 
     ``files`` are read in order; later files overwrite earlier rows with the
-    same accession.  ``progress``, when given, is called as
-    ``progress(rows_seen, path)`` roughly every 50,000 rows.
+    same accession.  With ``reps_only``, only species representatives
+    (``gtdb_representative`` true) are stored.  ``progress``, when given, is
+    called as ``progress(rows_seen, path)`` roughly every 20,000 rows.
     """
     if not files:
         raise ValueError("at least one metadata file is required")
@@ -256,9 +332,33 @@ def build_metadata_db(
     seen = 0
     rows_written = 0
     callback = progress if callable(progress) else None
+    # value -> id, plus values in id order, for each dictionary-encoded column.
+    dictionaries: dict[str, dict[str, int]] = {
+        name: {} for name in DICT_ENCODED_COLUMNS
+    }
+    dictionary_values: dict[str, list[str]] = {
+        name: [] for name in DICT_ENCODED_COLUMNS
+    }
+    representative_position = METADATA_COLUMNS.index("gtdb_representative")
+
+    def encode(accession: str, values: list[object]) -> tuple[object, ...]:
+        for position, name in _DICT_POSITIONS:
+            value = values[position]
+            # These columns are text: anything but a non-NULL string stays NULL.
+            if not isinstance(value, str):
+                continue
+            ids = dictionaries[name]
+            identifier = ids.get(value)
+            if identifier is None:
+                identifier = len(ids) + 1
+                ids[value] = identifier
+                dictionary_values[name].append(value)
+            values[position] = identifier
+        return (accession, *values)
 
     connection = sqlite3.connect(str(output))
     try:
+        connection.execute(f"PRAGMA page_size = {METADATA_PAGE_SIZE}")
         connection.execute("PRAGMA journal_mode = OFF")
         connection.execute("PRAGMA synchronous = OFF")
         connection.execute("PRAGMA cache_size = -200000")  # 200 MB
@@ -269,9 +369,11 @@ def build_metadata_db(
             file_rows = 0
             batch: list[tuple[object, ...]] = []
             for accession, values in _iter_rows(path):
-                batch.append((accession, *values))
                 file_rows += 1
                 seen += 1
+                if reps_only and values[representative_position] != 1:
+                    continue
+                batch.append(encode(accession, values))
                 if len(batch) >= 20_000:
                     rows_written += _insert_batch(connection, placeholders, batch)
                     batch.clear()
@@ -283,7 +385,15 @@ def build_metadata_db(
             if callback is not None:
                 callback(seen, path)
 
-        rows_written = connection.execute("SELECT COUNT(*) FROM metadata").fetchone()[0]
+        for name in DICT_ENCODED_COLUMNS:
+            connection.executemany(
+                f"INSERT INTO dict_{name} (id, value) VALUES (?, ?)",
+                enumerate(dictionary_values[name], start=1),
+            )
+
+        rows_written = connection.execute(
+            "SELECT COUNT(*) FROM metadata_data"
+        ).fetchone()[0]
         info = {
             "format_version": METADATA_FORMAT_VERSION,
             "sylphd_version": __version__,
@@ -292,6 +402,7 @@ def build_metadata_db(
             "sources": json.dumps(sources),
             "rows": str(rows_written),
             "columns": json.dumps(list(METADATA_COLUMNS)),
+            "reps_only": "true" if reps_only else "false",
         }
         connection.executemany(
             "INSERT OR REPLACE INTO info (key, value) VALUES (?, ?)", info.items()
@@ -322,7 +433,7 @@ def _insert_batch(
     connection: sqlite3.Connection, placeholders: str, batch: list[tuple[object, ...]]
 ) -> int:
     cursor = connection.executemany(
-        f"INSERT OR REPLACE INTO metadata VALUES ({placeholders})", batch
+        f"INSERT OR REPLACE INTO metadata_data VALUES ({placeholders})", batch
     )
     return cursor.rowcount
 
@@ -338,10 +449,12 @@ class MetadataDB:
         self._connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = threading.Lock()
+        # ``metadata`` is a view in format 2 and a table in format 1; both are
+        # readable, so accept either kind of sqlite_master entry here.
         tables = {
             row[0]
             for row in self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
             )
         }
         if "metadata" not in tables:
@@ -386,6 +499,8 @@ class MetadataDB:
             "rows": None,
             "release": self.info.get("release") or None,
             "built": self.info.get("built") or None,
+            "format_version": self.info.get("format_version") or None,
+            "reps_only": self.info.get("reps_only") == "true",
             "sources": [],
         }
         try:

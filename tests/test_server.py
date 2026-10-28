@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import sqlite3
 import struct
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -366,6 +367,44 @@ class TestMetadataJoin:
                 fields=["nope"],
             )
             assert response.status_code == 400
+
+    def test_old_format_metadata_table(
+        self, tiny_database: Path, tiny_metadata: Path, tmp_path: Path
+    ) -> None:
+        # Format 1 files store everything in a plain ``metadata`` table; the
+        # server must keep serving them without a rebuild.
+        old_path = tmp_path / "old-meta.sqlite"
+        connection = sqlite3.connect(old_path)
+        try:
+            connection.execute("ATTACH DATABASE ? AS built", (str(tiny_metadata),))
+            connection.execute("CREATE TABLE metadata AS SELECT * FROM built.metadata")
+            connection.execute(
+                "CREATE TABLE info (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            connection.execute("INSERT INTO info SELECT key, value FROM built.info")
+            # format 1 has no ``reps_only`` key and recorded version 1
+            connection.execute("DELETE FROM info WHERE key = 'reps_only'")
+            connection.execute(
+                "UPDATE info SET value = '1' WHERE key = 'format_version'"
+            )
+            connection.commit()
+            connection.execute("DETACH DATABASE built")
+        finally:
+            connection.close()
+
+        app = create_app(ServerConfig(db_path=tiny_database, meta_path=old_path))
+        with TestClient(app) as joined:
+            info = joined.get("/info").json()
+            assert info["metadata"]["rows"] == 1
+            assert info["metadata"]["format_version"] == "1"
+            response = _post(
+                joined, "query", [("mix", MIX_SKETCH.read_bytes())], names=["mix"]
+            )
+            assert response.status_code == 200
+            row = response.json()[0]["rows"][0]
+            assert row["gtdb_taxonomy"] == "d__Bacteria;p__Test;c__Test"
+            assert row["genome_size"] == 9957
+            assert row["ncbi_taxid"] is None
 
 
 class TestFormatting:
