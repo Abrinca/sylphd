@@ -23,9 +23,15 @@ for a non-profit or a commercial organisation; we are happy to talk about it.
 
 ## Your sequences
 
-Uploaded sequences are processed in memory to compute results. They are not stored and their
-contents are not logged. Only sizes, timings and request outcomes may be recorded, to run and
-monitor the service.
+In the **Assembly** mode of the web page, the uploaded sequence is processed in memory to compute
+results. It is not stored and its contents are not logged.
+
+In the **Reads** mode, your reads stay on your computer: they are sketched in your browser and
+only the sketch (k-mer hashes and counts, no sequences) is sent to the server, processed in memory
+and not stored or logged.
+
+In both modes only sizes, timings and request outcomes may be recorded, to run and monitor the
+service.
 
 ## No warranty, availability
 

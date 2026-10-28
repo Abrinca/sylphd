@@ -4,6 +4,19 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Web page: Reads mode.** The page now has two equal modes, *Assembly* and *Reads* (hash routes
+  `#assembly` and `#reads`, a landing page and a tab bar). In Reads mode FASTQ/FASTA reads (plain
+  or gzip; single-end, paired or interleaved) are sketched in the browser with a WebAssembly build
+  of the sylph sketcher (`sketch-wasm/`) and only the sketch is uploaded to `POST /profile`. The
+  results show an abundance chart per rank (GTDB or NCBI taxonomy), a sortable genome table and
+  downloads (TSV, JSON, `.sylphmpa`, `.sylsp`). See *Profiling reads in the browser* in the docs.
+- The Pages workflow and `scripts/preview-pages.sh` build the WebAssembly sketcher into
+  `web/wasm/` (not committed).
+
 ## [0.1.1] - 2026-10-28
 
 ### Added

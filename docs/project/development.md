@@ -38,12 +38,22 @@ the public domain.
 
 ## The web app
 
-`web/` is a static page (plain HTML, CSS and JS, no build step and no external requests) that talks
-to a `sylphd serve --allow-sequences` instance through `GET /info` and `POST /assembly`. It takes a
-pasted or uploaded FASTA (plain or gzip, up to the server's `--max-sequence-mb`), shows the species
-assignment, or the closest relative, with an ANI gauge, and lists the closest GTDB genomes in a
-sortable table that can be downloaded as TSV or JSON. See
-[Using the web app against your server](../guides/public-server.md#using-the-web-app-against-your-server)
+`web/` is a static page (plain HTML, CSS and JS, no JavaScript build step and no external requests)
+with two equal modes selected by the address: the landing page (no hash), `#assembly` and `#reads`.
+
+- **Assembly** talks to a `sylphd serve --allow-sequences` instance through `GET /info` and
+  `POST /assembly`. It takes a pasted or uploaded FASTA (plain or gzip, up to the server's
+  `--max-sequence-mb`), shows the species assignment, or the closest relative, with an ANI gauge, and
+  lists the closest GTDB genomes in a sortable table that can be downloaded as TSV or JSON.
+- **Reads** sketches reads in the browser (`reads.js`, the two workers `decompress-worker.js` and
+  `sketch-worker.js`, and the WebAssembly module from `sketch-wasm/`) and sends only the sketch to
+  `POST /profile`. `taxonomy.js` ports the lineage rules of `sylphd/taxonomy.py` (tested against it
+  in `tests/test_web_taxonomy_js.py`). See [Profiling reads in the browser](../guides/profiling-in-browser.md).
+
+The WebAssembly module is not committed: `sketch-wasm/build.sh ../web/wasm` builds it (Rust with the
+`wasm32-unknown-unknown` target and `wasm-bindgen-cli` at the version pinned in
+`sketch-wasm/Cargo.toml`), and the Pages workflow and `scripts/preview-pages.sh` do that.
+See [Using the web app against your server](../guides/public-server.md#using-the-web-app-against-your-server)
 for running it locally.
 
 ## This documentation

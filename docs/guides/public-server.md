@@ -94,7 +94,9 @@ are one example.
 ## Using the web app against your server
 
 The web app is a static page in `web/` that calls `GET /info` and `POST /assembly` of a server
-started with `--allow-sequences`. `web/config.js` holds two addresses: `apiBase`, the public
+started with `--allow-sequences` (Assembly mode), and `POST /profile` (Reads mode, see
+[Profiling reads in the browser](profiling-in-browser.md); it works on any server, with a
+metadata database for the taxonomy). `web/config.js` holds two addresses: `apiBase`, the public
 server used by the published page (the public instance), and `devApiBase`
 (`http://127.0.0.1:8765`), used only when the page itself is opened from localhost.
 The published page never contacts the visitor's own machine by default, because browsers ask
@@ -107,8 +109,11 @@ scripts/preview-pages.sh
 ```
 
 The script builds the docs and assembles the site like the Pages workflow (the web app at `/`,
-the docs at `/docs/`), so links from the page into the docs work. Serving `web/` alone with
-`python -m http.server -d web` also works for the app, but the docs links then return 404.
+the docs at `/docs/`), so links from the page into the docs work. It also builds the WebAssembly
+sketcher of the Reads mode into `web/wasm/` (needs `cargo` and `wasm-bindgen-cli`; `SKIP_WASM=1`
+skips it). Serving `web/` alone with `python -m http.server -d web` also works for the Assembly
+mode, but the docs links then return 404, and Reads mode needs `web/wasm/`
+(`sketch-wasm/build.sh ../web/wasm`).
 
 For local development start the server with `--cors-origin local`. The browser must be allowed by
 the server's CORS origins, and an HTTPS page can only call an HTTPS API (or localhost).

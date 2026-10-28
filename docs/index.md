@@ -5,8 +5,9 @@
 resident. Clients sketch their samples locally and send only the sketches, then get ANI hits or
 taxonomic profiles back as TSV or JSON, joined with GTDB metadata.
 
-A [web app](https://abrinca.github.io/sylphd/) built on the same server finds the closest GTDB
-genomes of a pasted assembly, with no install.
+A [web app](https://abrinca.github.io/sylphd/) built on the same server needs no install and has two
+modes: it finds the closest GTDB genomes of a pasted assembly, and it profiles sequencing reads that
+are sketched [in your browser](guides/profiling-in-browser.md), so the reads never leave your computer.
 
 ## Why a server
 
@@ -27,6 +28,7 @@ flowchart LR
     DB[("sylph database<br/>.syl2db")] --> S
     MD[("metadata<br/>SQLite")] --> S
     W["web app,<br/>sylphd assembly"] -.->|"raw FASTA"| S
+    B["web app, reads<br/>(sketched in the browser)"] -->|"sketch"| S
 ```
 
 The `assembly` path is the exception: it sends raw sequences because the server does the sketching.
@@ -37,6 +39,9 @@ It is opt-in (`--allow-sequences`) and exists for the web app.
 - **[Profile and query reads](guides/profiling-reads.md).** Single-end, paired, interleaved, several
   files per sample, or ready-made `.sylsp` sketches. Output mirrors sylph's TSV columns plus
   accession and metadata columns.
+- **[Profile reads in the browser](guides/profiling-in-browser.md).** Drop FASTQ files on the web
+  page: they are sketched locally (WebAssembly) and only the sketch is uploaded. Abundance by rank,
+  GTDB or NCBI taxonomy, downloads.
 - **[Identify an assembly](guides/assembly.md).** The closest GTDB genomes, a species assignment at
   95 % ANI and the lineage relation of every hit.
 - **[Taxonomic profiles](guides/taxonomic-profiles.md).** `.sylphmpa` files and clade × sample
