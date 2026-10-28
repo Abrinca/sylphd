@@ -1,8 +1,9 @@
 """HTTP client for a running ``sylphd serve``.
 
-The client speaks plain HTTP over a Unix socket (default) or TCP.  Sketches
-are made locally with the database's ``c``/``k``; ``/assembly`` is the exception
-and sends raw sequences, because the server does the sketching there.
+The client speaks HTTP over a Unix socket (default), TCP, or an ``http://`` /
+``https://`` base URL.  Sketches are made locally with the database's
+``c``/``k``; ``/assembly`` is the exception and sends raw sequences, because the
+server does the sketching there.
 """
 
 from __future__ import annotations
@@ -11,10 +12,39 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
 from .protocol import ProfileParams
+
+
+def normalize_base_url(url: str) -> str:
+    """Validate a base URL and strip its trailing slash.
+
+    Accepts ``http://`` and ``https://`` URLs, with or without a path prefix
+    (e.g. ``https://api.example.org/sylphd``).  A bare ``host:port`` gets
+    ``http://`` prepended, as before.
+    """
+    text = url.strip()
+    if not text:
+        raise ValueError("empty server URL")
+    if "://" not in text:
+        text = "http://" + text
+    parts = urlsplit(text)
+    if parts.scheme not in ("http", "https"):
+        raise ValueError(
+            f"unsupported URL scheme {parts.scheme!r}; use http:// or https://"
+        )
+    if not parts.hostname:
+        raise ValueError(f"server URL has no host: {url!r}")
+    try:
+        parts.port
+    except ValueError as error:
+        raise ValueError(f"invalid port in server URL {url!r}") from error
+    if parts.query or parts.fragment:
+        raise ValueError("server URL must not contain a query or fragment")
+    return urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
 
 
 class ClientError(RuntimeError):
@@ -33,8 +63,8 @@ def default_timeout() -> httpx.Timeout:
 class SylphClient:
     """A small synchronous client.
 
-    Either ``socket_path`` (Unix socket) or ``base_url`` (``http://host:port``)
-    must be given.
+    Either ``socket_path`` (Unix socket) or ``base_url`` (``http://host:port``,
+    optionally with a path prefix) must be given.
     """
 
     def __init__(
@@ -47,14 +77,19 @@ class SylphClient:
         if (socket_path is None) == (base_url is None):
             raise ValueError("exactly one of socket_path and base_url is required")
         self.socket_path = Path(socket_path) if socket_path is not None else None
-        self.base_url = base_url
+        self.base_url = (
+            normalize_base_url(base_url) if base_url is not None else None
+        )
         self.timeout = timeout if timeout is not None else default_timeout()
         transport = None
         if self.socket_path is not None:
             transport = httpx.HTTPTransport(uds=str(self.socket_path), retries=0)
+        # The trailing slash matters: httpx keeps the path prefix only when
+        # request paths are relative ("info", not "/info").
+        origin = f"{self.base_url}/" if self.base_url is not None else "http://sylphd.local/"
         self._client = httpx.Client(
             transport=transport,
-            base_url=base_url or "http://sylphd.local",
+            base_url=origin,
             timeout=self.timeout,
             headers={"user-agent": f"sylphd/{_version()}"},
         )
@@ -76,10 +111,10 @@ class SylphClient:
 
     # -- endpoints --------------------------------------------------------
     def health(self) -> dict[str, Any]:
-        return self._request("GET", "/health").json()
+        return self._request("GET", "health").json()
 
     def info(self) -> dict[str, Any]:
-        return self._request("GET", "/info").json()
+        return self._request("GET", "info").json()
 
     def profile(
         self,
@@ -114,7 +149,7 @@ class SylphClient:
             params["name"] = name
         response = self._request(
             "POST",
-            "/assembly",
+            "assembly",
             params=params,
             content=payload,
             headers={"content-type": content_type},
@@ -149,7 +184,7 @@ class SylphClient:
         ]
         response = self._request(
             "POST",
-            f"/{mode}",
+            mode,
             data={"params": json.dumps(payload)},
             files=files,
         )
@@ -191,12 +226,14 @@ def connect(
     url: str | None = None,
     timeout: float | None = None,
 ) -> SylphClient:
-    """Build a client for a socket path or an ``http://`` URL / ``host:port``."""
+    """Build a client for a socket path or an HTTP(S) base URL / ``host:port``.
+
+    The URL may carry a path prefix (``https://api.example.org/sylphd``);
+    TLS certificates are verified as usual by httpx.
+    """
     http_timeout = default_timeout() if timeout is None else httpx.Timeout(timeout, connect=30.0)
     if socket_path is not None:
         return SylphClient(socket_path=socket_path, timeout=http_timeout)
     if url is None:
         raise ValueError("either a socket path or a URL is required")
-    if not url.startswith(("http://", "https://")):
-        url = "http://" + url
-    return SylphClient(base_url=url, timeout=http_timeout)
+    return SylphClient(base_url=normalize_base_url(url), timeout=http_timeout)

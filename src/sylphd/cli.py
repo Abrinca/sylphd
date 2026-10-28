@@ -353,6 +353,8 @@ def cmd_contain(args: argparse.Namespace, mode: str) -> int:
 
 def _client_from_args(args: argparse.Namespace):
     timeout = args.timeout
+    if getattr(args, "url", None) is not None:
+        return connect(url=args.url, timeout=timeout)
     if getattr(args, "tcp", None) is not None:
         return connect(url=args.tcp, timeout=timeout)
     if getattr(args, "socket", None) is not None:
@@ -841,6 +843,15 @@ def _add_client_options(parser: argparse.ArgumentParser) -> None:
     )
     address.add_argument(
         "--tcp", metavar="HOST:PORT", help="server address [default: $SYLPHD_URL]"
+    )
+    address.add_argument(
+        "--url",
+        metavar="URL",
+        help=(
+            "server base URL, http:// or https://, optionally with a path "
+            "prefix (e.g. https://api.example.org/sylphd) "
+            "[default: $SYLPHD_URL]"
+        ),
     )
     parser.add_argument(
         "--timeout",
