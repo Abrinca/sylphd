@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -14,6 +15,7 @@ import pysylph
 import pytest
 
 from sylphd import cli
+from sylphd.client import ClientError, connect
 from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
 
 from conftest import (
@@ -125,6 +127,19 @@ def metadata_server(tmp_path_factory):
 
 
 class TestUnixSocketRoundTrip:
+    def test_allocation_bomb_does_not_kill_the_server(self, server) -> None:
+        """The real ``sylphd serve`` process must survive a malicious upload."""
+        socket_path, process = server
+        with connect(socket_path=socket_path) as client:
+            with pytest.raises(ClientError) as caught:
+                client.query([("bomb", struct.pack("<Q", 100_000_000))])
+            assert caught.value.status_code == 400
+            assert "declares" in str(caught.value)
+            # Same process, same socket: still answering.
+            assert client.health()["status"] == "ok"
+            assert client.query([("o157", O157_SKETCH.read_bytes())])
+        assert process.poll() is None
+
     def test_info(self, server) -> None:
         socket_path, _ = server
         result = _run("info", "--socket", str(socket_path), "--json")
