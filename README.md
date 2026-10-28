@@ -71,7 +71,8 @@ sylphd serve --db PATH [--meta PATH] [--socket PATH | --tcp HOST:PORT]
 - `--max-jobs`: how many profiling jobs may run at once; further requests
   queue. Blocking pysylph calls run in worker threads, so the server stays
   responsive. Default `2`.
-- `--max-upload-mb`: request body limit. Default `512`.
+- `--max-upload-mb`: request body limit. Default `512`. Sketches are also
+  checked structurally before they are decoded; see Wire format.
 - `--hash`: compute the database SHA-256 at startup (off by default, slow on a
   20 GB database). Reported by `/info`.
 - Exactly one worker process runs: sharing the in-memory index is the point.
@@ -188,6 +189,16 @@ body or sketch count exceeds the limit; 415 for non-multipart requests.
 
 Clients sketch with the server's `c`/`k`; existing sketches must match `k`
 exactly and must not be sparser than the database (`c <= db.c`).
+
+Uploaded sketches are checked structurally before they are decoded: the
+`SampleSketch` header (`c`, `k`, names, `paired`, mean read length) is parsed
+directly from the bytes, and its k-mer count prefix is verified against the
+actual upload size. The count must be checked first because sylph's
+deserializer allocates the k-mer map from that prefix up front, so an 8-byte
+upload declaring 100 million k-mers would abort the process. Malformed
+sketches are rejected with a 400 before any such allocation can happen. The
+layout is tied to the pinned sylph version (`ref/sylph/src/types.rs`); the test
+suite compares the parsed header against a decoded sketch to catch drift.
 
 ## Development
 

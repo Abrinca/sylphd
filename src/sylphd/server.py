@@ -39,6 +39,7 @@ from . import __version__
 from .metadata import MetadataDB, accession_from_genome_name
 from .paths import SOCKET_MODE, parse_tcp
 from .protocol import ProfileParams, ProtocolError, result_row
+from .sketchcheck import SketchFormatError, validate_sketch_bytes
 from .sketching import sample_name_from_path
 
 #: Maximum number of sketches accepted in one request.
@@ -340,18 +341,25 @@ def _run_sample(
     payload: bytes,
 ) -> dict[str, Any]:
     """Deserialize, validate and profile one sketch.  Runs in a worker thread."""
+    # Check the fixed header before decoding: sylph's deserializer allocates
+    # from the k-mer count prefix, and a huge count aborts the whole process.
+    # This also lets us reject a c/k mismatch without deserializing anything.
+    try:
+        c, k = validate_sketch_bytes(payload)
+    except SketchFormatError as error:
+        raise BadRequest(f"sample {name!r}: not a valid sample sketch ({error})") from error
+    if k != database.k:
+        raise BadRequest(
+            f"sample {name!r}: sketch k={k} does not match the database k={database.k}"
+        )
+    if c > database.c:
+        raise BadRequest(
+            f"sample {name!r}: sketch c={c} is sparser than the database c={database.c}"
+        )
     try:
         sketch = pysylph.SampleSketch.from_bytes(payload)
     except (ValueError, OSError) as error:
         raise BadRequest(f"sample {name!r}: not a valid sample sketch ({error})") from error
-    if sketch.k != database.k:
-        raise BadRequest(
-            f"sample {name!r}: sketch k={sketch.k} does not match the database k={database.k}"
-        )
-    if sketch.c > database.c:
-        raise BadRequest(
-            f"sample {name!r}: sketch c={sketch.c} is sparser than the database c={database.c}"
-        )
 
     profiler = pysylph.Profiler(database.db, **params.profiler_kwargs())
     results = profiler.profile(sketch) if mode == "profile" else profiler.query(sketch)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import struct
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -240,6 +241,21 @@ class TestErrors:
         response = _post(client, "query", [("bad", b"not a sketch")])
         assert response.status_code == 400
         assert "not a valid sample sketch" in response.json()["error"]
+
+    @pytest.mark.parametrize("count", [100_000_000, 2**63])
+    def test_allocation_bomb_sketch_returns_400(
+        self, client: TestClient, count: int
+    ) -> None:
+        # Eight bytes declaring ``count`` k-mers: sylph's deserializer would
+        # reserve the memory up front and abort the process.  The validator
+        # rejects it from the length prefix instead.
+        response = _post(client, "query", [("bomb", struct.pack("<Q", count))])
+        assert response.status_code == 400
+        assert "declares" in response.json()["error"]
+        # The server is still alive and still profiles normal sketches.
+        assert client.get("/health").status_code == 200
+
+        assert _post(client, "query", [("o157", O157_SKETCH.read_bytes())]).status_code == 200
 
     def test_k_mismatch(self, client: TestClient) -> None:
         sketch = pysylph.Sketcher(c=200, k=21).sketch_single("wrong-k", _reads(K12_R1))
