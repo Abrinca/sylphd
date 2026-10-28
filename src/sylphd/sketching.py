@@ -11,6 +11,7 @@ names a sample explicitly.
 
 from __future__ import annotations
 
+import collections
 import itertools
 import os
 import re
@@ -242,6 +243,43 @@ def load_sketch(path: str) -> SampleSketch:
         raise InputError(f"cannot load sketch {path}: {error}") from error
 
 
+def _split_pairs(
+    pairs: Iterator[tuple[str, str]],
+) -> tuple[Iterator[str], Iterator[str]]:
+    """Split one stream of mate pairs into two lazy streams for ``sketch_paired``.
+
+    ``sketch_paired`` zips its arguments in lockstep (R1 first, then R2), so the
+    R1 side drives the shared ``dnaio`` reader and parks the mate in a one-item
+    buffer. Memory stays constant.
+
+    Errors raised by ``dnaio`` (mismatched IDs or counts) surface on the R1
+    side. Rust's ``zip`` drops an R1 error if R2 is exhausted at the same step,
+    so the R2 side re-raises it.
+    """
+    pending: collections.deque[str] = collections.deque()
+    failure: list[BaseException] = []
+
+    def first() -> Iterator[str]:
+        try:
+            for seq1, seq2 in pairs:
+                pending.append(seq2)
+                yield seq1
+        except BaseException as error:
+            failure.append(error)
+            raise
+
+    def second() -> Iterator[str]:
+        while True:
+            if pending:
+                yield pending.popleft()
+            elif failure:
+                raise failure[0]
+            else:
+                return
+
+    return first(), second()
+
+
 def sketch_sample(sample: SampleInput, *, c: int, k: int) -> SampleSketch:
     """Sketch one sample with the server's ``c`` and ``k``."""
     if sample.is_sketch:
@@ -250,15 +288,8 @@ def sketch_sample(sample: SampleInput, *, c: int, k: int) -> SampleSketch:
     sketcher = Sketcher(c=c, k=k)
     try:
         if sample.interleaved or sample.paired:
-            # ``sketch_paired`` (Rust) swallows exceptions from lazy iterators,
-            # so mismatched counts/IDs would be silently lost.  Materializing the
-            # pairs makes ``dnaio`` raise before the Rust zip runs.  This costs
-            # memory, but correctness matters more; the paired stream is already
-            # read once per lane by ``dnaio``.
-            pairs = list(_paired_records(sample))
-            seq1 = [pair[0] for pair in pairs]
-            seq2 = [pair[1] for pair in pairs]
-            return sketcher.sketch_paired(sample.name, iter(seq1), iter(seq2))
+            seq1, seq2 = _split_pairs(_paired_records(sample))
+            return sketcher.sketch_paired(sample.name, seq1, seq2)
         reads = _combined(iter_sequences(item[0]) for item in sample.inputs)
         return sketcher.sketch_single(sample.name, reads)
     except (
