@@ -116,6 +116,14 @@ a:hover { text-decoration-thickness: 2px; }
 .status-detail { margin: 8px 0 0; font-size: .88rem; color: var(--muted); min-height: 1.3em; }
 .status-detail code { font-family: var(--mono); font-size: .92em; }
 .status-detail .warn { color: var(--distant); }
+.facts { display: inline-flex; flex-wrap: wrap; gap: 6px; vertical-align: middle; }
+.fact {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 2px 9px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--card); white-space: nowrap;
+}
+.fact-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.fact-value { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
 .privacy {
   display: flex; gap: 8px; align-items: flex-start;
   margin: 8px 0 0; font-size: .88rem; color: var(--muted);

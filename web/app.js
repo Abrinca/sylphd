@@ -222,19 +222,23 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       const db = info.database || {};
       const meta = info.metadata || {};
       setStatus('online', 'Server online');
-      const parts = [];
-      parts.push(el('span', null, 'Database ', el('code', { text: db.name || '?' })));
-      if (isNum(db.genomes)) parts.push(`${fmtInt(db.genomes)} genomes`);
-      if (isNum(db.c) && isNum(db.k)) parts.push(`c=${db.c}, k=${db.k}`);
-      if (meta.release) parts.push(`GTDB r${meta.release}`);
       const lim = info.limits || {};
-      if (isNum(lim.max_sequence_mb)) parts.push(`max ${lim.max_sequence_mb} MB`);
+      const fact = (label, value, title) => el('span', { class: 'fact', title: title || null },
+        el('span', { class: 'fact-label', text: label }), el('span', { class: 'fact-value', text: value }));
+      const facts = [];
+      facts.push(fact('Database', meta.release ? `GTDB r${meta.release}` : (db.name || '?'), db.name || null));
+      if (isNum(db.genomes)) facts.push(fact('Genomes', fmtInt(db.genomes)));
+      if (isNum(db.c) && isNum(db.k)) facts.push(fact('Sketch', `c=${db.c} · k=${db.k}`, 'sylph subsampling rate c and k-mer size k'));
+      if (isNum(lim.max_sequence_mb)) facts.push(fact('Upload', `≤ ${lim.max_sequence_mb} MB`, 'maximum assembly size'));
       if (lim.rate_limit && isNum(lim.rate_limit.count)) {
-        parts.push(`${lim.rate_limit.count} requests / ${Math.round(lim.rate_limit.window_seconds)} s`);
+        const w = Math.round(lim.rate_limit.window_seconds);
+        facts.push(fact('Rate', `${lim.rate_limit.count} / ${w === 60 ? 'min' : `${w} s`}`, 'requests per client'));
       }
-      const frag = [];
-      parts.forEach((p, i) => { if (i) frag.push(' · '); frag.push(p); });
-      frag.push(...overrideBits());
+      if (apiOverride) {
+        facts.push(el('span', { class: 'fact' }, el('span', { class: 'fact-label', text: 'API' }),
+          el('code', { class: 'fact-value', text: API }), ' ', resetLink()));
+      }
+      const frag = [el('span', { class: 'facts' }, ...facts)];
       const noAssembly = lim.allow_sequences === false || info.allow_sequences === false;
       if (noAssembly) {
         frag.push(' · ', el('span', { class: 'warn', text: 'this server does not accept assemblies (/assembly disabled)' }));
