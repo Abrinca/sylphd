@@ -17,6 +17,7 @@ nav = [
   { "Guides" = [
     { "Profiling reads" = "guides/profiling-reads.md" },
     { "Identifying an assembly" = "guides/assembly.md" },
+    { "Species and ANI" = "species-and-ani.md" },
     { "Taxonomic profiles" = "guides/taxonomic-profiles.md" },
     { "Running a public server" = "guides/public-server.md" },
   ] },

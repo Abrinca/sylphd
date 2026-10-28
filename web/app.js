@@ -662,10 +662,11 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       const [x1, y1] = pt(v, R - 14), [x2, y2] = pt(v, R + (soft ? 9 : 13)), [lx, ly] = pt(v, R + 20);
       const cos = Math.cos(ang(v));
       g.append(svg('line', { x1, y1, x2, y2, class: soft ? 'tick soft' : 'tick' }));
-      g.append(svg('text', {
+      const labelText = svg('text', {
         x: lx, y: ly, class: soft ? 'thr soft' : 'thr',
         'text-anchor': cos > 0.25 ? 'start' : cos < -0.25 ? 'end' : 'middle',
-      }, label));
+      }, label);
+      g.append(soft ? labelText : svg('a', { href: 'docs/species-and-ani/#how-sylphd-calls-a-species' }, labelText));
     }
     g.append(svg('text', { x: cx - R, y: cy + 36, 'text-anchor': 'middle' }, String(min)));
     g.append(svg('text', { x: cx + R, y: cy + 36, 'text-anchor': 'middle' }, String(max)));
@@ -731,7 +732,10 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     }
     const boundary = hits.filter((x, i) => i > 0 && x.ani_species_level && x.shared_rank !== 'species');
     if (species && boundary.length) {
-      notes.push(el('p', null, `${plural(boundary.length, 'other hit reaches', 'other hits reach')} ${thr.species} % ANI but ${boundary.length === 1 ? 'belongs' : 'belong'} to a different GTDB species (a species-boundary case).`));
+      notes.push(el('p', null,
+        `${plural(boundary.length, 'other hit reaches', 'other hits reach')} ${thr.species} % ANI but ${boundary.length === 1 ? 'belongs' : 'belong'} to a different GTDB species (`,
+        el('a', { href: 'docs/species-and-ani/#species-boundary-cases', text: 'a species-boundary case' }),
+        ').'));
     }
     if (isNum(a) && isNum(b) && b > 0) {
       notes.push(el('p', { title: 'Fraction of the query sketch k-mers that are also present in this genome' },

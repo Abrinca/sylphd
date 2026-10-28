@@ -19,6 +19,11 @@
         <div class="brand">
           <h1><picture class="logo"><source media="(prefers-color-scheme: dark)" srcset="img/sylphd-icon-tile.svg"><img src="img/sylphd-icon.svg" alt="" width="44" height="44"></picture>sylphd</h1>
           <p class="tagline">Find the closest <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a> genomes to a bacterial or archaeal assembly using <a href="https://github.com/bluenote-1577/sylph" rel="noopener">sylph</a> k-mer ANI. <a href="./docs/">Docs</a>.</p>
+          <p class="teaser">
+            <strong>What does "same species" mean?</strong>
+            A 95 % ANI cutoff is a convention, not a law: ANI values differ between methods, species can be millions of years old and genomically diverse, and some species fall on either side of the line.<br>
+            <a href="docs/species-and-ani/">Read how to interpret your result →</a>
+          </p>
         </div>
         <button type="button" id="status" class="status" data-state="checking" title="Click to re-check the server">
           <span class="dot" aria-hidden="true"></span>
