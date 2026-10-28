@@ -136,6 +136,25 @@ def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+#: Upper bound for integer parameters, chosen so the native ``usize``
+#: conversion used by pysylph cannot fail.
+MAX_INTEGER = 2**63 - 1
+
+
+def _finite_float(value: object, key: str, *, optional: bool = False) -> float:
+    """Convert ``value`` to a finite float or raise :class:`ProtocolError`."""
+    suffix = " or null" if optional else ""
+    if not _is_number(value):
+        raise ProtocolError(f"'{key}' must be a finite number{suffix}")
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as error:
+        raise ProtocolError(f"'{key}' must be a finite number{suffix}") from error
+    if not math.isfinite(number):
+        raise ProtocolError(f"'{key}' must be a finite number{suffix}")
+    return number
+
+
 def _number(
     data: Mapping[str, Any],
     key: str,
@@ -145,10 +164,7 @@ def _number(
 ) -> float:
     if key not in data or data[key] is None:
         return default
-    value = data[key]
-    if not _is_number(value) or not math.isfinite(float(value)):
-        raise ProtocolError(f"'{key}' must be a finite number")
-    number = float(value)
+    number = _finite_float(data[key], key)
     if minimum is not None and number < minimum:
         raise ProtocolError(f"'{key}' must be >= {minimum:g}")
     if maximum is not None and number > maximum:
@@ -164,10 +180,7 @@ def _optional_float(
 ) -> float | None:
     if key not in data or data[key] is None:
         return None
-    value = data[key]
-    if not _is_number(value) or not math.isfinite(float(value)):
-        raise ProtocolError(f"'{key}' must be a finite number or null")
-    number = float(value)
+    number = _finite_float(data[key], key, optional=True)
     if minimum is not None and number < minimum:
         raise ProtocolError(f"'{key}' must be >= {minimum:g}")
     if maximum is not None and number > maximum:
@@ -176,7 +189,11 @@ def _optional_float(
 
 
 def _integer(
-    data: Mapping[str, Any], key: str, default: int, minimum: int | None = None
+    data: Mapping[str, Any],
+    key: str,
+    default: int,
+    minimum: int | None = None,
+    maximum: int | None = MAX_INTEGER,
 ) -> int:
     if key not in data or data[key] is None:
         return default
@@ -187,6 +204,8 @@ def _integer(
         raise ProtocolError(f"'{key}' must be an integer")
     if minimum is not None and value < minimum:
         raise ProtocolError(f"'{key}' must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise ProtocolError(f"'{key}' must be <= {maximum}")
     return value
 
 
@@ -300,17 +319,32 @@ def header_for(
     mode: str,
     params: ProfileParams | None = None,
     fields: Sequence[str] | None = None,
+    *,
+    metadata_columns: Sequence[str] | None = None,
 ) -> list[str]:
     """TSV header: sylph columns, then ``accession`` and metadata columns."""
     header = list(columns_for_mode(mode, params)) + list(EXTRA_COLUMNS)
     if fields is not None:
         header.extend(fields)
+    elif metadata_columns is not None:
+        header.extend(metadata_columns)
     return header
 
 
 def format_row(row: Mapping[str, Any], header: Sequence[str]) -> str:
-    """Format a row as one TSV line (without the newline)."""
-    return "\t".join(format_value(column, row.get(column)) for column in header)
+    """Format a row as one TSV line (without the newline).
+
+    ``True_cov`` is the display alias used when ``estimate_unknown`` is set;
+    JSON rows keep the value under ``Eff_cov``.  Map the header to that key so
+    the column is not empty.
+    """
+    cells = []
+    for column in header:
+        value = row.get(column)
+        if column == "True_cov" and "True_cov" not in row and "Eff_cov" in row:
+            value = row["Eff_cov"]
+        cells.append(format_value(column, value))
+    return "\t".join(cells)
 
 
 def rows_to_tsv_lines(
@@ -319,9 +353,27 @@ def rows_to_tsv_lines(
     *,
     params: ProfileParams | None = None,
     fields: Sequence[str] | None = None,
+    metadata_columns: Sequence[str] | None = None,
 ):
-    """Yield the TSV header followed by every result row."""
-    header = header_for(mode, params, fields)
+    """Yield the TSV header followed by every result row.
+
+    ``fields=None`` is the wire value for "all": the server returns every
+    metadata column.  For display, use ``metadata_columns`` (the server's
+    column order) when given, otherwise infer the columns from the returned
+    rows in first-seen order.
+    """
+    if fields is None and metadata_columns is None:
+        sample_list = list(samples)
+        base = set(header_for(mode, params, []))
+        inferred: list[str] = []
+        for sample in sample_list:
+            for row in sample.get("rows", ()):
+                for key in row:
+                    if key not in base and key not in inferred:
+                        inferred.append(key)
+        metadata_columns = inferred
+        samples = sample_list
+    header = header_for(mode, params, fields, metadata_columns=metadata_columns)
     yield "\t".join(header)
     for sample in samples:
         for row in sample.get("rows", ()):
@@ -334,6 +386,15 @@ def rows_to_tsv(
     *,
     params: ProfileParams | None = None,
     fields: Sequence[str] | None = None,
+    metadata_columns: Sequence[str] | None = None,
 ) -> str:
     """Render the response samples as a single TSV document."""
-    return "\n".join(rows_to_tsv_lines(samples, mode, params=params, fields=fields)) + "\n"
+    return "\n".join(
+        rows_to_tsv_lines(
+            samples,
+            mode,
+            params=params,
+            fields=fields,
+            metadata_columns=metadata_columns,
+        )
+    ) + "\n"

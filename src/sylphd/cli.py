@@ -229,7 +229,9 @@ def cmd_contain(args: argparse.Namespace, mode: str) -> int:
         with _client_from_args(args) as client:
             info = client.info()
             database = info["database"]
-            fields = _resolve_fields(args.fields, info.get("metadata"))
+            metadata = info.get("metadata")
+            fields = _resolve_fields(args.fields, metadata)
+            metadata_columns = list((metadata or {}).get("columns") or [])
             if args.verbose:
                 print(
                     f"{PROG}: database {database['name']} (c={database['c']}, "
@@ -262,7 +264,7 @@ def cmd_contain(args: argparse.Namespace, mode: str) -> int:
         _print_error(str(error))
         return 1
 
-    _write_result(result, mode, params, fields, args)
+    _write_result(result, mode, params, fields, args, metadata_columns=metadata_columns)
     return 0
 
 
@@ -286,7 +288,9 @@ def _resolve_fields(text: str | None, metadata: dict[str, Any] | None) -> list[s
     available = list((metadata or {}).get("columns") or [])
     raw = (text or "all").strip()
     if raw.lower() in {"all", ""}:
-        return None if metadata is not None else []
+        if metadata is not None:
+            return list((metadata or {}).get("columns") or [])
+        return []
     if raw.lower() in {"none", "-"}:
         return []
     if metadata is None:
@@ -335,6 +339,8 @@ def _write_result(
     params: ProfileParams,
     fields: Sequence[str] | None,
     args: argparse.Namespace,
+    *,
+    metadata_columns: Sequence[str] | None = None,
 ) -> None:
     path = getattr(args, "output", None)
     handle = None
@@ -348,7 +354,13 @@ def _write_result(
             json.dump(samples, out, indent=None)
             out.write("\n")
         else:
-            for line in rows_to_tsv_lines(samples, mode, params=params, fields=fields):
+            for line in rows_to_tsv_lines(
+                samples,
+                mode,
+                params=params,
+                fields=fields,
+                metadata_columns=metadata_columns,
+            ):
                 out.write(line + "\n")
         out.flush()
     finally:
