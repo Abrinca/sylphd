@@ -27,3 +27,4 @@ db/
 /site/
 # Zensical build cache (it drops its own `.gitignore` with `*` inside).
 /.cache/
+/public/

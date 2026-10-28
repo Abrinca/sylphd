@@ -777,6 +777,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
         gauge(h.ani, thr, species),
         el('div', null,
           el('p', { class: `verdict ${species ? 'verdict-species' : 'verdict-below'}` }, verdict),
+          el('p', { class: 'species-note' },
+            el('a', { href: 'docs/species-and-ani/', text: 'More on species calls →' })),
           el('div', { class: 'best-meta' }, notes),
           el('ul', { class: 'legend', 'aria-label': legendHead },
             el('li', { class: 'legend-head', text: legendHead }),

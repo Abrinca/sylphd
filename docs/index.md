@@ -46,6 +46,11 @@ It is opt-in (`--allow-sequences`) and exists for the web app.
 
 ## Where to go next
 
+!!! tip "What does \"same species\" mean?"
+    sylphd calls a species at 95 % ANI. That cutoff is a convention, not a law of nature.
+    [Species and ANI](species-and-ani.md) explains what the call is based on, where it is
+    solid and where it needs care. Read it before you report a species.
+
 - [Install](install.md) and [Quick start](quickstart.md).
 - [Commands](commands/serve.md), [HTTP API](reference/http-api.md) and
   [metadata database](reference/metadata.md).

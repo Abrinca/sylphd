@@ -104,11 +104,27 @@ a:hover { text-decoration-thickness: 2px; }
 .brand .logo, .brand .logo img { display: block; width: 44px; height: 44px; flex: none; }
 .tagline { margin: 4px 0 0; color: var(--muted); max-width: 46em; }
 .teaser {
-  margin: 8px 0 0; color: var(--muted); font-size: .88rem; line-height: 1.45;
-  max-width: 46em;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 16px; align-items: center;
+  margin: 0 0 18px; padding: 14px 20px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-left: 4px solid var(--accent); border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--card));
+  color: var(--muted); font-size: .92rem; line-height: 1.5;
 }
-.teaser strong { display: block; color: var(--fg); font-size: .95rem; }
-.teaser a { display: inline-block; margin-top: 4px; }
+.teaser-icon { color: var(--accent); }
+.teaser strong { display: block; color: var(--fg); font-size: 1.05rem; margin-bottom: 2px; }
+.teaser-text span { display: block; max-width: 70em; }
+.teaser-link {
+  justify-self: end; white-space: nowrap; padding: 7px 16px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-weight: 600; text-decoration: none;
+}
+.teaser-link:hover, .teaser-link:focus-visible { filter: brightness(1.1); text-decoration: none; }
+@media (max-width: 760px) {
+  .teaser { grid-template-columns: auto minmax(0, 1fr); }
+  .teaser-link { grid-column: 2; justify-self: start; }
+}
+.species-note { margin: 4px 0 2px; font-size: .9rem; }
+.species-note a { font-weight: 600; }
 .status {
   display: inline-flex; align-items: center; gap: 8px;
   font: inherit; font-size: .9rem; color: var(--fg);

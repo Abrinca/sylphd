@@ -1,6 +1,6 @@
 # Design notes
 
-A condensed version of the design plan the project started from (`Plan.md` in the repository).
+A condensed version of the design plan the project started from.
 
 ## Why
 

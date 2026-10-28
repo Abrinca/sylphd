@@ -102,9 +102,13 @@ for "local network access" permission when a public site does that. The `?api=` 
 overrides both per visit:
 
 ```bash
-python -m http.server 8000 -d web
-# open http://localhost:8000 (uses devApiBase), or add ?api=http://host:port
+scripts/preview-pages.sh
+# open http://127.0.0.1:8000 (uses devApiBase), or add ?api=http://host:port
 ```
+
+The script builds the docs and assembles the site like the Pages workflow (the web app at `/`,
+the docs at `/docs/`), so links from the page into the docs work. Serving `web/` alone with
+`python -m http.server -d web` also works for the app, but the docs links then return 404.
 
 For local development start the server with `--cors-origin local`. The browser must be allowed by
 the server's CORS origins, and an HTTPS page can only call an HTTPS API (or localhost).

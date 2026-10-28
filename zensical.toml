@@ -14,10 +14,10 @@ nav = [
   { "Home" = "index.md" },
   { "Install" = "install.md" },
   { "Quick start" = "quickstart.md" },
+  { "Species and ANI" = "species-and-ani.md" },
   { "Guides" = [
     { "Profiling reads" = "guides/profiling-reads.md" },
     { "Identifying an assembly" = "guides/assembly.md" },
-    { "Species and ANI" = "species-and-ani.md" },
     { "Taxonomic profiles" = "guides/taxonomic-profiles.md" },
     { "Running a public server" = "guides/public-server.md" },
   ] },
