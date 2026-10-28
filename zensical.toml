@@ -1,0 +1,114 @@
+[project]
+site_name = "sylphd"
+site_url = "https://abrinca.github.io/sylphd/docs/"
+site_description = "A long-running sylph server that keeps a GTDB database in memory, with a sketching client, a metadata database and a small web app."
+site_author = "Abrinca"
+copyright = "AGPL-3.0-or-later &middot; Abrinca"
+docs_dir = "docs"
+site_dir = "site"
+repo_url = "https://github.com/Abrinca/sylphd"
+repo_name = "Abrinca/sylphd"
+edit_uri = "edit/main/docs/"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Install" = "install.md" },
+  { "Quick start" = "quickstart.md" },
+  { "Guides" = [
+    { "Profiling reads" = "guides/profiling-reads.md" },
+    { "Identifying an assembly" = "guides/assembly.md" },
+    { "Taxonomic profiles" = "guides/taxonomic-profiles.md" },
+    { "Running a public server" = "guides/public-server.md" },
+  ] },
+  { "Commands" = [
+    { "serve" = "commands/serve.md" },
+    { "Server address" = "commands/address.md" },
+    { "info" = "commands/info.md" },
+    { "profile" = "commands/profile.md" },
+    { "query" = "commands/query.md" },
+    { "assembly" = "commands/assembly.md" },
+    { "download" = "commands/download.md" },
+    { "setup" = "commands/setup.md" },
+  ] },
+  { "Reference" = [
+    { "HTTP API" = "reference/http-api.md" },
+    { "Metadata database" = "reference/metadata.md" },
+    { "Security notes" = "reference/security.md" },
+  ] },
+  { "Project" = [
+    { "Citing" = "project/citing.md" },
+    { "License" = "project/license.md" },
+    { "Terms of the web service" = "project/terms.md" },
+    { "Development" = "project/development.md" },
+    { "Design notes" = "project/design-notes.md" },
+  ] },
+]
+
+# Link checking at build time (`zensical build --strict` in CI fails on issues).
+[project.validation]
+invalid_links = true
+invalid_link_anchors = true
+
+[project.theme]
+language = "en"
+features = [
+  "content.action.edit",
+  "content.action.view",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+  "content.footnote.tooltips",
+  "content.tabs.link",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.tabs",
+  "navigation.tabs.sticky",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "toc.follow",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions]
+abbr = {}
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc.permalink = true
+pymdownx.details = {}
+pymdownx.highlight.anchor_linenums = true
+pymdownx.highlight.line_spans = "__span"
+pymdownx.highlight.pygments_lang_class = true
+pymdownx.inlinehilite = {}
+# Mermaid diagrams (docs/index.md): Zensical initialises
+# its Mermaid runtime for any fence rendered with class "mermaid".
+# https://zensical.org/docs/authoring/diagrams/
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+pymdownx.tabbed.alternate_style = true
+pymdownx.tabbed.combine_header_slug = true
+pymdownx.tasklist.custom_checkbox = true

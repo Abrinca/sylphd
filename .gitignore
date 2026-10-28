@@ -24,3 +24,6 @@ db/
 .DS_Store
 *.swp
 .playwright-mcp/
+/site/
+# Zensical build cache (it drops its own `.gitignore` with `*` inside).
+/.cache/
