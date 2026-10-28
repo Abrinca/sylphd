@@ -30,9 +30,13 @@ export SYLPHD_URL=https://api.example.org/sylphd
 See [Server address](../commands/address.md).
 
 !!! info "Reverse proxy deployment"
-    A deployment guide for Caddy and systemd is coming. In short: the proxy terminates TLS and
-    forwards to the TCP address (or the Unix socket), and sylphd gets `--trusted-proxy` so that
-    clients keep separate rate-limit buckets.
+    [`deploy/`](https://github.com/Abrinca/sylphd/tree/main/deploy) contains a
+    complete, reproducible setup for this pattern: a Caddy site block that
+    terminates TLS and proxies to the Unix socket, a hardened systemd unit, an
+    idempotent `setup-server.sh`, and a `sylphd-update` script that installs
+    release assets with checksum verification and rolls back a failed health
+    check. The [deployment README](https://github.com/Abrinca/sylphd/blob/main/deploy/README.md)
+    covers first-time setup, upgrades, logs and changing the domain.
 
 ## Raw sequences: `--allow-sequences`
 
@@ -91,8 +95,8 @@ are one example.
 
 The web app is a static page in `web/` that calls `GET /info` and `POST /assembly` of a server
 started with `--allow-sequences`. `web/config.js` holds two addresses: `apiBase`, the public
-server used by the published page (empty until one exists, so the page contacts nothing), and
-`devApiBase` (`http://127.0.0.1:8765`), used only when the page itself is opened from localhost.
+server used by the published page (the public instance), and `devApiBase`
+(`http://127.0.0.1:8765`), used only when the page itself is opened from localhost.
 The published page never contacts the visitor's own machine by default, because browsers ask
 for "local network access" permission when a public site does that. The `?api=` query parameter
 overrides both per visit:
