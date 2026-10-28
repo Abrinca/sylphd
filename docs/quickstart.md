@@ -1,5 +1,25 @@
 # Quick start
 
+## Get a database
+
+`sylphd` serves a sylph database that you provide: a two-stage `.syl2db` or a plain `.syldb`. The
+recommended database is `gtdb-r232-c200-dbv2.syl2db`: GTDB r232, `c=200`, about 200k species
+representatives, about 19 GB. It comes from the
+[sylph project](https://sylph-docs.github.io/pre%E2%80%90built-databases/), which builds and hosts
+the pre-sketched databases; `sylphd download` only knows where to get them.
+
+```bash
+sylphd download --database gtdb-r232-c200-dbv2.syl2db --outdir data
+```
+
+Without `--database` the same command fetches the GTDB metadata instead; see below. If
+[`aria2c`](https://aria2.github.io/) is installed, the download uses it with all mirrors at once;
+otherwise a resumable built-in downloader is used. `--list-databases` shows the other GTDB
+releases (r226, r220, r214), GlobDB, viral and eukaryotic databases. See
+[`download`](commands/download.md).
+
+The server reads `c` and `k` from the database, and clients sketch with the same values.
+
 ## Get metadata
 
 The metadata database is optional but recommended: it adds GTDB and NCBI taxonomy, genome quality
@@ -12,23 +32,15 @@ sylphd setup -m data/bac120_metadata_r232.tsv.gz data/ar53_metadata_r232.tsv.gz 
              -o data/gtdb-r232.sqlite --release 232
 ```
 
-`download` checks each file against GTDB's `MD5SUM.txt`. `setup` builds a SQLite file of about
-200 MB for the full release (about 80 MB with `--reps-only`). See
+`download` checks each metadata file against GTDB's `MD5SUM.txt`. `setup` builds a SQLite file of
+about 200 MB for the full release (about 80 MB with `--reps-only`). See
 [`download`](commands/download.md), [`setup`](commands/setup.md) and the
 [metadata database](reference/metadata.md).
-
-## Get a database
-
-`sylphd` serves a sylph database that you provide: a two-stage `.syl2db` or a plain `.syldb`. The
-examples use `gtdb-r232-c200-dbv2.syl2db`, a GTDB r232 database with `c=200` (about 200k species
-representatives, about 20 GB). Databases are built with sylph itself; see the
-[sylph documentation](https://sylph-docs.github.io/). The server reads `c` and `k` from the
-database, and clients sketch with the same values.
 
 ## Serve
 
 ```bash
-sylphd serve --db gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite
+sylphd serve --db data/gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite
 ```
 
 The server listens on a Unix socket, by default `$XDG_RUNTIME_DIR/sylphd.sock` (or
@@ -62,7 +74,7 @@ Start the server with `--allow-sequences`, which enables the endpoint behind `sy
 the [web app](https://abrinca.github.io/sylphd/):
 
 ```bash
-sylphd serve --db gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite --allow-sequences
+sylphd serve --db data/gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite --allow-sequences
 ```
 
 ```bash

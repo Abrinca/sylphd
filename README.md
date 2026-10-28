@@ -41,13 +41,25 @@ for the details.
 ## Quick start
 
 ```console
-# 1. Serve a database (add --meta for GTDB metadata, see `sylphd download` and `sylphd setup`)
-sylphd serve --db gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite
+# 1. Get the recommended database (GTDB r232 c200, ~19 GB) and the GTDB metadata
+sylphd download --database gtdb-r232-c200-dbv2.syl2db --outdir data
+sylphd download --release 232 --outdir data
+sylphd setup -m data/bac120_metadata_r232.tsv.gz data/ar53_metadata_r232.tsv.gz \
+             -o data/gtdb-r232.sqlite --release 232
 
-# 2. In another shell: sketch locally and ask the server
+# 2. Serve it
+sylphd serve --db data/gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite
+
+# 3. In another shell: sketch locally and ask the server
 sylphd query -1 sample_R1.fq.gz -2 sample_R2.fq.gz
 sylphd profile -r sample.fq.gz -o sample.profile.tsv
 ```
+
+`sylphd download --list-databases` shows the other pre-built databases (GTDB r226/r220/r214,
+GlobDB, viral and eukaryotic catalogues). They are built and hosted by the
+[sylph project](https://sylph-docs.github.io/pre%E2%80%90built-databases/); the downloader uses
+[`aria2c`](https://aria2.github.io/) when it is installed and resumes interrupted transfers
+otherwise.
 
 The default address is `$XDG_RUNTIME_DIR/sylphd.sock`. To identify an assembly, start the server
 with `--allow-sequences` and run `sylphd assembly assembly.fasta`.
