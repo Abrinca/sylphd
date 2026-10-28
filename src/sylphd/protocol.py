@@ -87,6 +87,10 @@ class ProfileParams:
     min_number_kmers: int = 10
     min_contain: int = 7
     screen_ani: float = 85.0
+    #: Report the naive containment ANI instead of the adjusted one.  Meant for
+    #: assemblies (and genomes) as samples, where every k-mer occurs once and
+    #: the coverage-based adjustment is meaningless.
+    no_adjust: bool = False
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> "ProfileParams":
@@ -104,6 +108,7 @@ class ProfileParams:
             "names",
             "fields",
             "mode",
+            "no_adjust",
         }
         unknown = sorted(set(data) - known)
         if unknown:
@@ -116,6 +121,7 @@ class ProfileParams:
             min_number_kmers=_integer(data, "min_number_kmers", 10, minimum=0),
             min_contain=_integer(data, "min_contain", 7, minimum=0),
             screen_ani=_number(data, "screen_ani", 85.0, 0.0, 100.0),
+            no_adjust=_optional_bool(data, "no_adjust", False),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -126,6 +132,7 @@ class ProfileParams:
             "min_number_kmers": self.min_number_kmers,
             "min_contain": self.min_contain,
             "screen_ani": self.screen_ani,
+            "no_adjust": self.no_adjust,
         }
 
     def profiler_kwargs(self) -> dict[str, Any]:
@@ -239,8 +246,14 @@ def result_row(
     mode: str = "query",
     metadata: Mapping[str, Any] | None = None,
     fields: Sequence[str] | None = None,
+    hide_ani_ci: bool = False,
 ) -> dict[str, Any]:
-    """Convert a `pysylph` result object into a JSON-friendly row."""
+    """Convert a `pysylph` result object into a JSON-friendly row.
+
+    With ``no_adjust``, ``ani`` is the naive containment ANI while
+    ``ani_ci`` is still the confidence interval of the adjusted estimate;
+    ``hide_ani_ci`` drops that misleading value.
+    """
     genome = result.genome_sketch
     genome_file = genome.name
     accession = accession_from_genome_name(genome_file)
@@ -250,7 +263,7 @@ def result_row(
         "Genome_file": genome_file,
         "Adjusted_ANI": float(result.ani),
         "Eff_cov": float(result.coverage),
-        "ANI_5-95_percentile": _pair(result.ani_ci),
+        "ANI_5-95_percentile": None if hide_ani_ci else _pair(result.ani_ci),
         "Eff_lambda": None if result.effective_lambda is None else float(result.effective_lambda),
         "Lambda_status": result.lambda_status,
         "Lambda_5-95_percentile": _pair(result.lambda_ci),
