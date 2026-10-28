@@ -1,7 +1,8 @@
 """HTTP client for a running ``sylphd serve``.
 
-The client speaks plain HTTP over a Unix socket (default) or TCP.  It only
-sends sample sketches: sketching is done locally with the database's ``c``/``k``.
+The client speaks plain HTTP over a Unix socket (default) or TCP.  Sketches
+are made locally with the database's ``c``/``k``; ``/assembly`` is the exception
+and sends raw sequences, because the server does the sketching there.
 """
 
 from __future__ import annotations
@@ -97,6 +98,31 @@ class SylphClient:
         fields: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         return self._post("query", samples, params, fields)
+
+    def assembly(
+        self,
+        payload: bytes,
+        *,
+        top: int = 10,
+        min_ani: float = 80.0,
+        name: str | None = None,
+        content_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        """Send one raw FASTA/FASTQ assembly to ``POST /assembly``."""
+        params: dict[str, Any] = {"top": top, "min_ani": min_ani}
+        if name:
+            params["name"] = name
+        response = self._request(
+            "POST",
+            "/assembly",
+            params=params,
+            content=payload,
+            headers={"content-type": content_type},
+        )
+        result = response.json()
+        if not isinstance(result, dict) or "hits" not in result:
+            raise ClientError("unexpected response from /assembly")
+        return result
 
     def _post(
         self,

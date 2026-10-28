@@ -4,8 +4,9 @@ Design notes
 ------------
 * The database is loaded once, at startup, and shared by every request.
 * Blocking ``pysylph`` calls run in worker threads through
-  ``anyio.to_thread.run_sync``; an ``anyio`` semaphore caps the number of
-  concurrent profiling jobs (``--max-jobs``) and queues the rest.
+  ``anyio.to_thread.run_sync``; a semaphore caps the number of concurrent
+  profiling jobs (``--max-jobs``) and queues the rest, optionally up to
+  ``--max-queue`` requests.
 * A fresh ``Profiler`` is built per request: it holds references only.
 * One process, one worker: the whole point is sharing the in-memory index.
 """
@@ -30,13 +31,31 @@ import pysylph
 import uvicorn
 from starlette.applications import Starlette
 from starlette.datastructures import UploadFile
+from starlette.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import __version__
-from .metadata import MetadataDB, accession_from_genome_name
+from .assembly import (
+    DECOMPRESSION_FACTOR,
+    INTERPRETATION_THRESHOLDS,
+    SequenceError,
+    SequenceTooLarge,
+    gunzip_limited,
+    interpret_ani,
+    is_gzip,
+    parse_assembly,
+)
+from .limits import (
+    QUEUE_RETRY_SECONDS,
+    JobSlots,
+    QueueFullError,
+    RateLimiter,
+    RateLimitMiddleware,
+)
+from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
 from .paths import SOCKET_MODE, parse_tcp
 from .protocol import ProfileParams, ProtocolError, result_row
 from .sketchcheck import SketchFormatError, validate_sketch_bytes
@@ -44,6 +63,17 @@ from .sketching import sample_name_from_path
 
 #: Maximum number of sketches accepted in one request.
 MAX_SKETCHES = 4096
+
+#: Accepted ``Content-Type`` values of an ``/assembly`` upload.
+SEQUENCE_CONTENT_TYPES = frozenset(
+    {"text/plain", "application/octet-stream", "application/gzip"}
+)
+
+#: ``top`` range of ``POST /assembly``.
+MIN_TOP, MAX_TOP = 1, 50
+
+#: ``min_ani`` range of ``POST /assembly``.
+MIN_ANI_RANGE = (70.0, 100.0)
 
 
 class BadRequest(ValueError):
@@ -59,6 +89,18 @@ class ServerConfig:
     max_jobs: int = 2
     max_upload_mb: int = 512
     compute_hash: bool = False
+    #: Serve ``POST /assembly`` (raw sequences instead of sketches).
+    allow_sequences: bool = False
+    #: Upload size limit of ``/assembly`` (compressed bytes).
+    max_sequence_mb: int = 20
+    #: ``(count, window_seconds)`` for the per-client rate limit, or ``None``.
+    rate_limit: tuple[int, float] | None = None
+    #: How many requests may wait for a job slot; ``None`` is unlimited.
+    max_queue: int | None = None
+    #: Peers whose ``X-Forwarded-For`` header is trusted (IPs or ``"unix"``).
+    trusted_proxies: tuple[str, ...] = ()
+    #: Allowed CORS origins; none by default.
+    cors_origins: tuple[str, ...] = ()
     #: Set when serving on a Unix socket, so the app can adjust its mode.
     socket_path: Path | None = None
 
@@ -204,10 +246,28 @@ async def _info(request: Request) -> JSONResponse:
                 "max_jobs": state.max_jobs,
                 "max_upload_mb": state.max_upload_mb,
                 "max_sketches": MAX_SKETCHES,
+                "allow_sequences": state.allow_sequences,
+                "max_sequence_mb": state.max_sequence_mb if state.allow_sequences else None,
+                "rate_limit": _rate_limit_dict(state.rate_limit),
+                "max_queue": state.max_queue,
             },
-            "endpoints": ["/health", "/info", "/profile", "/query"],
+            "endpoints": _endpoints(state),
         }
     )
+
+
+def _endpoints(state: Any) -> list[str]:
+    endpoints = ["/health", "/info", "/profile", "/query"]
+    if state.allow_sequences:
+        endpoints.append("/assembly")
+    return endpoints
+
+
+def _rate_limit_dict(rate_limit: tuple[int, float] | None) -> dict[str, Any] | None:
+    if rate_limit is None:
+        return None
+    count, window = rate_limit
+    return {"count": count, "window_seconds": window}
 
 
 async def _index(request: Request) -> JSONResponse:
@@ -215,7 +275,7 @@ async def _index(request: Request) -> JSONResponse:
         {
             "service": "sylphd",
             "version": __version__,
-            "endpoints": ["/health", "/info", "/profile", "/query"],
+            "endpoints": _endpoints(request.app.state),
         }
     )
 
@@ -226,6 +286,197 @@ async def _profile(request: Request) -> JSONResponse:
 
 async def _query(request: Request) -> JSONResponse:
     return await _handle(request, "query")
+
+
+async def _assembly(request: Request) -> JSONResponse:
+    """Profile one uploaded assembly against the database (opt-in)."""
+    state = request.app.state
+    if not state.allow_sequences:  # route is not registered; safety net only
+        return _error("not found", 404)
+
+    content_type = request.headers.get("content-type", "")
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if media_type and media_type not in SEQUENCE_CONTENT_TYPES:
+        return _error(
+            "expected raw FASTA or FASTQ with Content-Type text/plain, "
+            "application/octet-stream or application/gzip",
+            415,
+        )
+
+    try:
+        top = _query_integer(request, "top", 10, MIN_TOP, MAX_TOP)
+        min_ani = _query_float(request, "min_ani", 80.0, *MIN_ANI_RANGE)
+    except ValueError as error:
+        return _error(str(error), 400)
+
+    name = request.query_params.get("name") or "assembly"
+    if len(name) > 1024:
+        return _error("'name' is too long (max 1024 characters)", 400)
+
+    limit = state.max_sequence_mb * 1024 * 1024
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > limit:
+                return _too_large_response(limit)
+        except ValueError:
+            pass
+    chunks: list[bytes] = []
+    received = 0
+    async for chunk in request.stream():
+        received += len(chunk)
+        if received > limit:
+            return _too_large_response(limit)
+        chunks.append(chunk)
+    payload = b"".join(chunks)
+    if not payload:
+        return _error("empty sequence upload", 400)
+
+    start = time.perf_counter()
+    try:
+        async with state.jobs.slot():
+            result = await anyio.to_thread.run_sync(
+                _run_assembly,
+                state.database,
+                state.metadata,
+                name,
+                payload,
+                top,
+                min_ani,
+                limit,
+            )
+    except QueueFullError:
+        return _busy()
+    except SequenceTooLarge as error:
+        return _error(str(error), 413)
+    except SequenceError as error:
+        return _error(str(error), 400)
+    except Exception as error:  # pragma: no cover - defensive
+        # Never echo the payload: the type is enough to debug a failure.
+        return _error(f"assembly profiling failed ({type(error).__name__})", 500)
+
+    elapsed_ms = round((time.perf_counter() - start) * 1000.0, 1)
+    database = state.database
+    return JSONResponse(
+        {
+            "query": result["query"],
+            "database": {
+                "name": database.name,
+                "genomes": database.genomes,
+                "c": database.c,
+                "k": database.k,
+            },
+            "params": {"top": top, "min_ani": min_ani},
+            "thresholds": dict(INTERPRETATION_THRESHOLDS),
+            "elapsed_ms": elapsed_ms,
+            "hits": result["hits"],
+        }
+    )
+
+
+def _too_large_response(limit: int) -> JSONResponse:
+    return _error(
+        f"request body exceeds the {limit // (1024 * 1024)} MB sequence limit", 413
+    )
+
+
+def _query_integer(
+    request: Request, key: str, default: int, minimum: int, maximum: int
+) -> int:
+    raw = request.query_params.get(key)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"'{key}' must be an integer") from None
+    if value < minimum or value > maximum:
+        raise ValueError(f"'{key}' must be between {minimum} and {maximum}")
+    return value
+
+
+def _query_float(
+    request: Request, key: str, default: float, minimum: float, maximum: float
+) -> float:
+    raw = request.query_params.get(key)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError(f"'{key}' must be a number") from None
+    if not value == value or value in (float("inf"), float("-inf")):
+        raise ValueError(f"'{key}' must be a finite number")
+    if value < minimum or value > maximum:
+        raise ValueError(f"'{key}' must be between {minimum:g} and {maximum:g}")
+    return value
+
+
+def _run_assembly(
+    database: LoadedDatabase,
+    metadata: MetadataDB | None,
+    name: str,
+    payload: bytes,
+    top: int,
+    min_ani: float,
+    max_sequence_bytes: int,
+) -> dict[str, Any]:
+    """Parse, sketch and profile one assembly.  Runs in a worker thread."""
+    data = payload
+    if is_gzip(data):
+        data = gunzip_limited(data, max_sequence_bytes * DECOMPRESSION_FACTOR)
+    parsed = parse_assembly(data)
+
+    sketcher = pysylph.Sketcher(c=database.c, k=database.k)
+    sketch = sketcher.sketch_single(name, list(parsed.sequences))
+    profiler = pysylph.Profiler(
+        database.db,
+        no_adjust=True,
+        minimum_ani=min_ani,
+        screen_ani=min(min_ani, 85.0),
+    )
+    results = sorted(profiler.query(sketch), key=lambda result: float(result.ani), reverse=True)
+    results = results[:top]
+
+    columns = tuple(metadata.columns) if metadata is not None else METADATA_COLUMNS
+    accessions = [
+        accession_from_genome_name(result.genome_sketch.name) for result in results
+    ]
+    found = (
+        metadata.lookup(accession for accession in accessions if accession)
+        if metadata is not None
+        else {}
+    )
+
+    hits: list[dict[str, Any]] = []
+    for rank, result in enumerate(results, start=1):
+        genome = result.genome_sketch
+        accession = accession_from_genome_name(genome.name)
+        contained, total = (int(value) for value in result.containment)
+        row: dict[str, Any] = {
+            "rank": rank,
+            "ani": round(float(result.ani), 2),
+            "containment": [contained, total],
+            "containment_fraction": round(contained / total, 3) if total else 0.0,
+            "interpretation": interpret_ani(float(result.ani)),
+            "genome_file": genome.name,
+            "accession": accession,
+        }
+        record = found.get(accession, {}) if accession else {}
+        for column in columns:
+            row[column] = record.get(column)
+        hits.append(row)
+
+    return {
+        "query": {
+            "name": name,
+            "records": parsed.records,
+            "length": parsed.length,
+            "gc": parsed.gc,
+            "sketch_kmers": len(sketch.kmer_counts),
+        },
+        "hits": hits,
+    }
 
 
 async def _handle(request: Request, mode: str) -> JSONResponse:
@@ -305,7 +556,21 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
         return _error(f"profiling failed: {group}", 500)
     except Exception as error:  # pragma: no cover - defensive
         return _error(f"profiling failed: {error}", 500)
+    if any(sample is _QUEUE_FULL for sample in samples):
+        return _busy()
     return JSONResponse(samples)
+
+
+#: Marker stored for a sample whose job was refused because the queue was full.
+_QUEUE_FULL = object()
+
+
+def _busy() -> JSONResponse:
+    return JSONResponse(
+        {"error": "the server is busy; retry shortly"},
+        status_code=503,
+        headers={"Retry-After": str(QUEUE_RETRY_SECONDS)},
+    )
 
 
 async def _run_slot(
@@ -318,17 +583,21 @@ async def _run_slot(
     samples: list[dict[str, Any] | None],
     index: int,
 ) -> None:
-    async with state.semaphore:
-        samples[index] = await anyio.to_thread.run_sync(
-            _run_sample,
-            state.database,
-            state.metadata,
-            mode,
-            params,
-            fields,
-            name,
-            payload,
-        )
+    try:
+        async with state.jobs.slot():
+            samples[index] = await anyio.to_thread.run_sync(
+                _run_sample,
+                state.database,
+                state.metadata,
+                mode,
+                params,
+                fields,
+                name,
+                payload,
+                params.no_adjust,
+            )
+    except QueueFullError:
+        samples[index] = _QUEUE_FULL
 
 
 def _run_sample(
@@ -339,6 +608,7 @@ def _run_sample(
     fields: Sequence[str] | None,
     name: str,
     payload: bytes,
+    hide_ani_ci: bool = False,
 ) -> dict[str, Any]:
     """Deserialize, validate and profile one sketch.  Runs in a worker thread."""
     # Check the fixed header before decoding: sylph's deserializer allocates
@@ -367,7 +637,7 @@ def _run_sample(
     rows: list[dict[str, Any]] = []
     if metadata is None:
         for result in results:
-            rows.append(result_row(result, name, mode=mode))
+            rows.append(result_row(result, name, mode=mode, hide_ani_ci=hide_ani_ci))
     else:
         accessions = [accession_from_genome_name(result.genome_sketch.name) for result in results]
         found = metadata.lookup(accession for accession in accessions if accession)
@@ -379,6 +649,7 @@ def _run_sample(
                     mode=mode,
                     metadata=found.get(accession, {}) if accession else {},
                     fields=fields,
+                    hide_ani_ci=hide_ani_ci,
                 )
             )
     return {"name": name, "kind": mode, "rows": rows}
@@ -458,14 +729,17 @@ def create_app(
     if metadata_store is None and config.meta_path is not None:
         metadata_store = MetadataDB(config.meta_path)
 
+    routes = [
+        Route("/", _index, methods=["GET"]),
+        Route("/health", _health, methods=["GET"]),
+        Route("/info", _info, methods=["GET"]),
+        Route("/profile", _profile, methods=["POST"]),
+        Route("/query", _query, methods=["POST"]),
+    ]
+    if config.allow_sequences:
+        routes.append(Route("/assembly", _assembly, methods=["POST"]))
     app = Starlette(
-        routes=[
-            Route("/", _index, methods=["GET"]),
-            Route("/health", _health, methods=["GET"]),
-            Route("/info", _info, methods=["GET"]),
-            Route("/profile", _profile, methods=["POST"]),
-            Route("/query", _query, methods=["POST"]),
-        ],
+        routes=routes,
         exception_handlers={
             StarletteHTTPException: _json_http_error,
             Exception: _json_http_error,
@@ -477,10 +751,35 @@ def create_app(
     app.state.started = time.monotonic()
     app.state.max_jobs = config.max_jobs
     app.state.max_upload_mb = config.max_upload_mb
-    app.state.semaphore = anyio.Semaphore(config.max_jobs)
+    app.state.allow_sequences = config.allow_sequences
+    app.state.max_sequence_mb = config.max_sequence_mb
+    app.state.rate_limit = config.rate_limit
+    app.state.max_queue = config.max_queue
+    app.state.jobs = JobSlots(config.max_jobs, config.max_queue)
+    # Starlette middleware: the last added is the outermost, so CORS wraps
+    # rate-limit and body-limit errors too.
     app.add_middleware(
         BodyLimitMiddleware, max_bytes=config.max_upload_mb * 1024 * 1024
     )
+    if config.rate_limit is not None:
+        count, window = config.rate_limit
+        app.add_middleware(
+            RateLimitMiddleware,
+            limiter=RateLimiter(count, window),
+            paths=frozenset(("/profile", "/query")) | (
+                {"/assembly"} if config.allow_sequences else set()
+            ),
+            trusted=frozenset(config.trusted_proxies),
+        )
+    if config.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(config.cors_origins),
+            allow_methods=["GET", "POST"],
+            allow_headers=["Content-Type"],
+            expose_headers=["Retry-After"],
+            max_age=600,
+        )
     return app
 
 

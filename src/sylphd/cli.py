@@ -14,6 +14,7 @@ from typing import Any, Sequence
 from . import __version__
 from .client import ClientError, connect
 from .download import METADATA_FILES, ProgressPrinter, download_release
+from .limits import parse_rate_limit
 from .metadata import build_metadata_db
 from .paths import check_socket_path, default_socket_path, parse_tcp
 from .protocol import ProfileParams, ProtocolError, rows_to_tsv_lines
@@ -23,6 +24,7 @@ from .sketching import (
     SampleInput,
     build_sample_inputs,
     check_sketch,
+    sample_name_from_path,
     sketch_sample,
 )
 from .taxonomy import (
@@ -76,6 +78,27 @@ def _fraction(text: str) -> float:
     return value
 
 
+def _assembly_ani(text: str) -> float:
+    value = float(text)
+    if not 70 <= value <= 100:
+        raise argparse.ArgumentTypeError("must be between 70 and 100")
+    return value
+
+
+def _top(text: str) -> int:
+    value = int(text)
+    if not 1 <= value <= 50:
+        raise argparse.ArgumentTypeError("must be between 1 and 50")
+    return value
+
+
+def _rate_limit(text: str) -> tuple[int, float]:
+    try:
+        return parse_rate_limit(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
 # ---------------------------------------------------------------------------
 # serve
 # ---------------------------------------------------------------------------
@@ -92,6 +115,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
         max_jobs=args.max_jobs,
         max_upload_mb=args.max_upload_mb,
         compute_hash=args.hash,
+        allow_sequences=args.allow_sequences,
+        max_sequence_mb=args.max_sequence_mb,
+        rate_limit=args.rate_limit,
+        max_queue=args.max_queue,
+        trusted_proxies=tuple(args.trusted_proxy or ()),
+        cors_origins=tuple(args.cors_origin or ()),
     )
     socket_path = None
     tcp = None
@@ -138,10 +167,20 @@ def _log_startup(
         assert tcp is not None
         address = f"http://{tcp[0]}:{tcp[1]}"
     kind = "two-stage" if database.two_stage else "plain"
+    extras = [f"max-jobs={config.max_jobs}", f"max-upload={config.max_upload_mb} MB"]
+    if config.allow_sequences:
+        extras.append(f"assembly={config.max_sequence_mb} MB")
+    if config.max_queue is not None:
+        extras.append(f"max-queue={config.max_queue}")
+    if config.rate_limit is not None:
+        count, window = config.rate_limit
+        extras.append(f"rate-limit={count}/{int(window)}s")
+    if config.cors_origins:
+        extras.append(f"cors={','.join(config.cors_origins)}")
     print(
         f"{PROG}: {database.name} ({kind}, c={database.c}, k={database.k}, "
         f"{database.genomes} genomes) listening on {address} "
-        f"[max-jobs={config.max_jobs}, max-upload={config.max_upload_mb} MB]",
+        f"[{', '.join(extras)}]",
         file=sys.stderr,
         flush=True,
     )
@@ -196,6 +235,19 @@ def cmd_info(args: argparse.Namespace) -> int:
         f"max-upload {limits.get('max_upload_mb')} MB, "
         f"max-sketches {limits.get('max_sketches')}"
     )
+    rate_limit = limits.get("rate_limit")
+    if limits.get("allow_sequences") or rate_limit or limits.get("max_queue") is not None:
+        rate = (
+            "off"
+            if not rate_limit
+            else f"{rate_limit['count']}/{int(rate_limit['window_seconds'])}s"
+        )
+        print(
+            f"web: assembly {'on' if limits.get('allow_sequences') else 'off'}"
+            f" (max {limits.get('max_sequence_mb')} MB), "
+            f"rate-limit {rate}, "
+            f"max-queue {limits.get('max_queue') if limits.get('max_queue') is not None else 'unlimited'}"
+        )
     return 0
 
 
@@ -231,6 +283,7 @@ def cmd_contain(args: argparse.Namespace, mode: str) -> int:
         min_number_kmers=args.min_number_kmers,
         min_contain=args.min_contain,
         screen_ani=args.screen_ani,
+        no_adjust=args.no_adjust,
     )
 
     taxonomy_prefix = getattr(args, "taxprof", None)
@@ -413,6 +466,76 @@ def _write_result(
 
 
 # ---------------------------------------------------------------------------
+# assembly
+# ---------------------------------------------------------------------------
+
+
+def cmd_assembly(args: argparse.Namespace) -> int:
+    path = Path(args.file)
+    try:
+        payload = path.read_bytes()
+    except OSError as error:
+        _print_error(f"cannot read {path}: {error}")
+        return 1
+    name = args.name or sample_name_from_path(path.name)
+    content_type = (
+        "application/gzip" if payload[:2] == b"\x1f\x8b" else "application/octet-stream"
+    )
+    with _client_from_args(args) as client:
+        result = client.assembly(
+            payload,
+            top=args.top,
+            min_ani=args.min_ani,
+            name=name,
+            content_type=content_type,
+        )
+    if args.json:
+        json.dump(result, sys.stdout, indent=None)
+        sys.stdout.write("\n")
+        return 0
+    output = sys.stdout
+    handle = None
+    if args.output and args.output != "-":
+        handle = open(args.output, "w", encoding="utf-8", newline="\n")
+        output = handle
+    try:
+        output.write(
+            "rank\tani\tinterpretation\taccession\tgtdb_species\t"
+            "ncbi_organism_name\tncbi_taxid\n"
+        )
+        for hit in result.get("hits", ()):
+            output.write(
+                "\t".join(
+                    [
+                        str(hit.get("rank", "")),
+                        f"{float(hit.get('ani', 0.0)):.2f}",
+                        str(hit.get("interpretation") or ""),
+                        str(hit.get("accession") or ""),
+                        _gtdb_species(hit.get("gtdb_taxonomy")),
+                        str(hit.get("ncbi_organism_name") or ""),
+                        "" if hit.get("ncbi_taxid") is None else str(hit["ncbi_taxid"]),
+                    ]
+                )
+                + "\n"
+            )
+        output.flush()
+    finally:
+        if handle is not None:
+            handle.close()
+    return 0
+
+
+def _gtdb_species(taxonomy: Any) -> str:
+    if not isinstance(taxonomy, str):
+        return ""
+    for rank in taxonomy.split(";"):
+        rank = rank.strip()
+        if rank.startswith("s__"):
+            return rank[len("s__") :]
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # download / setup
 # ---------------------------------------------------------------------------
 
@@ -531,6 +654,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="compute the database sha256 at startup (slow, off by default)",
     )
     serve_parser.add_argument(
+        "--allow-sequences",
+        action="store_true",
+        help="enable POST /assembly (upload raw FASTA/FASTQ instead of sketches)",
+    )
+    serve_parser.add_argument(
+        "--max-sequence-mb",
+        type=_positive,
+        default=20,
+        metavar="N",
+        help="maximum /assembly upload in MB, before decompression [default: 20]",
+    )
+    serve_parser.add_argument(
+        "--rate-limit",
+        type=_rate_limit,
+        default=None,
+        metavar="N/min",
+        help="per-client POST rate limit, e.g. 10/min (off by default)",
+    )
+    serve_parser.add_argument(
+        "--max-queue",
+        type=_non_negative,
+        default=None,
+        metavar="N",
+        help="maximum requests waiting for a job slot (unlimited by default)",
+    )
+    serve_parser.add_argument(
+        "--trusted-proxy",
+        action="append",
+        default=[],
+        metavar="IP",
+        help=(
+            "peer allowed to set X-Forwarded-For; repeatable, use 'unix' for a "
+            "Unix socket (none by default)"
+        ),
+    )
+    serve_parser.add_argument(
+        "--cors-origin",
+        action="append",
+        default=[],
+        metavar="ORIGIN",
+        help="allowed CORS origin; repeatable (none by default)",
+    )
+    serve_parser.add_argument(
         "--log-level",
         default="info",
         choices=["critical", "error", "warning", "info", "debug"],
@@ -552,6 +718,39 @@ def build_parser() -> argparse.ArgumentParser:
         mode_parser = subparsers.add_parser(mode, help=help_text)
         _add_contain_options(mode_parser, mode)
         mode_parser.set_defaults(func=lambda args, mode=mode: cmd_contain(args, mode))
+
+    # assembly ----------------------------------------------------------
+    assembly_parser = subparsers.add_parser(
+        "assembly", help="find the closest GTDB genomes to one assembly"
+    )
+    assembly_parser.add_argument(
+        "file", metavar="FILE", help="assembly in FASTA or FASTQ, plain or gzip"
+    )
+    assembly_parser.add_argument(
+        "--top",
+        type=_top,
+        default=10,
+        metavar="N",
+        help="number of hits to print [default: 10]",
+    )
+    assembly_parser.add_argument(
+        "--min-ani",
+        type=_assembly_ani,
+        default=80.0,
+        metavar="ANI",
+        help="minimum ANI in percent, 70-100 [default: 80]",
+    )
+    assembly_parser.add_argument(
+        "--name", metavar="NAME", help="query name [default: from the file name]"
+    )
+    assembly_parser.add_argument(
+        "--json", action="store_true", help="print the raw JSON response"
+    )
+    assembly_parser.add_argument(
+        "-o", "--output", metavar="FILE", help="write the table here [default: stdout]"
+    )
+    assembly_parser.set_defaults(func=cmd_assembly)
+    _add_client_options(assembly_parser)
 
     # download ----------------------------------------------------------
     download_parser = subparsers.add_parser(
@@ -751,6 +950,14 @@ def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
         default=85.0,
         metavar="ANI",
         help="two-stage screen threshold, 0-100 [default: 85]",
+    )
+    parser.add_argument(
+        "--no-adjust",
+        action="store_true",
+        help=(
+            "report the naive containment ANI instead of the adjusted ANI; use "
+            "for assemblies/genomes as samples"
+        ),
     )
     if mode == "profile":
         parser.add_argument(
