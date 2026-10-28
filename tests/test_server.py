@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import socket
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import anyio
 import dnaio
+import httpx
 import pysylph
 import pytest
 from starlette.testclient import TestClient
 
 from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
-from sylphd.protocol import ProfileParams, format_value
-from sylphd.server import LoadedDatabase, ServerConfig, create_app
+from sylphd.protocol import ProfileParams, format_row, format_value
+from sylphd.server import (
+    LoadedDatabase,
+    ServerConfig,
+    _socket_identity,
+    _unlink_socket_if_owned,
+    bind_unix_socket,
+    create_app,
+    prepare_unix_socket,
+)
 
 from conftest import ECOLI_TWO_STAGE, K12_R1, MIX_SKETCH, O157_SKETCH
 
@@ -260,6 +274,42 @@ class TestErrors:
         assert response.status_code == 413
         assert "limit" in response.json()["error"]
 
+    def test_non_file_sketch_part(self, client: TestClient) -> None:
+        response = client.post(
+            "/query",
+            data={"params": "{}"},
+            files={"sketch": (None, "not a file")},
+        )
+        assert response.status_code == 400
+        assert "file uploads" in response.json()["error"]
+
+    @pytest.mark.parametrize(
+        "params, needle",
+        [
+            ({"minimum_ani": float("inf")}, "finite number"),
+            ({"minimum_ani": float("nan")}, "finite number"),
+            ({"minimum_ani": 10**400}, "finite number"),
+            ({"min_number_kmers": 2**63}, "<= 9223372036854775807"),
+        ],
+    )
+    def test_unrepresentable_parameter_values(
+        self, client: TestClient, params, needle
+    ) -> None:
+        response = _post(client, "query", [("x", b"x")], **params)
+        assert response.status_code == 400
+        assert needle in response.json()["error"]
+
+    def test_unexpected_profiling_error_returns_json_500(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        def boom(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("sylphd.server._run_sample", boom)
+        response = _post(client, "query", [("o157", O157_SKETCH.read_bytes())])
+        assert response.status_code == 500
+        assert "profiling failed" in response.json()["error"]
+
 
 class TestMetadataJoin:
     def test_metadata_columns(self, tiny_database: Path, tiny_metadata: Path) -> None:
@@ -313,3 +363,151 @@ class TestFormatting:
         assert format_value("Eff_lambda", None) == ""
         assert format_value("Sample_file", "x") == "x"
         assert format_value("kmers_reassigned", 0) == "0"
+
+    def test_true_cov_header_uses_eff_cov_value(self) -> None:
+        row = {"Eff_cov": 0.3597986}
+        assert format_row(row, ["True_cov"]) == "0.360"
+
+
+class TestUnixSocketCleanup:
+    def test_replaced_socket_is_not_unlinked(self, tmp_path: Path) -> None:
+        path = tmp_path / "s.sock"
+        sock = bind_unix_socket(path)
+        identity = _socket_identity(path)
+        assert identity is not None
+        sock.close()
+        path.unlink()
+        path.write_text("replacement")
+        _unlink_socket_if_owned(path, identity)
+        assert path.exists()
+        assert path.read_text() == "replacement"
+
+    def test_owned_socket_is_unlinked(self, tmp_path: Path) -> None:
+        path = tmp_path / "s.sock"
+        sock = bind_unix_socket(path)
+        identity = _socket_identity(path)
+        assert identity is not None
+        sock.close()
+        _unlink_socket_if_owned(path, identity)
+        assert not path.exists()
+
+    def test_prepare_unix_socket_refuses_live(self, tmp_path: Path) -> None:
+        path = tmp_path / "live.sock"
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(path))
+        listener.listen(1)
+        try:
+            with pytest.raises(RuntimeError, match="already listening"):
+                prepare_unix_socket(path)
+        finally:
+            listener.close()
+            path.unlink()
+
+    def test_prepare_unix_socket_removes_stale(self, tmp_path: Path) -> None:
+        path = tmp_path / "stale.sock"
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.bind(str(path))
+        sock.close()
+        prepare_unix_socket(path)
+        assert not path.exists()
+
+
+class TestConcurrency:
+    def test_health_responsive_while_jobs_busy(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocking_run_sample(*args, **kwargs):
+            started.set()
+            release.wait(timeout=10)
+            return {"name": "blocked", "kind": "query", "rows": []}
+
+        monkeypatch.setattr("sylphd.server._run_sample", blocking_run_sample)
+        app = create_app(
+            ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1),
+            database=client.app.state.database,
+        )
+        with TestClient(app) as test_client:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    test_client.post,
+                    "/query",
+                    data={"params": "{}"},
+                    files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
+                )
+                assert started.wait(timeout=5)
+                health = test_client.get("/health")
+                assert health.status_code == 200
+                release.set()
+                response = future.result(timeout=10)
+                assert response.status_code == 200
+
+    def test_semaphore_released_after_error(self, client: TestClient) -> None:
+        app = create_app(
+            ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1),
+            database=client.app.state.database,
+        )
+        with TestClient(app) as test_client:
+            bad = _post(test_client, "query", [("bad", b"not a sketch")])
+            assert bad.status_code == 400
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    _post,
+                    test_client,
+                    "query",
+                    [("o157", O157_SKETCH.read_bytes())],
+                )
+                good = future.result(timeout=10)
+            assert good.status_code == 200
+
+    def test_semaphore_released_after_cancellation(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def blocking_run_sample(*args, **kwargs):
+            started.set()
+            release.wait(timeout=10)
+            finished.set()
+            return {"name": "blocked", "kind": "query", "rows": []}
+
+        monkeypatch.setattr("sylphd.server._run_sample", blocking_run_sample)
+        app = create_app(
+            ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1),
+            database=client.app.state.database,
+        )
+
+        async def run():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as ac:
+                task = asyncio.create_task(
+                    ac.post(
+                        "/query",
+                        data={"params": "{}"},
+                        files=[
+                            ("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))
+                        ],
+                    )
+                )
+                await anyio.to_thread.run_sync(started.wait, 5)
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                release.set()
+                await anyio.to_thread.run_sync(finished.wait, 5)
+                response = await ac.post(
+                    "/query",
+                    data={"params": "{}"},
+                    files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
+                )
+                assert response.status_code == 200
+
+        anyio.run(run)

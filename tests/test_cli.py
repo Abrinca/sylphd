@@ -14,6 +14,7 @@ import pysylph
 import pytest
 
 from sylphd import cli
+from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
 
 from conftest import (
     ECOLI_TWO_STAGE,
@@ -55,6 +56,53 @@ def server(tmp_path_factory):
             "serve",
             "--db",
             str(ECOLI_TWO_STAGE),
+            "--socket",
+            str(socket_path),
+            "--log-level",
+            "warning",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for_socket(socket_path)
+        yield socket_path, process
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+@pytest.fixture(scope="module")
+def metadata_server(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("meta-server")
+    source = directory / "meta.tsv"
+    header = ["accession", *METADATA_COLUMNS]
+    values = {column: "none" for column in METADATA_COLUMNS}
+    values["genome_size"] = "42"
+    source.write_text(
+        "\t".join(header)
+        + "\n"
+        + "\t".join(["GCA_1", *[values[column] for column in METADATA_COLUMNS]])
+        + "\n"
+    )
+    meta_path = directory / "meta.sqlite"
+    build_metadata_db([source], meta_path, release=232)
+    socket_path = directory / "sylphd.sock"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "sylphd",
+            "serve",
+            "--db",
+            str(ECOLI_TWO_STAGE),
+            "--meta",
+            str(meta_path),
             "--socket",
             str(socket_path),
             "--log-level",
@@ -164,6 +212,23 @@ class TestUnixSocketRoundTrip:
         assert payload[0]["kind"] == "query"
         assert len(payload[0]["rows"]) == 3
 
+    def test_estimate_unknown_tsv_value(self, server) -> None:
+        socket_path, _ = server
+        result = _run(
+            "profile",
+            str(O157_SKETCH),
+            "--socket",
+            str(socket_path),
+            "--estimate-unknown",
+            "--fields",
+            "none",
+        )
+        lines = [line for line in result.stdout.splitlines() if line]
+        header = lines[0].split("\t")
+        assert "True_cov" in header
+        row = dict(zip(header, lines[1].split("\t")))
+        assert row["True_cov"] != ""
+
     def test_graceful_shutdown_removes_socket(self, server) -> None:
         socket_path, process = server
         assert socket_path.is_socket()
@@ -173,6 +238,43 @@ class TestUnixSocketRoundTrip:
         while time.monotonic() < deadline and socket_path.exists():
             time.sleep(0.1)
         assert not socket_path.exists()
+
+
+class TestMetadataTSV:
+    def test_default_includes_metadata_columns(self, metadata_server) -> None:
+        socket_path, _ = metadata_server
+        result = _run("query", str(O157_SKETCH), "--socket", str(socket_path))
+        lines = [line for line in result.stdout.splitlines() if line]
+        header = lines[0].split("\t")
+        assert "gtdb_taxonomy" in header
+        assert "genome_size" in header
+        assert len(lines[1].split("\t")) == len(header)
+
+    def test_fields_all_includes_metadata_columns(self, metadata_server) -> None:
+        socket_path, _ = metadata_server
+        result = _run(
+            "query", str(O157_SKETCH), "--socket", str(socket_path), "--fields", "all"
+        )
+        lines = [line for line in result.stdout.splitlines() if line]
+        header = lines[0].split("\t")
+        assert "gtdb_taxonomy" in header
+        assert "genome_size" in header
+
+    def test_explicit_fields(self, metadata_server) -> None:
+        socket_path, _ = metadata_server
+        result = _run(
+            "query",
+            str(O157_SKETCH),
+            "--socket",
+            str(socket_path),
+            "--fields",
+            "gtdb_taxonomy,genome_size",
+        )
+        lines = [line for line in result.stdout.splitlines() if line]
+        header = lines[0].split("\t")
+        assert "gtdb_taxonomy" in header
+        assert "genome_size" in header
+        assert "ncbi_taxid" not in header
 
 
 class TestLocalCLI:
