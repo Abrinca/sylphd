@@ -434,6 +434,17 @@ class TestCORS:
                 "access-control-expose-headers"
             ].lower()
 
+    def test_wildcard_origin(self) -> None:
+        app = create_app(
+            ServerConfig(db_path=ECOLI_TWO_STAGE, cors_origins=("*",))
+        )
+        with TestClient(app) as test_client:
+            response = test_client.get(
+                "/health", headers={"origin": "https://anywhere.example"}
+            )
+            assert response.status_code == 200
+            assert response.headers["access-control-allow-origin"] == "*"
+
     def test_other_origin_is_not_allowed(self) -> None:
         app = create_app(
             ServerConfig(
