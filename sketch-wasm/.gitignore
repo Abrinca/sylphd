@@ -1,3 +1,4 @@
 /target/
 /pkg/
 /demo/pkg/
+/tests/seedcheck/target/

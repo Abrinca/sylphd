@@ -34,6 +34,10 @@
   <label><input id="dedup" type="checkbox" checked> deduplicate</label>
   <label><input id="paired" type="checkbox"> two files = paired R1/R2</label>
   <label><input id="send" type="checkbox" checked> send to server</label>
+  <label>gunzip <select id="gunzip">
+    <option value="auto">auto (native, WASM fallback)</option>
+    <option value="native">native DecompressionStream</option>
+    <option value="wasm">WASM (multi-member safe)</option></select></label>
 </fieldset>
 
 <div id="drop">Drop files here or <u>choose files</u>
@@ -47,7 +51,7 @@
 
 <script type="module">
 const $ = (id) => document.getElementById(id);
-const fmtMB = (n) => (n / 1e6).toFixed(1) + ' MB';
+const fmtMB = (n) => (n < 1e6 ? (n / 1e3).toFixed(1) + ' kB' : (n / 1e6).toFixed(1) + ' MB');
 const fmtInt = (n) => Math.round(n).toLocaleString('en-US');
 const fmtS = (ms) => (ms / 1000).toFixed(1) + ' s';
 
@@ -69,7 +73,7 @@ syncParams();
 
 const drop = $('drop');
 drop.addEventListener('click', () => $('file').click());
-$('file').addEventListener('change', () => start([...$('file').files]));
+$('file').addEventListener('change', () => { start([...$('file').files]); $('file').value = ''; });
 drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('over'));
 drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); start([...e.dataTransfer.files]); });
@@ -79,6 +83,9 @@ function start(files) {
   if (worker) worker.terminate();
   $('result').replaceChildren();
   $('download').replaceChildren();
+  $('status').textContent = '';
+  window.__lastError = window.__lastStats = window.__lastProfile = null;
+  window.__notes = [];
   $('bar').hidden = false;
   $('bar').value = 0;
   const paired = $('paired').checked && files.length === 2;
@@ -86,7 +93,9 @@ function start(files) {
   worker.onmessage = ({ data }) => {
     if (data.type === 'progress') progress(data);
     else if (data.type === 'done') done(data);
+    else if (data.type === 'note') { window.__notes = (window.__notes || []).concat(data.message); $('status').textContent = data.message; }
     else if (data.type === 'error') {
+      window.__lastError = data.message;
       $('status').innerHTML = '';
       const p = document.createElement('span');
       p.className = 'err';
@@ -98,15 +107,16 @@ function start(files) {
   worker.postMessage({
     files, paired,
     c: Number($('c').value), k: Number($('k').value), deduplicate: $('dedup').checked,
+    gunzip: $('gunzip').value,
   });
 }
 
 function progress(p) {
   $('bar').value = p.total ? p.read / p.total : 0;
   $('status').textContent =
-    `read ${fmtMB(p.read)} / ${fmtMB(p.total)} (compressed)  |  ${fmtMB(p.decompressed)} decompressed\n` +
+    `read ${fmtMB(p.read)} / ${fmtMB(p.total)} (compressed)` + (p.gunzip === 'native' ? `  |  ${fmtMB(p.decompressed)} decompressed` : '') + '\n' +
     `${fmtInt(p.reads)} reads, ${fmtInt(p.bases)} bases, ${fmtInt(p.kmers)} sketch k-mers\n` +
-    `elapsed ${fmtS(p.elapsed)}  |  wasm memory ${fmtMB(p.wasmMemory)}`;
+    `elapsed ${fmtS(p.elapsed)}  |  wasm memory ${fmtMB(p.wasmMemory)}  |  gunzip: ${p.gunzip}`;
 }
 
 async function done({ sketch, stats }) {
@@ -117,7 +127,7 @@ async function done({ sketch, stats }) {
     `${fmtInt(stats.kmers)} k-mers, sketch ${fmtMB(stats.sketchBytes)}\n` +
     `total ${fmtS(stats.totalMs)} (of which wasm sketching ${fmtS(stats.sketchMs)}, ` +
     `read+gunzip ${fmtS(stats.totalMs - stats.sketchMs - stats.initMs)}, wasm init ${stats.initMs.toFixed(0)} ms)\n` +
-    `wasm memory ${fmtMB(stats.wasmMemory)}`;
+    `wasm memory ${fmtMB(stats.wasmMemory)}  |  gunzip: ${stats.gunzip}`;
   const blob = new Blob([sketch], { type: 'application/octet-stream' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
