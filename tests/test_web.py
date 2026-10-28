@@ -15,13 +15,12 @@ import pytest
 from starlette.testclient import TestClient
 
 from sylphd.assembly import (
-    GENUS_ANI,
+    IMPRECISE_BELOW_ANI,
     INTERPRETATION_THRESHOLDS,
     SPECIES_ANI,
     SequenceError,
     SequenceTooLarge,
     gunzip_limited,
-    interpret_ani,
     parse_assembly,
 )
 from sylphd.cli import _gtdb_species
@@ -87,6 +86,8 @@ class TestAssemblyUpload:
             "database",
             "params",
             "thresholds",
+            "assignment",
+            "closest",
             "elapsed_ms",
             "hits",
         }
@@ -101,13 +102,20 @@ class TestAssemblyUpload:
         assert payload["database"]["c"] == 200
         assert payload["database"]["k"] == 31
         assert payload["params"] == {"top": 5, "min_ani": 80.0}
-        assert payload["thresholds"] == {"species": 95, "genus": 85}
+        assert payload["thresholds"] == {"species": 95, "imprecise_below": 85}
         assert payload["elapsed_ms"] >= 0
 
         (hit,) = payload["hits"]
         assert hit["rank"] == 1
         assert hit["ani"] == pytest.approx(100.0, abs=0.01)
-        assert hit["interpretation"] == "same species"
+        assert hit["relation"] == "same species"
+        assert hit["shared_rank"] == "species"
+        assert hit["ani_species_level"] is True
+        assert "interpretation" not in hit
+        assert payload["assignment"]["rank"] == "species"
+        assert payload["assignment"]["accession"] == "GCA_000000001.1"
+        assert payload["assignment"]["ani"] == hit["ani"]
+        assert payload["closest"]["accession"] == "GCA_000000001.1"
         assert hit["genome_file"] == "GCA_000000001.1_genomic.fna.gz"
         assert hit["accession"] == "GCA_000000001.1"
         assert hit["containment"] == [44, 44]
@@ -225,22 +233,9 @@ class TestAssemblyHelpers:
         assert parsed.gc == 60.0
         assert parsed.sequences == ("ACGTNN", "GGCC")
 
-    @pytest.mark.parametrize(
-        "ani, label",
-        [
-            (100.0, "same species"),
-            (95.0, "same species"),
-            (94.99, "same genus"),
-            (85.0, "same genus"),
-            (84.99, "distant"),
-        ],
-    )
-    def test_interpret_ani(self, ani: float, label: str) -> None:
-        assert interpret_ani(ani) == label
-
     def test_thresholds_are_one_constant(self) -> None:
-        assert INTERPRETATION_THRESHOLDS == {"species": 95.0, "genus": 85.0}
-        assert SPECIES_ANI == 95.0 and GENUS_ANI == 85.0
+        assert INTERPRETATION_THRESHOLDS == {"species": 95.0, "imprecise_below": 85.0}
+        assert SPECIES_ANI == 95.0 and IMPRECISE_BELOW_ANI == 85.0
 
     def test_gunzip_limited(self) -> None:
         data = gzip.compress(b"A" * 1000)
@@ -521,7 +516,8 @@ class TestCLI:
         assert header == [
             "rank",
             "ani",
-            "interpretation",
+            "relation",
+            "shared_rank",
             "accession",
             "gtdb_species",
             "ncbi_organism_name",
@@ -531,9 +527,10 @@ class TestCLI:
         assert row[0] == "1"
         assert float(row[1]) == pytest.approx(100.0, abs=0.01)
         assert row[2] == "same species"
-        assert row[3] == "GCA_000000001.1"
-        assert row[4] == ""  # the test taxonomy has no s__ rank
-        assert row[5] == ""
+        assert row[3] == "species"
+        assert row[4] == "GCA_000000001.1"
+        assert row[5] == ""  # the test taxonomy has no s__ rank
+        assert row[6] == ""
 
     def test_assembly_json(self, assembly_server: Path) -> None:
         result = subprocess.run(
@@ -554,4 +551,4 @@ class TestCLI:
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
         assert payload["query"]["length"] == 9957
-        assert payload["hits"][0]["interpretation"] == "same species"
+        assert payload["hits"][0]["relation"] == "same species"

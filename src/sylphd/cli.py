@@ -500,7 +500,7 @@ def cmd_assembly(args: argparse.Namespace) -> int:
         output = handle
     try:
         output.write(
-            "rank\tani\tinterpretation\taccession\tgtdb_species\t"
+            "rank\tani\trelation\tshared_rank\taccession\tgtdb_species\t"
             "ncbi_organism_name\tncbi_taxid\n"
         )
         for hit in result.get("hits", ()):
@@ -509,7 +509,8 @@ def cmd_assembly(args: argparse.Namespace) -> int:
                     [
                         str(hit.get("rank", "")),
                         f"{float(hit.get('ani', 0.0)):.2f}",
-                        str(hit.get("interpretation") or ""),
+                        str(hit.get("relation") or ""),
+                        str(hit.get("shared_rank") or ""),
                         str(hit.get("accession") or ""),
                         _gtdb_species(hit.get("gtdb_taxonomy")),
                         str(hit.get("ncbi_organism_name") or ""),
@@ -522,7 +523,24 @@ def cmd_assembly(args: argparse.Namespace) -> int:
     finally:
         if handle is not None:
             handle.close()
+    print(_assignment_summary(result), file=sys.stderr)
     return 0
+
+
+def _assignment_summary(result: dict[str, Any]) -> str:
+    """One human line for stderr: the species assignment, or its absence."""
+    assignment = result.get("assignment")
+    if assignment:
+        taxon = assignment.get("taxon") or assignment.get("accession") or "the best hit"
+        return f"assigned to species {taxon} ({float(assignment['ani']):.2f} % ANI)"
+    closest = result.get("closest")
+    if closest:
+        taxon = closest.get("taxon") or closest.get("accession") or "the best hit"
+        return (
+            f"no species-level match (< {(result.get('thresholds') or {}).get('species', 95):g} % ANI); "
+            f"closest relative {taxon} ({float(closest['ani']):.2f} % ANI)"
+        )
+    return "no hits"
 
 
 def _gtdb_species(taxonomy: Any) -> str:

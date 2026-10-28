@@ -43,8 +43,8 @@ from .assembly import (
     INTERPRETATION_THRESHOLDS,
     SequenceError,
     SequenceTooLarge,
+    classify_hits,
     gunzip_limited,
-    interpret_ani,
     is_gzip,
     parse_assembly,
 )
@@ -360,6 +360,8 @@ async def _assembly(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             "query": result["query"],
+            "assignment": result["assignment"],
+            "closest": result["closest"],
             "database": {
                 "name": database.name,
                 "genomes": database.genomes,
@@ -458,7 +460,6 @@ def _run_assembly(
             "ani": round(float(result.ani), 2),
             "containment": [contained, total],
             "containment_fraction": round(contained / total, 3) if total else 0.0,
-            "interpretation": interpret_ani(float(result.ani)),
             "genome_file": genome.name,
             "accession": accession,
         }
@@ -467,7 +468,10 @@ def _run_assembly(
             row[column] = record.get(column)
         hits.append(row)
 
+    assignment, closest = classify_hits(hits)
     return {
+        "assignment": assignment,
+        "closest": closest,
         "query": {
             "name": name,
             "records": parsed.records,

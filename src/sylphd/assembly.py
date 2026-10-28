@@ -12,20 +12,33 @@ from __future__ import annotations
 import io
 import zlib
 from dataclasses import dataclass
+from typing import Any
 
 import dnaio
 
 #: ANI (percent) at or above which two genomes are called the same species.
+#: This is GTDB's species ANI circumscription and the only hard threshold.
 SPECIES_ANI = 95.0
 
-#: ANI (percent) at or above which two genomes are called the same genus.
-GENUS_ANI = 85.0
+#: k-mer ANI below this (percent) is imprecise.  A soft hint, never a cut-off.
+IMPRECISE_BELOW_ANI = 85.0
 
 #: Thresholds returned with every ``/assembly`` response.
 INTERPRETATION_THRESHOLDS: dict[str, float] = {
     "species": SPECIES_ANI,
-    "genus": GENUS_ANI,
+    "imprecise_below": IMPRECISE_BELOW_ANI,
 }
+
+#: GTDB rank prefixes, shallowest first, and their names.
+GTDB_RANKS: tuple[tuple[str, str], ...] = (
+    ("d", "domain"),
+    ("p", "phylum"),
+    ("c", "class"),
+    ("o", "order"),
+    ("f", "family"),
+    ("g", "genus"),
+    ("s", "species"),
+)
 
 #: First bytes of a gzip stream (RFC 1952).
 GZIP_MAGIC = b"\x1f\x8b"
@@ -136,14 +149,115 @@ def parse_assembly(data: bytes) -> ParsedAssembly:
     )
 
 
-def interpret_ani(ani: float) -> str:
-    """Label an ANI (percent) as ``same species``, ``same genus`` or ``distant``.
+def parse_gtdb_taxonomy(taxonomy: object) -> dict[str, str]:
+    """Parse ``d__Bacteria;p__...;s__Escherichia coli`` into ``{"d": "Bacteria", ...}``.
 
-    >>> interpret_ani(99.0), interpret_ani(90.0), interpret_ani(70.0)
-    ('same species', 'same genus', 'distant')
+    Unknown or empty ranks (``g__``) are left out.
+
+    >>> parse_gtdb_taxonomy("d__Bacteria;p__Bacillota;g__;s__")
+    {'d': 'Bacteria', 'p': 'Bacillota'}
     """
-    if ani >= SPECIES_ANI:
-        return "same species"
-    if ani >= GENUS_ANI:
-        return "same genus"
-    return "distant"
+    ranks: dict[str, str] = {}
+    if not isinstance(taxonomy, str):
+        return ranks
+    valid = {prefix for prefix, _ in GTDB_RANKS}
+    for part in taxonomy.split(";"):
+        prefix, sep, name = part.strip().partition("__")
+        name = name.strip()
+        if sep and prefix in valid and name:
+            ranks[prefix] = name
+    return ranks
+
+
+def shared_rank(a: dict[str, str], b: dict[str, str]) -> str | None:
+    """Deepest rank name two parsed lineages share, or ``None``.
+
+    A rank only counts when it and every shallower rank agree, so two genera
+    with the same name in different families do not match.
+
+    >>> shared_rank({"d": "X", "p": "A", "c": "B"}, {"d": "X", "p": "A", "c": "C"})
+    'phylum'
+    """
+    shared: str | None = None
+    for prefix, name in GTDB_RANKS:
+        if prefix in a and a.get(prefix) == b.get(prefix):
+            shared = name
+        else:
+            break
+    return shared
+
+
+def classify_hits(
+    hits: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Add ``relation``, ``shared_rank`` and ``ani_species_level`` to every hit.
+
+    ``hits`` must be sorted by ANI, best first, and carry ``ani`` (percent),
+    ``accession`` and ``gtdb_taxonomy`` (``None`` without metadata); they are
+    modified in place.  Returns ``(assignment, closest)``.
+
+    * Best hit ANI >= 95 and a known lineage: the query is assigned to that
+      hit's GTDB species (``assignment``).  Every hit's ``relation`` is the
+      deepest GTDB rank it shares with the assigned lineage, e.g. ``same
+      genus``; no shared domain is ``different domain``.  The same GTDB
+      species is ``same species`` whatever the hit's own ANI.
+    * Best hit ANI < 95: no assignment.  The best hit is the ``closest
+      relative`` and the others are described relative to it (``same genus as
+      closest relative``).
+    * No lineage for the best hit (no metadata): ANI only, ``same species``
+      from 95, otherwise ``related``.  A species hit still yields an
+      ``assignment``, with ``taxon`` and ``gtdb_taxonomy`` set to ``None``.
+
+    ``shared_rank`` is the machine-readable form of the rank (``species`` ...
+    ``domain`` or ``None``).  ``ani_species_level`` says the hit's ANI alone
+    reaches the species threshold, which can happen for a hit whose GTDB
+    species differs from the assigned one.  ``closest`` is the best hit's
+    summary, or ``None`` without hits.
+    """
+    if not hits:
+        return None, None
+    best = hits[0]
+    best_lineage = parse_gtdb_taxonomy(best.get("gtdb_taxonomy"))
+    best_ani = float(best["ani"])
+    species_level = best_ani >= SPECIES_ANI
+
+    def summary(hit: dict[str, Any]) -> dict[str, Any]:
+        lineage = parse_gtdb_taxonomy(hit.get("gtdb_taxonomy"))
+        return {
+            "rank": "species",
+            "taxon": lineage.get("s"),
+            "gtdb_taxonomy": hit.get("gtdb_taxonomy") if lineage else None,
+            "accession": hit.get("accession"),
+            "ani": hit["ani"],
+        }
+
+    closest = summary(best)
+    assignment = summary(best) if species_level else None
+
+    for index, hit in enumerate(hits):
+        ani = float(hit["ani"])
+        hit["ani_species_level"] = ani >= SPECIES_ANI
+        if not best_lineage:
+            hit["shared_rank"] = "species" if ani >= SPECIES_ANI else None
+            hit["relation"] = "same species" if ani >= SPECIES_ANI else "related"
+            continue
+        if index == 0:
+            hit["shared_rank"] = "species" if species_level else None
+            hit["relation"] = "same species" if species_level else "closest relative"
+            continue
+        lineage = parse_gtdb_taxonomy(hit.get("gtdb_taxonomy"))
+        if not lineage:
+            hit["shared_rank"] = None
+            hit["relation"] = "unknown lineage"
+            continue
+        rank = shared_rank(best_lineage, lineage)
+        hit["shared_rank"] = rank
+        if species_level:
+            hit["relation"] = f"same {rank}" if rank else "different domain"
+        else:
+            hit["relation"] = (
+                f"same {rank} as closest relative"
+                if rank
+                else "different domain from closest relative"
+            )
+    return assignment, closest
