@@ -18,6 +18,7 @@ import pysylph
 import pytest
 from starlette.testclient import TestClient
 
+from sylphd import cli
 from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
 from sylphd.protocol import ProfileParams, format_row, format_value
 from sylphd.server import (
@@ -51,6 +52,26 @@ def client():
         yield test_client
 
 
+class TestTerms:
+    def test_terms_url_is_reported(self) -> None:
+        terms = "https://abrinca.github.io/sylphd/terms.html"
+        app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, terms_url=terms))
+        with TestClient(app) as test_client:
+            assert test_client.get("/info").json()["terms_url"] == terms
+
+    def test_serve_accepts_terms_url(self) -> None:
+        args = cli.build_parser().parse_args(
+            [
+                "serve",
+                "--db",
+                "db.syl2db",
+                "--terms-url",
+                "https://example.org/terms",
+            ]
+        )
+        assert args.terms_url == "https://example.org/terms"
+
+
 class TestBasics:
     def test_health(self, client: TestClient) -> None:
         response = client.get("/health")
@@ -72,6 +93,7 @@ class TestBasics:
         assert info["database"]["two_stage"] is True
         assert info["database"]["size"] > 0
         assert info["metadata"] is None
+        assert info["terms_url"] is None
         assert info["limits"]["max_jobs"] == 2
         assert info["pysylph_version"]
         assert info["python_version"].startswith("3.")

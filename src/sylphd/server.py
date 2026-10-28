@@ -101,6 +101,8 @@ class ServerConfig:
     trusted_proxies: tuple[str, ...] = ()
     #: Allowed CORS origins; none by default.
     cors_origins: tuple[str, ...] = ()
+    #: Optional URL of a terms-of-use page, reported by ``/info``.
+    terms_url: str | None = None
     #: Set when serving on a Unix socket, so the app can adjust its mode.
     socket_path: Path | None = None
 
@@ -242,6 +244,7 @@ async def _info(request: Request) -> JSONResponse:
             "python_version": ".".join(str(part) for part in sys.version_info[:3]),
             "database": state.database.info(),
             "metadata": metadata.summary() if metadata is not None else None,
+            "terms_url": state.terms_url,
             "limits": {
                 "max_jobs": state.max_jobs,
                 "max_upload_mb": state.max_upload_mb,
@@ -759,6 +762,7 @@ def create_app(
     app.state.max_sequence_mb = config.max_sequence_mb
     app.state.rate_limit = config.rate_limit
     app.state.max_queue = config.max_queue
+    app.state.terms_url = config.terms_url
     app.state.jobs = JobSlots(config.max_jobs, config.max_queue)
     # Starlette middleware: the last added is the outermost, so CORS wraps
     # rate-limit and body-limit errors too.

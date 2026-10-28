@@ -121,6 +121,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         max_queue=args.max_queue,
         trusted_proxies=tuple(args.trusted_proxy or ()),
         cors_origins=tuple(args.cors_origin or ()),
+        terms_url=args.terms_url,
     )
     socket_path = None
     tcp = None
@@ -177,6 +178,8 @@ def _log_startup(
         extras.append(f"rate-limit={count}/{int(window)}s")
     if config.cors_origins:
         extras.append(f"cors={','.join(config.cors_origins)}")
+    if config.terms_url:
+        extras.append(f"terms={config.terms_url}")
     print(
         f"{PROG}: {database.name} ({kind}, c={database.c}, k={database.k}, "
         f"{database.genomes} genomes) listening on {address} "
@@ -717,6 +720,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "allowed CORS origin; repeatable (none by default). 'local' allows "
             "localhost, 127.0.0.1, 0.0.0.0 and [::1] on any port"
+        ),
+    )
+    serve_parser.add_argument(
+        "--terms-url",
+        metavar="URL",
+        default=None,
+        help=(
+            "terms-of-use page URL reported by /info and linked from the web "
+            "page (none by default)"
         ),
     )
     serve_parser.add_argument(

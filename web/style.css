@@ -118,6 +118,8 @@ a:hover { text-decoration-thickness: 2px; }
   margin: 8px 0 0; font-size: .88rem; color: var(--muted);
 }
 .privacy svg { flex: none; margin-top: 4px; color: var(--species); }
+.terms-note svg { color: var(--accent); }
+.brand a { color: inherit; text-decoration: none; }
 
 /* cards */
 main.wrap { padding-top: 22px; padding-bottom: 36px; }
@@ -334,6 +336,12 @@ details.lineage li b { flex: none; width: 5.2em; color: var(--muted); font-weigh
 /* footer */
 .site-footer { border-top: 1px solid var(--border); padding: 14px 0 28px; font-size: .85rem; color: var(--muted); }
 .site-footer p { margin: 4px 0; }
+
+/* terms page */
+.terms h2 { margin: 0 0 10px; font-size: 1.15rem; }
+.terms h3 { margin: 18px 0 4px; font-size: .98rem; }
+.terms p { margin: 6px 0; }
+.terms p:first-of-type { margin-top: 0; }
 
 details.lineage li span { min-width: 0; overflow-wrap: break-word; }
 .hits td.num { white-space: nowrap; }
