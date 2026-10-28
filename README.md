@@ -6,9 +6,11 @@ samples locally and send only the sketches. This avoids paying the database
 deserialisation cost (about 2 s and 2 GB of RAM for GTDB r232 c200) in every
 process.
 
-The client and server speak HTTP over a Unix socket by default. There is no
-TLS and no authentication: run it on a machine you trust, and keep the socket
-in a directory only your group can access.
+The client and server speak HTTP over a Unix socket by default. Clients can
+also use an `http://` or `https://` base URL (`--url`), for example through a
+TLS-terminating reverse proxy. The server itself has no TLS and no
+authentication: run it on a machine you trust, and keep the socket in a
+directory only your group can access.
 
 ## Requirements
 
@@ -63,7 +65,7 @@ group with `chgrp` if needed).
 sylphd serve --db PATH [--meta PATH] [--socket PATH | --tcp HOST:PORT]
              [--max-jobs N] [--max-upload-mb N] [--allow-sequences]
              [--max-sequence-mb N] [--rate-limit N/min] [--max-queue N]
-             [--trusted-proxy IP] [--cors-origin ORIGIN]
+             [--trusted-proxy IP] [--cors-origin ORIGIN] [--terms-url URL]
              [--hash] [--log-level LEVEL]
 ```
 
@@ -92,11 +94,39 @@ sylphd serve --db PATH [--meta PATH] [--socket PATH | --tcp HOST:PORT]
   the socket peer is the client identity.
 - `--cors-origin ORIGIN`: allowed CORS origin for a browser front end;
   repeatable, none by default. `GET`/`POST` and the `Content-Type` header are
-  allowed, and `Retry-After` is exposed. `--cors-origin local` allows
-  `localhost`, `127.0.0.1`, `0.0.0.0` and `[::1]` on any port, for development.
+  allowed, and `Retry-After` is exposed. Accepted forms:
+  - none (default): no CORS headers, browsers on other origins cannot call it;
+  - `--cors-origin '*'`: any origin, answered with
+    `Access-Control-Allow-Origin: *`. The API uses no credentials or cookies,
+    so this is safe for a public instance;
+  - `--cors-origin https://example.org`: one or more specific origins, repeat
+    the flag for each;
+  - `--cors-origin local`: `localhost`, `127.0.0.1`, `0.0.0.0` and `[::1]` on
+    any port, for development.
+- `--terms-url URL`: optional terms-of-use page advertised by `/info` as
+  `terms_url`. None by default.
 - `--hash`: compute the database SHA-256 at startup (off by default, slow on a
   20 GB database). Reported by `/info`.
 - Exactly one worker process runs: sharing the in-memory index is the point.
+
+### Server address
+
+The client commands (`info`, `profile`, `query`, `assembly`) accept exactly one
+of:
+
+| Option | Meaning |
+|---|---|
+| `--socket PATH` | Unix socket (default: `$SYLPHD_SOCKET`, else `$XDG_RUNTIME_DIR/sylphd.sock`) |
+| `--tcp HOST:PORT` | plain HTTP to a host and port |
+| `--url URL` | `http://` or `https://` base URL, optionally with a path prefix |
+
+`--url` also accepts a bare `host:port` (as `--tcp` does) and defaults to
+`$SYLPHD_URL`. TLS certificates are verified normally, so a public instance
+behind a reverse proxy works as
+`sylphd query --url https://api.example.org/sylphd ...`; a path prefix is kept
+for every request. An explicit option wins over the environment:
+`--url`/`--tcp` before `$SYLPHD_URL`, and `--socket` before `$SYLPHD_SOCKET`.
+`--url`, `--tcp` and `--socket` are mutually exclusive.
 
 ### `sylphd info`
 
@@ -309,8 +339,9 @@ Genome names such as `.../GCA_964372435.1_genomic.fna.gz` map to
 
 ## Wire format
 
-`GET /health`, `GET /info` return JSON. `POST /query` and `POST /profile` take
-`multipart/form-data`:
+`GET /health`, `GET /info` return JSON. `/info` reports the database, metadata
+summary, limits, endpoints and the optional `terms_url` (see `--terms-url`).
+`POST /query` and `POST /profile` take `multipart/form-data`:
 
 - one `sketch` file part per sample, containing the raw bytes of a
   `pysylph.SampleSketch` (a `.sylsp` file);
@@ -456,6 +487,11 @@ bucket called `unix`.
 
 CORS is off unless `--cors-origin` is given. Preflights allow `GET`/`POST` and
 the `Content-Type` request header, and `Retry-After` is exposed to JavaScript.
+For a public instance, `--cors-origin '*'` lets any browser page call the API
+(the reply carries `Access-Control-Allow-Origin: *`); that is safe here because
+no credentials or cookies are used. Alternatively list the page's origin
+(`--cors-origin https://abrinca.github.io`) or use `--cors-origin local` for
+development.
 
 Example public deployment behind a reverse proxy:
 
@@ -463,7 +499,8 @@ Example public deployment behind a reverse proxy:
 sylphd serve --db gtdb-r232-c200-dbv2.syl2db --meta gtdb-r232.sqlite \
     --tcp 127.0.0.1:8765 --allow-sequences --max-jobs 4 --max-queue 16 \
     --rate-limit 10/min \
-    --cors-origin https://abrinca.github.io
+    --cors-origin https://abrinca.github.io \
+    --terms-url https://abrinca.github.io/sylphd/terms.html
 ```
 
 Caddy (or nginx) terminates TLS and forwards to `127.0.0.1:8765`; add
@@ -478,6 +515,12 @@ requests) that talks to a `sylphd serve --allow-sequences` instance through
 (or the closest relative) with an ANI gauge, and lists the closest GTDB genomes in a sortable table
 (downloadable as TSV or JSON). The workflow `.github/workflows/pages.yml`
 deploys it to GitHub Pages on pushes to `main` that touch `web/`.
+
+The page shows a short terms-of-use notice next to the privacy note and links
+[`web/terms.html`](web/terms.html): free for academic use through the page,
+other uses (programmatic/API or commercial) only after contacting Abrinca
+Genomics. A server can advertise its own terms page with `--terms-url`; the URL
+is reported as `terms_url` in `/info`.
 
 Local development, against a server started with `--cors-origin local`
 (allows any loopback origin, whether you open the page as `localhost`,
