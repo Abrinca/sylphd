@@ -166,7 +166,7 @@ wheels = [
 [[package]]
 name = "pysylph"
 version = "0.1.3"
-source = { git = "https://github.com/MrTomRod/pysylph?branch=multi-db#e31cc517d450f0a8a4e88e6f7c659501530dbb23" }
+source = { git = "https://github.com/MrTomRod/pysylph?branch=multi-db#b9e73269a074634ad5dd7e3bde80fc9901d8a226" }
 
 [[package]]
 name = "pytest"
