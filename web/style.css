@@ -262,7 +262,7 @@ textarea:disabled { opacity: .5; }
 
 /* table */
 .table-wrap { overflow-x: auto; }
-table.hits { width: 100%; border-collapse: collapse; font-size: .92rem; min-width: 900px; }
+table.hits { width: 100%; border-collapse: collapse; font-size: .92rem; }
 .hits th, .hits td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .hits th { white-space: nowrap; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 0; }
 .hits th button {
@@ -321,32 +321,15 @@ details.lineage li b { flex: none; width: 5.2em; color: var(--muted); font-weigh
 .empty ul { text-align: left; display: inline-block; color: var(--muted); }
 
 /* cite */
-.cite { padding-top: 6px; padding-bottom: 28px; }
-.cite-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
-  box-shadow: var(--shadow); padding: 22px 24px;
-  border-top: 3px solid var(--accent);
-}
-.cite-card h2 { margin: 0 0 4px; font-size: 1.25rem; display: flex; align-items: center; gap: 8px; }
-.cite-card h2 svg { color: var(--accent); flex: none; }
-.cite-lead { margin: 0 0 16px; color: var(--muted); }
-.cite-grid { align-items: start; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.cite-item {
-  background: var(--soft); border: 1px solid var(--border); border-radius: 10px;
-  padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0;
-}
-.cite-item h3 { margin: 0; font-size: 1rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-.cite-item .role { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-.cite-item p { margin: 0; font-size: .9rem; overflow-wrap: anywhere; }
-.cite-item .ref + .ref { margin-top: 4px; }
-.cite-item .ref cite { font-style: italic; }
-.cite-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 4px; }
-.cite-links a {
-  display: inline-block; font-size: .8rem; font-weight: 600; text-decoration: none;
-  padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--card);
-}
-.cite-links a:hover { border-color: var(--accent); text-decoration: none; }
-.cite-wide { grid-column: 1 / -1; }
+.cite { padding-top: 0; padding-bottom: 18px; color: var(--muted); font-size: .85rem; }
+.cite h2 { margin: 0 0 2px; font-size: 1rem; color: var(--fg); }
+.cite-lead { margin: 0 0 6px; }
+.cite-list { margin: 0; padding: 0; list-style: none; }
+.cite-list li { padding: 6px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; line-height: 1.5; }
+.cite-list li:first-child { border-top: 0; }
+.cite-list b { color: var(--fg); font-weight: 600; }
+.cite-list cite { font-style: italic; }
+.cite-links { white-space: nowrap; margin-left: 4px; }
 
 /* footer */
 .site-footer { border-top: 1px solid var(--border); padding: 14px 0 28px; font-size: .85rem; color: var(--muted); }
@@ -355,6 +338,15 @@ details.lineage li b { flex: none; width: 5.2em; color: var(--muted); font-weigh
 details.lineage li span { min-width: 0; overflow-wrap: break-word; }
 .hits td.num { white-space: nowrap; }
 @media (min-width: 901px) { .hits td:nth-child(5) .cv { min-width: 13em; } }
+@media (min-width: 901px) and (max-width: 1260px) {
+  table.hits { font-size: .85rem; }
+  .hits th, .hits td { padding-left: 5px; padding-right: 5px; }
+  .hits th button { padding: 8px 5px; }
+  .hits td:nth-child(5) .cv { min-width: 0; }
+  .hits td .mono { font-size: .8rem; }
+  .anibar { min-width: 0; gap: 6px; }
+  .bar { min-width: 28px; }
+}
 
 @media (max-width: 900px) {
   .mobile-sort { display: flex; }
@@ -375,8 +367,6 @@ details.lineage li span { min-width: 0; overflow-wrap: break-word; }
   .wrap { padding: 0 14px; }
   .card { padding: 14px; }
   .best { grid-template-columns: minmax(0, 1fr); }
-  .cite-grid { grid-template-columns: 1fr; }
-  .cite-card { padding: 16px; }
   .verdict { font-size: 1.25rem; }
   textarea { height: 150px; }
   .drop.has-file textarea { height: 92px; }

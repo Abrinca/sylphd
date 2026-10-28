@@ -501,15 +501,21 @@ K-12 reads, `.sylsp` sketches) and include an in-process Starlette client and
 one real Unix-socket round trip against a `sylphd serve` subprocess. The large
 GTDB database is only needed for manual runs.
 
-## Please cite
+## How to cite
 
-If you use sylphd or its web page, please cite the method and the data behind it:
+You are using sylphd. If it helps your research, please cite:
 
-- **sylph**: Jim Shaw and Yun William Yu. Rapid species-level metagenome
-  profiling and containment estimation with sylph (2024). *Nature
+- **sylphd**: this web page and its API server. Thomas Roder at
+  [Abrinca Genomics](https://abrinca.com).
+  [GitHub](https://github.com/MrTomRod/sylphd), [Docs](https://github.com/MrTomRod/sylphd#readme)
+- **pysylph**: Python bindings used by the server. Martin Larralde. PyO3
+  bindings and Python interface to sylph.
+  [GitHub](https://github.com/althonos/pysylph), [Docs](https://pysylph.readthedocs.io/)
+- **sylph**: the method. Jim Shaw and Yun William Yu. Rapid species-level
+  metagenome profiling and containment estimation with sylph (2024). *Nature
   Biotechnology*. [doi:10.1038/s41587-024-02412-y](https://doi.org/10.1038/s41587-024-02412-y).
   [GitHub](https://github.com/bluenote-1577/sylph), [Docs](https://sylph-docs.github.io/)
-- **GTDB** (taxonomy and genome metadata, <https://gtdb.ecogenomic.org/>), as
+- **GTDB**: taxonomy and genome metadata (<https://gtdb.ecogenomic.org/>), as
   GTDB recommends:
   - Parks DH, Chaumeil P-A, Mussig AJ, Rinke C, Chuvochina M, Hugenholtz P.
     GTDB release 10: a complete and systematic taxonomy for 715 230 bacterial
@@ -520,11 +526,6 @@ If you use sylphd or its web page, please cite the method and the data behind it
     phylogenetically consistent, rank normalized and complete genome-based
     taxonomy (2022). *Nucleic Acids Research* 50(D1):D785-D794.
     [doi:10.1093/nar/gkab776](https://doi.org/10.1093/nar/gkab776)
-- **pysylph**: Martin Larralde. PyO3 bindings and Python interface to sylph.
-  [GitHub](https://github.com/althonos/pysylph), [Docs](https://pysylph.readthedocs.io/)
-- **sylphd**: Thomas Roder at [Abrinca Genomics](https://abrinca.com). A small
-  server and client around pysylph.
-  [GitHub](https://github.com/MrTomRod/sylphd), [Docs](https://github.com/MrTomRod/sylphd#readme)
 
 sylph and pysylph are MIT licensed; the test data in `tests/data` comes from
 pysylph's test suite. The web page shows the same list at the bottom.
