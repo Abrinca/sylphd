@@ -98,7 +98,10 @@ a:hover { text-decoration-thickness: 2px; }
 }
 .brand h1 {
   margin: 0; font-size: 2rem; letter-spacing: -.02em; line-height: 1.1;
+  display: flex; align-items: center; gap: 10px;
 }
+.brand h1 a { display: inline-flex; align-items: center; gap: 10px; }
+.brand .logo, .brand .logo img { display: block; width: 44px; height: 44px; flex: none; }
 .tagline { margin: 4px 0 0; color: var(--muted); max-width: 46em; }
 .status {
   display: inline-flex; align-items: center; gap: 8px;
@@ -398,4 +401,5 @@ details.lineage li span { min-width: 0; overflow-wrap: break-word; }
   .file-name { flex: 1 1 calc(100% - 40px); }
   .size { margin-left: 0; width: 100%; }
   .brand h1 { font-size: 1.7rem; }
+  .brand .logo, .brand .logo img { width: 36px; height: 36px; }
 }

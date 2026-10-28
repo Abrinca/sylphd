@@ -51,6 +51,9 @@ invalid_link_anchors = true
 
 [project.theme]
 language = "en"
+# Icons: canonical copies live in web/img/; docs/img/ holds copies for the docs build.
+logo = "img/sylphd-icon-tile.svg"
+favicon = "img/sylphd-icon-tile.svg"
 features = [
   "content.action.edit",
   "content.action.view",

@@ -1,4 +1,4 @@
-# sylphd
+# <img src="web/img/sylphd-icon-tile.svg" alt="" width="40" height="40" align="top"> sylphd
 
 A small server and client around [sylph](https://github.com/bluenote-1577/sylph): one
 long-running server keeps a sylph database in memory, while clients sketch samples locally and
