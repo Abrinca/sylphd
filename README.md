@@ -234,16 +234,21 @@ Sends one assembly (FASTA or FASTQ, plain or gzip) to `POST /assembly` and
 prints a compact table of its closest database genomes:
 
 ```
-rank  ani   interpretation  accession        gtdb_species  ncbi_organism_name  ncbi_taxid
-1     99.53 same species    GCA_000005845.2  Escherichia coli  Escherichia coli K-12  562
+rank  ani    relation      shared_rank  accession        gtdb_species      ncbi_organism_name     ncbi_taxid
+1     99.53  same species  species      GCA_000005845.2  Escherichia coli  Escherichia coli K-12  562
+2     90.12  same genus    genus        GCF_000...       Escherichia sp...  ...                    ...
 ```
+
+One line on stderr says whether the query was assigned to a species
+(`assigned to species Escherichia coli (99.53 % ANI)`) or only has a closest
+relative (`no species-level match (< 95 % ANI); closest relative ...`).
 
 - `--top` is 1-50 (default `10`), `--min-ani` is 70-100 (default `80`).
 - `--name` sets the query name (default: the file base name).
 - `--json` prints the raw response, `-o FILE` writes the table to a file.
 - The ANI is the naive containment ANI (`no_adjust`), which is the meaningful
-  measure for an assembly; the server also labels each hit as
-  `same species`, `same genus` or `distant`.
+  measure for an assembly; the server also relates every hit to the query's
+  species assignment through its GTDB lineage (see [`POST /assembly`](#post-assembly)).
 - The server must run with `--allow-sequences`.
 
 ### `sylphd download`
@@ -374,10 +379,17 @@ response is:
  "database": {"name": "gtdb-r232-c200-dbv2.syl2db", "genomes": 199937,
               "c": 200, "k": 31},
  "params": {"top": 10, "min_ani": 80.0},
- "thresholds": {"species": 95.0, "genus": 85.0},
+ "thresholds": {"species": 95.0, "imprecise_below": 85.0},
+ "assignment": {"rank": "species", "taxon": "Escherichia coli",
+                "gtdb_taxonomy": "d__Bacteria;...;s__Escherichia coli",
+                "accession": "GCF_000005845.2", "ani": 98.65},
+ "closest": {"rank": "species", "taxon": "Escherichia coli",
+             "gtdb_taxonomy": "d__Bacteria;...;s__Escherichia coli",
+             "accession": "GCF_000005845.2", "ani": 98.65},
  "elapsed_ms": 412.7,
  "hits": [{"rank": 1, "ani": 98.65, "containment": [7096, 10826],
-           "containment_fraction": 0.655, "interpretation": "same species",
+           "containment_fraction": 0.655, "relation": "same species",
+           "shared_rank": "species", "ani_species_level": true,
            "genome_file": "/db/GCA_000005845.2_genomic.fna.gz",
            "accession": "GCF_000005845.2",
            "gtdb_taxonomy": "d__Bacteria;...;s__Escherichia coli",
@@ -388,9 +400,36 @@ response is:
   ANI is meaningless for assemblies, so there is no confidence interval here.
 - `containment` is `[contained k-mers, sample k-mers]` and
   `containment_fraction` is their ratio.
-- `interpretation` comes from one pair of thresholds, also returned in the
-  response: `ani >= 95` is `same species`, `85 <= ani < 95` is `same genus`,
-  everything else is `distant`.
+- **Species assignment.** `95` % ANI is GTDB's species circumscription and the
+  only hard threshold (`thresholds.species`). If the best hit reaches it, the
+  query is assigned to that hit's GTDB species and `assignment` is
+  `{"rank": "species", "taxon", "gtdb_taxonomy", "accession", "ani"}`
+  (`taxon` and `gtdb_taxonomy` are `null` without metadata). Otherwise
+  `assignment` is `null`: there is no species-level match.
+  `closest` has the same shape for the best hit (`null` without hits).
+  `thresholds.imprecise_below` (`85`) is only a hint that k-mer ANI below it is
+  imprecise; it never changes an assignment.
+- **Hit relations** come from the GTDB lineage (`d__;p__;c__;o__;f__;g__;s__`),
+  not from the ANI. `shared_rank` is the deepest rank a hit shares with the
+  reference lineage (`species`, `genus`, `family`, `order`, `class`, `phylum`,
+  `domain` or `null`); a rank only counts when all shallower ranks agree.
+  `relation` is the human label:
+
+  | Situation | `relation` of the hit |
+  |---|---|
+  | assigned, shares rank *R* with the assigned species | `same species`, `same genus`, `same family`, `same order`, `same class`, `same phylum`, `same domain` |
+  | assigned, shares nothing | `different domain` |
+  | not assigned, the best hit | `closest relative` (`shared_rank` is `null`) |
+  | not assigned, other hits, sharing rank *R* with the best hit | `same genus as closest relative`, ... |
+  | not assigned, sharing nothing with the best hit | `different domain from closest relative` |
+  | a hit without lineage next to classified hits | `unknown lineage` |
+  | no metadata at all (ANI only) | `same species` for `ani >= 95`, else `related` |
+
+  A hit in the same GTDB species as the assignment is `same species` whatever
+  its ANI. `ani_species_level` is `ani >= 95` for every hit: a hit that has it
+  but a different GTDB species name (a species boundary case) gets the
+  lineage relation, e.g. `same genus`, plus `ani_species_level: true`.
+- The former `interpretation` field is gone; `relation` replaces it.
 - Every metadata column of the server's metadata database is added flat to each
   hit, or `null` when the accession has no metadata. A server without `--meta`
   returns all columns as `null`, so the shape is stable.
@@ -434,8 +473,8 @@ Caddy (or nginx) terminates TLS and forwards to `127.0.0.1:8765`; add
 `web/` is a static page (plain HTML/CSS/JS, no build step, no external
 requests) that talks to a `sylphd serve --allow-sequences` instance through
 `GET /info` and `POST /assembly`. It takes a pasted or uploaded FASTA
-(plain or gzip, up to the server's `--max-sequence-mb`), shows the best hit as
-an ANI gauge and lists the closest GTDB genomes in a sortable table
+(plain or gzip, up to the server's `--max-sequence-mb`), shows the species assignment
+(or the closest relative) with an ANI gauge, and lists the closest GTDB genomes in a sortable table
 (downloadable as TSV or JSON). The workflow `.github/workflows/pages.yml`
 deploys it to GitHub Pages on pushes to `main` that touch `web/`.
 
@@ -462,15 +501,33 @@ K-12 reads, `.sylsp` sketches) and include an in-process Starlette client and
 one real Unix-socket round trip against a `sylphd serve` subprocess. The large
 GTDB database is only needed for manual runs.
 
-## Credits
+## Please cite
 
-- [sylph](https://github.com/bluenote-1577/sylph) by Jim Shaw and Yun William Yu
-  does the sketching and profiling (MIT).
-- [pysylph](https://github.com/althonos/pysylph) by Martin Larralde provides the
-  Python bindings (MIT). The test data in `tests/data` comes from pysylph's
-  test suite.
-- [GTDB](https://gtdb.ecogenomic.org/) provides the genome metadata, including
-  the NCBI fields, that `sylphd download` fetches.
+If you use sylphd or its web page, please cite the method and the data behind it:
+
+- **sylph**: Jim Shaw and Yun William Yu. Rapid species-level metagenome
+  profiling and containment estimation with sylph (2024). *Nature
+  Biotechnology*. [doi:10.1038/s41587-024-02412-y](https://doi.org/10.1038/s41587-024-02412-y).
+  [GitHub](https://github.com/bluenote-1577/sylph), [Docs](https://sylph-docs.github.io/)
+- **GTDB** (taxonomy and genome metadata, <https://gtdb.ecogenomic.org/>), as
+  GTDB recommends:
+  - Parks DH, Chaumeil P-A, Mussig AJ, Rinke C, Chuvochina M, Hugenholtz P.
+    GTDB release 10: a complete and systematic taxonomy for 715 230 bacterial
+    and 17 245 archaeal genomes (2025). *Nucleic Acids Research*.
+    [doi:10.1093/nar/gkaf1040](https://doi.org/10.1093/nar/gkaf1040)
+  - Parks DH, Chuvochina M, Rinke C, Mussig AJ, Chaumeil P-A, Hugenholtz P.
+    GTDB: an ongoing census of bacterial and archaeal diversity through a
+    phylogenetically consistent, rank normalized and complete genome-based
+    taxonomy (2022). *Nucleic Acids Research* 50(D1):D785-D794.
+    [doi:10.1093/nar/gkab776](https://doi.org/10.1093/nar/gkab776)
+- **pysylph**: Martin Larralde. PyO3 bindings and Python interface to sylph.
+  [GitHub](https://github.com/althonos/pysylph), [Docs](https://pysylph.readthedocs.io/)
+- **sylphd**: Thomas Roder at [Abrinca Genomics](https://abrinca.com). A small
+  server and client around pysylph.
+  [GitHub](https://github.com/MrTomRod/sylphd), [Docs](https://github.com/MrTomRod/sylphd#readme)
+
+sylph and pysylph are MIT licensed; the test data in `tests/data` comes from
+pysylph's test suite. The web page shows the same list at the bottom.
 
 ## License
 

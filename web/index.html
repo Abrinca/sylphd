@@ -84,16 +84,53 @@
     <section id="results" class="results" aria-live="polite"></section>
   </main>
 
+  <section class="wrap cite" aria-labelledby="cite-h">
+    <div class="cite-card">
+      <h2 id="cite-h">
+        <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M2 3h5v5c0 2.6-1.5 4.2-4 4.8l-.4-1.2C4.1 11 4.8 10 4.900 9H2V3Zm7 0h5v5c0 2.6-1.5 4.2-4 4.8l-.4-1.200C11.1 11 11.8 10 11.900 9H9V3Z"/></svg>
+        Please cite
+      </h2>
+      <p class="cite-lead">This page is a thin layer over the work below. If it helps your research, please cite the method and the data.</p>
+      <ul class="cite-grid">
+        <li class="cite-item">
+          <h3>sylph <span class="role">method</span></h3>
+          <p class="ref">Jim Shaw and Yun William Yu. Rapid species-level metagenome profiling and containment estimation with sylph (2024). <cite>Nature Biotechnology</cite>. <a href="https://doi.org/10.1038/s41587-024-02412-y" rel="noopener">doi:10.1038/s41587-024-02412-y</a></p>
+          <div class="cite-links">
+            <a href="https://github.com/bluenote-1577/sylph" rel="noopener">GitHub</a>
+            <a href="https://sylph-docs.github.io/" rel="noopener">Docs</a>
+          </div>
+        </li>
+        <li class="cite-item">
+          <h3>GTDB <span class="role">taxonomy &amp; genomes</span></h3>
+          <p class="ref">Parks DH, Chaumeil P-A, Mussig AJ, Rinke C, Chuvochina M, Hugenholtz P. GTDB release 10: a complete and systematic taxonomy for 715&#8239;230 bacterial and 17&#8239;245 archaeal genomes (2025). <cite>Nucleic Acids Research</cite>. <a href="https://doi.org/10.1093/nar/gkaf1040" rel="noopener">doi:10.1093/nar/gkaf1040</a></p>
+          <p class="ref">Parks DH, Chuvochina M, Rinke C, Mussig AJ, Chaumeil P-A, Hugenholtz P. GTDB: an ongoing census of bacterial and archaeal diversity through a phylogenetically consistent, rank normalized and complete genome-based taxonomy (2022). <cite>Nucleic Acids Research</cite> 50(D1):D785&#8211;D794. <a href="https://doi.org/10.1093/nar/gkab776" rel="noopener">doi:10.1093/nar/gkab776</a></p>
+          <div class="cite-links">
+            <a href="https://gtdb.ecogenomic.org/" rel="noopener">gtdb.ecogenomic.org</a>
+          </div>
+        </li>
+        <li class="cite-item">
+          <h3>pysylph <span class="role">Python bindings</span></h3>
+          <p class="ref">Martin Larralde. PyO3 bindings and Python interface to sylph.</p>
+          <div class="cite-links">
+            <a href="https://github.com/althonos/pysylph" rel="noopener">GitHub</a>
+            <a href="https://pysylph.readthedocs.io/" rel="noopener">Docs</a>
+          </div>
+        </li>
+        <li class="cite-item">
+          <h3>sylphd <span class="role">this server and client</span></h3>
+          <p class="ref">Thomas Roder at <a href="https://abrinca.com" rel="noopener">Abrinca Genomics</a>. A small server and client around pysylph.</p>
+          <div class="cite-links">
+            <a href="https://github.com/MrTomRod/sylphd" rel="noopener">GitHub</a>
+            <a href="https://github.com/MrTomRod/sylphd#readme" rel="noopener">Docs</a>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </section>
+
   <footer class="site-footer">
     <div class="wrap">
-      <p>
-        <a href="https://github.com/MrTomRod/sylphd" rel="noopener">sylphd on GitHub</a> ·
-        k-mer containment ANI by
-        <a href="https://github.com/bluenote-1577/sylph" rel="noopener">sylph</a> (Jim Shaw &amp; Yun William Yu) ·
-        Python bindings by <a href="https://github.com/althonos/pysylph" rel="noopener">pysylph</a> (Martin Larralde) ·
-        taxonomy and genome metadata from <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a>.
-      </p>
-      <p class="muted">Example genome: <i>Mycoplasmoides genitalium</i> G37, NCBI RefSeq
+      <p>Example genome: <i>Mycoplasmoides genitalium</i> G37, NCBI RefSeq
         <a href="https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_000027325.1/" rel="noopener">GCF_000027325.1</a>.</p>
     </div>
   </footer>
