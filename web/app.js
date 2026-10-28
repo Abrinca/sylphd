@@ -628,51 +628,82 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
 
   /* gauge */
+  // Piecewise-linear scale: [GAUGE_MIN, imprecise_below] -> first 25 % of the arc,
+  // [imprecise_below, species] -> next 35 %, [species, 100] -> last 40 %.
+  const GAUGE_MIN = 75, GAUGE_MAX = 100, GAUGE_SHARE = [0.25, 0.35, 0.40];
   function gauge(ani, thr, species) {
     const W = 360, H = 212, cx = 180, cy = 170, R = 125;
-    const min = Math.min(75, Math.floor(ani / 5) * 5), max = 100;
-    const ang = (v) => Math.PI * (1 - (Math.min(max, Math.max(min, v)) - min) / (max - min));
-    const pt = (v, r) => [cx + r * Math.cos(ang(v)), cy - r * Math.sin(ang(v))];
-    const arc = (v1, v2) => {
-      const [x1, y1] = pt(v1, R), [x2, y2] = pt(v2, R);
-      return `M${x1.toFixed(2)} ${y1.toFixed(2)}A${R} ${R} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+    const imp = thr.imprecise_below, sp = thr.species;
+    const min = GAUGE_MIN, max = GAUGE_MAX;
+    const stops = [min, imp, sp, max];
+    const okScale = imp > min && sp > imp && max > sp;
+    // value -> position on the arc, 0 (left end) .. 1 (right end); values outside clamp
+    const frac = (v) => {
+      v = Math.min(max, Math.max(min, v));
+      if (!okScale) return (v - min) / (max - min);
+      let acc = 0;
+      for (let i = 0; i < 3; i++) {
+        if (v <= stops[i + 1]) return acc + GAUGE_SHARE[i] * (v - stops[i]) / (stops[i + 1] - stops[i]);
+        acc += GAUGE_SHARE[i];
+      }
+      return 1;
     };
-    const imp = thr.imprecise_below;
-    // 'below' is everything under the species threshold; under ~85 % it is drawn dashed (imprecise).
-    const zones = [
-      { a: min, b: Math.min(imp, thr.species), c: 'below', dash: true },
-      { a: Math.max(min, imp), b: thr.species, c: 'below' },
-      { a: thr.species, b: max, c: 'species' },
-    ].filter((z) => z.b > z.a);
-    const color = species ? 'species' : 'below';
+    const ang = (v) => Math.PI * (1 - frac(v));
+    const pt = (v, r) => [cx + r * Math.cos(ang(v)), cy - r * Math.sin(ang(v))];
+    const arc = (v1, v2, r) => {
+      const [x1, y1] = pt(v1, r), [x2, y2] = pt(v2, r);
+      return `M${x1.toFixed(2)} ${y1.toFixed(2)}A${r} ${r} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+    };
+    // colour by the zone the value falls in: red (imprecise), orange (below species), green (species)
+    const zone = ani < imp ? 'distant' : (species && ani >= sp) ? 'species' : 'below';
+    const zoneColor = `var(--${zone})`;
+    const interp = zone === 'species' ? 'species level'
+      : zone === 'below' ? `below the species threshold of ${sp} percent`
+        : `below ${imp} percent, imprecise, distantly related`;
     const g = svg('svg', {
       class: 'gauge', viewBox: `0 0 ${W} ${H}`, role: 'img',
-      'aria-label': `ANI ${ani.toFixed(2)} percent, ${species ? 'species level' : 'below the species threshold'}`,
+      'aria-label': `ANI ${ani.toFixed(2)} percent, ${interp}`,
     });
-    for (const z of zones) {
-      const attrs = (extra) => Object.assign({ class: 'track' + (z.dash ? ' imprecise' : ''), stroke: `var(--${z.c})` }, extra);
-      g.append(svg('path', attrs({ d: arc(z.a, z.b), class: 'track zone-dim' + (z.dash ? ' imprecise' : '') })));
-      if (ani > z.a) g.append(svg('path', attrs({ d: arc(z.a, Math.min(z.b, ani)) })));
+    // neutral track for the full scale
+    g.append(svg('path', { d: arc(min, max, R), class: 'track' }));
+    // fill from the scale minimum up to the value; the part under imprecise_below is striped
+    const v = Math.min(max, Math.max(min, ani));
+    if (v > min) {
+      const cut = okScale ? Math.min(v, imp) : min;
+      if (cut > min) g.append(svg('path', { d: arc(min, cut, R), class: 'fill imprecise', stroke: zoneColor }));
+      if (v > cut) g.append(svg('path', { d: arc(cut, v, R), class: 'fill', stroke: zoneColor }));
     }
-    // hard marker: species threshold; soft, dashed marker: imprecise below ~85 %
+    // thin zone bands inside the arc keep the thresholds visible on the unfilled track
+    if (okScale) {
+      for (const [a, b, c] of [[min, imp, 'distant'], [imp, sp, 'below'], [sp, max, 'species']]) {
+        g.append(svg('path', { d: arc(a, b, R - 17), class: 'band', stroke: `var(--${c})` }));
+      }
+    }
+    // threshold ticks: dashed at imprecise_below, solid at species
     const marks = [];
-    if (imp > min && imp < thr.species) marks.push([imp, `${imp}`, true]);
-    marks.push([thr.species, `species ${thr.species}`, false]);
-    for (const [v, label, soft] of marks) {
-      const [x1, y1] = pt(v, R - 14), [x2, y2] = pt(v, R + (soft ? 9 : 13)), [lx, ly] = pt(v, R + 20);
-      const cos = Math.cos(ang(v));
+    if (okScale) marks.push([imp, `${imp}`, true]);
+    if (sp > min && sp < max) marks.push([sp, `species ${sp}`, false]);
+    for (const [mv, label, soft] of marks) {
+      const [x1, y1] = pt(mv, R - 21), [x2, y2] = pt(mv, R + (soft ? 10 : 14)), [lx, ly] = pt(mv, R + 22);
+      const cos = Math.cos(ang(mv));
       g.append(svg('line', { x1, y1, x2, y2, class: soft ? 'tick soft' : 'tick' }));
       g.append(svg('text', {
-        x: lx, y: ly, class: soft ? 'thr soft' : 'thr',
+        x: lx, y: ly + 4, class: soft ? 'thr soft' : 'thr',
         'text-anchor': cos > 0.25 ? 'start' : cos < -0.25 ? 'end' : 'middle',
       }, label));
     }
     g.append(svg('text', { x: cx - R, y: cy + 36, 'text-anchor': 'middle' }, String(min)));
     g.append(svg('text', { x: cx + R, y: cy + 36, 'text-anchor': 'middle' }, String(max)));
-    const [kx, ky] = pt(ani, R);
-    g.append(svg('circle', { cx: kx, cy: ky, r: 11, class: 'knob', stroke: `var(--${color})` }));
-    g.append(svg('text', { x: cx, y: cy - 22, 'text-anchor': 'middle', class: 'value' }, ani.toFixed(2)));
-    g.append(svg('text', { x: cx, y: cy - 2, 'text-anchor': 'middle', class: 'unit' }, 'k-mer ANI, %'));
+    // needle pointing from the centre toward the value (starts clear of the number), then a knob on the arc
+    const [kx, ky] = pt(v, R), [nx, ny] = pt(v, 92);
+    g.append(svg('line', { x1: nx, y1: ny, x2: kx, y2: ky, class: 'needle' }));
+    g.append(svg('circle', { cx: nx, cy: ny, r: 3.5, class: 'hub' }));
+    g.append(svg('g', { class: 'knob' },
+      svg('circle', { cx: kx, cy: ky, r: 16, class: 'knob-outer' }),
+      svg('circle', { cx: kx, cy: ky, r: 14.5, class: 'knob-ring' }),
+      svg('circle', { cx: kx, cy: ky, r: 10.5, fill: zoneColor })));
+    g.append(svg('text', { x: cx, y: cy - 30, 'text-anchor': 'middle', class: 'value' }, ani.toFixed(2)));
+    g.append(svg('text', { x: cx, y: cy - 12, 'text-anchor': 'middle', class: 'unit' }, 'k-mer ANI, %'));
     return g;
   }
 

@@ -252,17 +252,24 @@ textarea:disabled { opacity: .5; }
 .best > * { min-width: 0; }
 .best { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 10px 32px; align-items: center; }
 .gauge { width: 100%; height: auto; display: block; }
-.gauge .track { fill: none; stroke-width: 20; }
-.gauge .zone-dim { opacity: .25; }
-.gauge .imprecise { stroke-dasharray: 3 5; }
+.gauge { --gauge-track: color-mix(in srgb, var(--muted) 30%, var(--card)); }
+.gauge .track { fill: none; stroke-width: 20; stroke: var(--gauge-track); }
+.gauge .fill { fill: none; stroke-width: 20; }
+.gauge .imprecise { stroke-dasharray: 3 4; }
+.gauge .band { fill: none; stroke-width: 4; }
 .gauge .tick { stroke: var(--fg); stroke-width: 2; }
 .gauge .tick.soft { stroke-width: 1.5; stroke-dasharray: 3 2; opacity: .75; }
-.gauge text.thr.soft { fill: var(--muted); font-weight: 400; }
 .gauge text { fill: var(--muted); font-size: 12px; font-family: inherit; }
 .gauge text.thr { fill: var(--fg); font-weight: 600; }
+.gauge text.thr.soft { fill: var(--muted); font-weight: 400; }
+.gauge text.value, .gauge text.unit { paint-order: stroke; stroke: var(--card); stroke-width: 5px; stroke-linejoin: round; }
 .gauge text.value { fill: var(--fg); font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .gauge text.unit { font-size: 12px; letter-spacing: .06em; }
-.gauge .knob { fill: var(--card); stroke-width: 5; }
+.gauge .needle { stroke: var(--fg); stroke-width: 3; stroke-linecap: round; }
+.gauge .hub { fill: var(--fg); }
+.gauge .knob { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .4)); }
+.gauge .knob-outer { fill: var(--fg); }
+.gauge .knob-ring { fill: var(--card); }
 .verdict { margin: 0; font-size: 1.5rem; font-weight: 700; line-height: 1.25; letter-spacing: -.01em; }
 .verdict .tag { display: inline-block; }
 .verdict-species { color: var(--species); }
