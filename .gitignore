@@ -28,3 +28,6 @@ db/
 # Zensical build cache (it drops its own `.gitignore` with `*` inside).
 /.cache/
 /public/
+
+# WebAssembly sketcher, built by sketch-wasm/build.sh (preview script, Pages workflow)
+/web/wasm/

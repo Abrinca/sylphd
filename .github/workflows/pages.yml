@@ -9,12 +9,14 @@ on:
     paths:
       - "web/**"
       - "docs/**"
+      - "sketch-wasm/**"
       - "zensical.toml"
       - ".github/workflows/pages.yml"
   pull_request:
     paths:
       - "web/**"
       - "docs/**"
+      - "sketch-wasm/**"
       - "zensical.toml"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -24,6 +26,15 @@ on:
 # granted per job below, only to the job that deploys.
 permissions:
   contents: read
+
+env:
+  # The "Reads" mode sketches in the browser with sketch-wasm/ (Rust -> WebAssembly), built here
+  # and copied into the site; the binaries are not committed. wasm-bindgen-cli must equal the
+  # `wasm-bindgen` crate version in sketch-wasm/Cargo.toml (pinned with `=`).
+  RUST_VERSION: "1.98.1"
+  WASM_BINDGEN_VERSION: "0.2.129"
+  # sha256 of wasm-bindgen-<version>-x86_64-unknown-linux-musl.tar.gz (GitHub release asset)
+  WASM_BINDGEN_SHA256: "82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e"
 
 concurrency:
   group: pages
@@ -41,7 +52,27 @@ jobs:
       # v10.3.1 (there is no `v10` tag).
       - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
       - run: uvx zensical build --clean --strict
-      # web/ at the root, the built docs under docs/.
+      - name: Install the Rust wasm toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
+          rustup default "$RUST_VERSION"
+          base="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          curl -fsSL -o "$RUNNER_TEMP/wb.tar.gz" "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$base.tar.gz"
+          echo "$WASM_BINDGEN_SHA256  $RUNNER_TEMP/wb.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$RUNNER_TEMP/wb.tar.gz" -C "$HOME/.local/bin" --strip-components=1 "$base/wasm-bindgen"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Cache cargo registry and build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sketch-wasm/target
+          key: wasm-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('sketch-wasm/Cargo.lock') }}
+      - name: Build the WebAssembly sketcher into web/wasm
+        run: sketch-wasm/build.sh ../web/wasm
+      # web/ (with wasm/) at the root, the built docs under docs/.
       - name: Assemble the Pages artifact
         run: |
           mkdir -p public
