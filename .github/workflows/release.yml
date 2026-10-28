@@ -1,0 +1,247 @@
+name: Release
+
+# Publish installable artifacts for production servers, which have no Rust
+# toolchain and must not compile anything:
+#
+#   * the `sylphd` sdist and pure-Python wheel (`uv build`);
+#   * a `pysylph` wheel for every supported Linux architecture, built from the
+#     exact commit pinned in `uv.lock`, for CPython 3.14, manylinux_2_28;
+#   * a `dnaio` wheel for linux/aarch64, because PyPI has no wheel for that
+#     platform and it is a Cython extension (see `docs/install.md`).
+#
+# `workflow_dispatch` runs the whole pipeline as a dry run and publishes
+# nothing.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Least privilege: the build jobs only read the repository. Creating the
+# release needs `contents: write`; only the `publish` job gets it.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sdist:
+    name: sdist and wheel
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check that the tag matches the package version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
+          init=$(python3 -c 'import pathlib, re; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("src/sylphd/__init__.py").read_text()).group(1))')
+          echo "pyproject.toml: $version, src/sylphd/__init__.py: $init"
+          if [ "$version" != "$init" ]; then
+            echo "::error::pyproject.toml says $version but src/sylphd/__init__.py says $init"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match version $version (expected v$version)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - run: uv build --out-dir dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-sdist
+          path: dist/*
+          if-no-files-found: error
+
+  wheels:
+    name: pysylph wheel (${{ matrix.arch }})
+    needs: sdist
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the pysylph source from uv.lock
+        id: pin
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import pathlib, re, tomllib
+
+          lock = tomllib.loads(pathlib.Path("uv.lock").read_text())
+          packages = {package["name"]: package for package in lock["package"]}
+          source = packages["pysylph"]["source"]["git"]
+          url, rev = source.split("#", 1)
+          repo = re.sub(r"^https://github\.com/", "", url.split("?")[0]).rstrip("/")
+          version = packages["pysylph"]["version"]
+          print(f"repo={repo}")
+          print(f"rev={rev}")
+          # A local version label keeps the fork's wheel distinct from PyPI's
+          # pysylph 0.1.3, so installs can never pick the wrong one.
+          print(f"label={version}+g{rev[:7]}")
+          print(f"dnaio={packages['dnaio']['version']}")
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.rev }}
+          path: pysylph-src
+          persist-credentials: false
+      - name: Set the local version label in the fork
+        working-directory: pysylph-src
+        env:
+          LABEL: ${{ steps.pin.outputs.label }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, pathlib, re
+
+          # `[project] dynamic = ["version"]`: maturin reads the version from
+          # Cargo.toml, and Cargo's build metadata maps onto a PEP 440 local
+          # version (0.1.3+g9bb3c71).
+          path = pathlib.Path("Cargo.toml")
+          text = path.read_text()
+          patched, count = re.subn(
+              r'(?m)^version = "[^"]+"$',
+              f'version = "{os.environ["LABEL"]}"',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("could not find the package version in Cargo.toml")
+          path.write_text(patched)
+          PY
+          grep -n '^version' Cargo.toml
+      # PyO3/maturin-action builds inside a pypa/manylinux_2_28 container, which
+      # ships cmake (needed by libz-ng-sys) and every CPython. `manylinux: 2_28`
+      # is fine for Oracle Linux 10 (glibc 2.39).
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: pysylph-src
+          target: ${{ matrix.target }}
+          manylinux: 2_28
+          args: --release --out dist --interpreter /opt/python/cp314-cp314/bin/python
+          before-script-linux: cmake --version
+      # dnaio is a Cython extension and PyPI publishes no linux/aarch64 wheel,
+      # so build one here; otherwise the server would need a C compiler.
+      - name: Build the dnaio wheel (PyPI has no aarch64 wheel)
+        if: matrix.arch == 'aarch64'
+        env:
+          DNAIO_VERSION: ${{ steps.pin.outputs.dnaio }}
+          MANYLINUX_IMAGE: quay.io/pypa/manylinux_2_28_${{ matrix.arch }}
+        run: |
+          set -eux
+          mkdir -p dist dnaio-dist
+          docker run --rm -v "$GITHUB_WORKSPACE:/io" -w /io "$MANYLINUX_IMAGE" bash -ec "
+            /opt/python/cp314-cp314/bin/python -m pip wheel --no-deps --no-binary :all: \
+              --wheel-dir /io/dnaio-dist 'dnaio==$DNAIO_VERSION'
+            auditwheel repair --wheel-dir /io/dist /io/dnaio-dist/dnaio-*.whl
+          "
+      - name: Collect the wheels
+        run: |
+          set -eux
+          mkdir -p dist
+          mv pysylph-src/dist/*.whl dist/
+          ls -l dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-wheels-${{ matrix.arch }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  smoke:
+    name: install and smoke test (${{ matrix.arch }})
+    needs: [sdist, wheels]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist-sdist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist-wheels-${{ matrix.arch }}
+          path: dist
+      # `--only-binary :all:` fails the run if anything would have to be built
+      # from source, which is exactly the guarantee we sell to the server.
+      - name: Install from the built wheels only
+        env:
+          VERSION: ${{ needs.sdist.outputs.version }}
+        run: |
+          set -eux
+          ls -l dist
+          uv venv --python 3.14 smoke
+          VIRTUAL_ENV="$PWD/smoke" uv pip install --python smoke/bin/python \
+            --only-binary :all: --find-links dist "sylphd==$VERSION" pytest
+          smoke/bin/sylphd --version
+          smoke/bin/sylphd info --help > /dev/null
+          # The fork's wheel, not PyPI's pysylph 0.1.3.
+          smoke/bin/python -c 'import pysylph; print(pysylph.__version__); assert "+g" in pysylph.__version__'
+      - name: Run a test subset against the installed package
+        run: |
+          set -eux
+          smoke/bin/python -m pytest tests/test_sketching.py tests/test_server.py -q
+
+  publish:
+    name: publish the GitHub release
+    # Tags only: `workflow_dispatch` is the dry run.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [sdist, wheels, smoke]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        working-directory: dist
+        run: |
+          set -eux
+          sha256sum ./* > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eux
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'
