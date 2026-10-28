@@ -121,6 +121,83 @@ profile: ... Taxonomic_abundance Sequence_abundance ... kmers_reassigned ...
 
 With `--estimate-unknown`, `Eff_cov` is labelled `True_cov`, as in sylph.
 
+#### Taxonomic profiles (`--taxprof`, `--taxmatrix`)
+
+`sylphd profile` can fold its ANI hits into per-rank taxonomic profiles on the
+client, mirroring `sylph-tax taxprof` and `sylph-tax merge`. It only needs the
+`gtdb_taxonomy` and `ncbi_taxonomy` metadata columns, so the server must run
+with `--meta`. The client always requests those two columns, even when
+`--fields` hides them from the main TSV.
+
+```console
+sylphd profile -r sample.fq.gz \
+    --taxonomy gtdb,ncbi \
+    --taxprof results/ \
+    --taxmatrix results/
+```
+
+- `--taxonomy LIST`: `gtdb`, `ncbi`, or both, comma-separated. Default
+  `gtdb,ncbi`. Only `profile` has these flags.
+- `--taxprof PREFIX`: writes one MetaPhlAn-style file per sample and taxonomy,
+  `PREFIX<sample>.<gtdb|ncbi>.sylphmpa`, in sylph-tax's format: the
+  `#SampleID ... Taxonomies_used:['gtdb']` comment line, then
+  `clade_name relative_abundance sequence_abundance ANI (if strain-level)
+  Coverage (if strain-level)`.
+- `--taxmatrix PREFIX`: writes one wide table per taxonomy,
+  `PREFIX<gtdb|ncbi>.tsv`, with a `clade_name` column followed by one column
+  per sample. Clades missing from a sample are `0.0`.
+- `--taxmatrix-value relative|sequence`: value used by `--taxmatrix`; default
+  `relative` (`Taxonomic_abundance`). `sequence` uses `Sequence_abundance`.
+
+Both flags can be combined with the normal TSV/JSON output (`-o`, `--format`).
+The prefix is used verbatim, so end it with `/` (or a directory that exists) to
+write into a directory; the directory is not created.
+
+A `.sylphmpa` file looks like this:
+
+```
+#SampleID	sample-a	Taxonomies_used:['gtdb']
+clade_name	relative_abundance	sequence_abundance	ANI (if strain-level)	Coverage (if strain-level)
+d__Bacteria	100.0	100.0	NA	NA
+d__Bacteria|p__Bacillota	60.0	42.5	NA	NA
+d__Bacteria|p__Bacillota|c__Clostridia	60.0	42.5	NA	NA
+...
+d__Bacteria|p__Bacillota|c__Clostridia|...|s__Clostridium difficile	60.0	42.5	NA	NA
+d__Bacteria|p__Bacillota|c__Clostridia|...|s__Clostridium difficile|t__GCA_000000001.1	60.0	42.5	99.79	1.234
+```
+
+Each row is a cumulative lineage: a clade's abundances are the sums of all
+genomes below it, so `d__Bacteria` is the sum of every hit of that sample.
+Rows are ordered rank by rank, and within a rank by decreasing relative
+abundance (ties keep the order the server returned). Only `t__` rows carry
+`Adjusted_ANI` and `Eff_cov` (or `True_cov`); the other rows have `NA` there.
+`sylph-tax merge` can read these files directly.
+
+Lineage rules:
+
+- GTDB strings name every rank (`d__..;p__..;c__..;o__..;f__..;g__..;s__..`);
+  NCBI strings may leave ranks empty.
+- Trailing empty ranks are dropped: the lineage stops at the last named rank
+  and the `t__` genome hangs directly below it (an empty `s__` puts the
+  strain under the genus).
+- An empty rank *before* a named one is filled with
+  `{rank}__unclassified {nearest named ancestor}`, e.g.
+  `o__unclassified Clostridia`, so every genome of a sample uses the same
+  path for that rank. With no named ancestor the suffix is `root`.
+- `t__` is the genome accession (`GCA_...`/`GCF_...`, as stored in the
+  `accession` column, like sylph-tax's taxonomy files) or, when no accession
+  is known, the `Genome_file` base name.
+- Rows without any usable taxonomy (no metadata, no accession match, `none`)
+  go to a single `unclassified` clade, with the genome as `t__` below it.
+  sylph-tax's default for such rows is `NO_TAXONOMY;t__<file>:<contig>`.
+- Abundances are summed exactly as the server reports them; they are never
+  renormalised. With `--estimate-unknown` the root clade may therefore stay
+  below 100.
+
+The matrix columns are sample names in request order; rows are all clades seen
+in any sample, in first-seen order (the same order sylph-tax merge produces
+when joining its profiles in that order).
+
 ### `sylphd download`
 
 ```
