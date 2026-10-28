@@ -156,10 +156,12 @@ jobs:
             auditwheel repair --wheel-dir /io/dist /io/dnaio-dist/dnaio-*.whl
           "
       - name: Collect the wheels
+        # The container writes the wheels as root; copying only needs read
+        # access, unlike moving them out of a root-owned directory.
         run: |
           set -eux
           mkdir -p dist
-          mv pysylph-src/dist/*.whl dist/
+          cp -v pysylph-src/dist/*.whl dist/
           ls -l dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
