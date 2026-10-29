@@ -15,20 +15,20 @@ shares one copy across runs, parallel jobs and users.
 |---|---|
 | Commands | `serve`, `profile`, `query`, `info`, `download`, `setup`, and later `assembly` |
 | Transport | HTTP over a Unix socket by default, `--tcp host:port` as an option. No TLS, no auth |
-| Server stack | Starlette and uvicorn, exactly one worker process. Blocking pysylph calls run in a thread pool, and a semaphore caps concurrent profiling jobs (the rest queue). A new `Profiler` per request (cheap; it only holds references) |
+| Server stack | Starlette and uvicorn, exactly one worker process. Blocking pysylph calls run in a thread pool, and a semaphore caps concurrent profiling jobs (the rest queue). One `Profiler` per parameter set, cached and shared by all threads: with one database it only holds references, but with two or more its constructor scans every genome, so it must not be rebuilt per request. A `pysylph.Profiler` is read-only and safe to use concurrently |
 | Sketch transfer | `SampleSketch.to_bytes()` and `from_bytes()` in the pysylph `multi-db` branch. The server enforces an upload limit and checks the sketch's `c` and `k` against the database |
 | Requests | Several samples per request |
 | Responses | JSON rows from the server; the CLI writes TSV (sylph-like columns plus metadata columns) |
 | Database identity | File name and size, plus an optional hash (off by default), reported by `/info` |
 | Fallback | None. The client requires a server |
 | Service | Plain `sylphd serve`; no systemd unit shipped |
-| One database | One database per server process |
+| Databases | `serve --db [NAME=]PATH`, repeatable: one pool per server process, all with the same `k`; samples are sketched at the smallest `c` |
 | Tests | pytest on Python 3.14 with pysylph's small test data; GTDB only for manual runs |
 
 ## Architecture
 
-- **Server.** Loads the database at startup and offers `/health`, `/info`, `/profile`, `/query`
-  and `/assembly`.
+- **Server.** Loads the databases at startup (in parallel threads) and offers `/health`, `/info`,
+  `/profile`, `/query` and `/assembly`.
 - **Client library and CLI.** Ask the server for `c` and `k`, sketch locally, send the sketches and
   write the rows. Inputs: single-end reads (also long reads and assemblies), paired reads,
   interleaved reads, several files per sample (combined into one sketch) and existing `.sylsp`

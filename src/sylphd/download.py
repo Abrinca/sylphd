@@ -302,7 +302,8 @@ DATABASES: dict[str, Database] = {
             (_FAUST + "uhgv_c200_dbv1.syldb", _GCS + "uhgv_c200_dbv1.syldb"),
             size=227714056,
             md5="2fa195f73b7e685ac19d44f2d56dde1b",
-            genomes=171338,
+            # measured from the file: len(Database), MD5 matches the entry
+            genomes=168536,
             c=200,
             description="UHGV gut vOTUs, c200",
         ),

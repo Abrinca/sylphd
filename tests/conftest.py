@@ -10,6 +10,7 @@ DATA = Path(__file__).parent / "data"
 
 ECOLI_TWO_STAGE = DATA / "ecoli.syl2db"
 ECOLI_PLAIN = DATA / "ecoli.syldb"
+CLODF13_PLAIN = DATA / "clodf13.syldb"
 O157_SKETCH = DATA / "o157.sylsp"
 K12_PAIRED_SKETCH = DATA / "k12.paired.sylsp"
 K12_R1_SKETCH = DATA / "k12.R1.sylsp"

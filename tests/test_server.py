@@ -13,13 +13,12 @@ import dnaio
 import pysylph
 import pytest
 import uvicorn
+from conftest import CLODF13_FASTA, ECOLI_TWO_STAGE, K12_R1, MIX_SKETCH, O157_SKETCH
 from starlette.testclient import TestClient
 
-from sylphd import cli
-from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
+from sylphd.metadata import METADATA_COLUMNS
 from sylphd.protocol import ProfileParams, columns_for_mode, format_row, format_value
 from sylphd.server import (
-    LoadedDatabase,
     ServerConfig,
     _socket_identity,
     _unlink_socket_if_owned,
@@ -28,8 +27,6 @@ from sylphd.server import (
     prepare_unix_socket,
     serve,
 )
-
-from conftest import CLODF13_FASTA, ECOLI_TWO_STAGE, K12_R1, MIX_SKETCH, O157_SKETCH
 
 
 def _reads(path):
@@ -253,13 +250,12 @@ class TestErrors:
         assert response.status_code == 400
         assert "sparser" in response.json()["error"]
 
-    def test_database_genome_denser_than_sketch_is_400(self, tmp_path: Path) -> None:
-        """pysylph's ``ValueError`` for an incompatible sketch becomes a 400.
+    def test_plain_database_advertises_the_smallest_genome_c(self, tmp_path: Path) -> None:
+        """A plain database's ``c`` is the minimum over its genomes.
 
-        ``/info`` reports the first genome's ``c`` (400), so a sketch at c=300
-        passes sylphd's header check, but the second genome was sketched at
-        c=200 and pysylph refuses to profile against it.  sylph terminates on
-        that condition, so it is the client's bad request, not a server fault.
+        The genomes below were sketched at c=400 and c=200, so ``/info`` says
+        200 and a c=300 sketch is refused by the header check instead of being
+        sent to pysylph, which would reject it while naming only the genome.
         """
         with dnaio.open(CLODF13_FASTA) as reader:
             sequences = [record.sequence for record in reader]
@@ -280,12 +276,34 @@ class TestErrors:
         app = create_app(ServerConfig(db_path=db_path))
         sketch = pysylph.Sketcher(c=300, k=31).sketch_single("mixed", _reads(K12_R1))
         with TestClient(app) as mixed:
+            assert mixed.get("/info").json()["database"]["c"] == 200
             response = _post(mixed, "profile", [("mixed", sketch.to_bytes())])
             assert response.status_code == 400
             error = response.json()["error"]
-            assert "c parameter for sample" in error
+            assert "sketch c=300" in error and "database c=200" in error
             # Still a healthy server: the next request is answered normally.
             assert mixed.get("/health").status_code == 200
+
+    def test_profiler_runtime_error_is_400(self, client: TestClient, monkeypatch) -> None:
+        """A ``ValueError`` from ``profile``/``query`` is also a 400.
+
+        sylphd's header check catches ``c``/``k`` mismatches first; pysylph can
+        still refuse a sketch per genome, and that is the client's bad request.
+        """
+
+        class Refuse:
+            def profile(self, sketch):
+                raise ValueError(
+                    "c parameter for sample (300) > c parameter for genome x (200)"
+                )
+
+        monkeypatch.setattr(
+            client.app.state.database, "profiler", lambda params: Refuse()
+        )
+        response = _post(client, "profile", [("o157", O157_SKETCH.read_bytes())])
+        assert response.status_code == 400
+        assert "cannot profile this sample" in response.json()["error"]
+        assert "c parameter for sample" in response.json()["error"]
 
     def test_profiler_construction_error_is_400(
         self, client: TestClient, monkeypatch
@@ -295,6 +313,9 @@ class TestErrors:
         def refuse(*args, **kwargs):
             raise ValueError("k parameter for sample (31) != k parameter for database (21)")
 
+        # Profilers are cached per parameter set; drop the cached one so this
+        # request has to build (and the patched constructor is called).
+        client.app.state.database.clear_profilers()
         monkeypatch.setattr("sylphd.profiling.pysylph.Profiler", refuse)
         response = _post(client, "profile", [("o157", O157_SKETCH.read_bytes())])
         assert response.status_code == 400
@@ -490,20 +511,19 @@ class TestConcurrency:
             ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1),
             database=client.app.state.database,
         )
-        with TestClient(app) as test_client:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(
-                    test_client.post,
-                    "/query",
-                    data={"params": "{}"},
-                    files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
-                )
-                assert started.wait(timeout=5)
-                health = test_client.get("/health")
-                assert health.status_code == 200
-                release.set()
-                response = future.result(timeout=10)
-                assert response.status_code == 200
+        with TestClient(app) as test_client, ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                test_client.post,
+                "/query",
+                data={"params": "{}"},
+                files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
+            )
+            assert started.wait(timeout=5)
+            health = test_client.get("/health")
+            assert health.status_code == 200
+            release.set()
+            response = future.result(timeout=10)
+            assert response.status_code == 200
 
     def test_unexpected_failure_is_logged_but_not_sent_to_the_client(
         self, client: TestClient, monkeypatch, caplog

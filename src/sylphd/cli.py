@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import os
 import sqlite3
 import sys
+import time
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -37,8 +39,9 @@ from .download import (
 )
 from .metadata import build_metadata_db
 from .paths import check_socket_path, default_socket_path, parse_tcp
+from .profiling import DatabaseSet, DatabaseSpec
 from .protocol import ProfileParams, ProtocolError, rows_to_tsv_lines
-from .server import LoadedDatabase, ServerConfig, create_app, serve
+from .server import ServerConfig, create_app, serve
 from .sketching import (
     InputError,
     SampleInput,
@@ -54,6 +57,8 @@ from .taxonomy import (
     resolve_taxonomy_columns,
     write_outputs,
 )
+
+log = logging.getLogger("sylphd")
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -105,17 +110,34 @@ def _open_output(path: str | None) -> Iterator[Any]:
 # ---------------------------------------------------------------------------
 
 
+def _configure_logging(level: str) -> None:
+    """Make the ``sylphd`` logger (load times, warnings) follow ``--log-level``."""
+    logger = logging.getLogger("sylphd")
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter(f"{PROG}: %(message)s"))
+        logger.addHandler(handler)
+        logger.propagate = False
+    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     if args.socket is not None and args.tcp is not None:
         _print_error("--socket and --tcp are mutually exclusive")
         return 2
+    _configure_logging(args.log_level)
 
     # Check --name/--about first (cheap): a bad one must fail before the
     # database is loaded.
     name = check_name(args.name)
     about = About(Path(args.about) if args.about else None)
+    try:
+        specs = parse_db_specs(args.db)
+    except ValueError as error:
+        _print_error(str(error))
+        return 2
     config = ServerConfig(
-        db_path=Path(args.db),
+        db_paths=specs,
         meta_path=Path(args.meta) if args.meta else None,
         max_jobs=args.max_jobs,
         max_upload_mb=args.max_upload_mb,
@@ -145,9 +167,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
             return 2
         config.socket_path = socket_path
 
-    database = LoadedDatabase(config.db_path, compute_hash=config.compute_hash)
-    app = create_app(config, database=database)
-    _log_startup(database, config, socket_path, tcp)
+    databases = DatabaseSet.load(config.db_paths, compute_hash=config.compute_hash)
+    # Warm the default profiler: its construction scans every genome when
+    # there are two or more databases, which must not happen in a request.
+    started = time.perf_counter()
+    databases.profiler(ProfileParams())
+    profiler_seconds = time.perf_counter() - started
+    app = create_app(config, database=databases)
+    _log_startup(databases, config, socket_path, tcp)
+    log.info("profiler ready in %.2f s", profiler_seconds)
     try:
         serve(
             config,
@@ -161,8 +189,25 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_db_specs(values: Sequence[str]) -> tuple[DatabaseSpec, ...]:
+    """Turn the repeated ``--db`` values into specs, rejecting duplicate names."""
+    specs = tuple(DatabaseSpec.parse(value) for value in values)
+    if not specs:
+        raise ValueError("at least one --db is required")
+    seen: dict[str, Path] = {}
+    for spec in specs:
+        if spec.display_name in seen:
+            raise ValueError(
+                f"two databases are both named {spec.display_name!r} "
+                f"({seen[spec.display_name]} and {spec.path}); "
+                "give one an alias with --db NAME=PATH"
+            )
+        seen[spec.display_name] = spec.path
+    return specs
+
+
 def _log_startup(
-    database: LoadedDatabase,
+    databases: DatabaseSet,
     config: ServerConfig,
     socket_path: Path | None,
     tcp: tuple[str, int] | None,
@@ -172,7 +217,7 @@ def _log_startup(
     else:
         assert tcp is not None
         address = f"http://{tcp[0]}:{tcp[1]}"
-    kind = "two-stage" if database.two_stage else "plain"
+    kind = "two-stage" if databases.two_stage else "plain"
     extras = [f"max-jobs={config.max_jobs}", f"max-upload={config.max_upload_mb} MB"]
     if config.allow_sequences:
         extras.append(f"raw-sequence-assembly={config.max_sequence_mb} MB")
@@ -186,8 +231,8 @@ def _log_startup(
     if config.about.path:
         extras.append(f"about={config.about.path}")
     print(
-        f"{PROG}: {database.name} ({kind}, c={database.c}, k={database.k}, "
-        f"{database.genomes} genomes) listening on {address} "
+        f"{PROG}: {databases.name} ({kind}, c={databases.c}, k={databases.k}, "
+        f"{databases.genomes} genomes) listening on {address} "
         f"[{', '.join(extras)}]",
         file=sys.stderr,
         flush=True,
@@ -221,6 +266,22 @@ def cmd_info(args: argparse.Namespace) -> int:
         )
     )
     print(f"  sha256: {database.get('sha256') or '-'}")
+
+    databases = info.get("databases") or []
+    if len(databases) > 1:
+        print(f"databases: {len(databases)}")
+        for entry in databases:
+            kind = "two-stage" if entry.get("two_stage") else "plain"
+            print(
+                "  {name}: {file} ({kind}, c={c}, k={k}, {genomes} genomes)".format(
+                    name=entry.get("name"),
+                    file=entry.get("file"),
+                    kind=kind,
+                    c=entry.get("c"),
+                    k=entry.get("k"),
+                    genomes=entry.get("genomes"),
+                )
+            )
 
     metadata = info.get("metadata")
     if metadata is None:

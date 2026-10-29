@@ -1,15 +1,19 @@
 # Several databases and non-GTDB taxonomy
 
-Design note, not yet implemented. Two coupled features: **A** one server holds several sylph
-databases, **B** `sylphd setup` imports sylph-tax taxonomy files next to the GTDB metadata, so hits
-from viral, fungal, MAG and GlobDB databases get a lineage. They were coupled by one question: for
-a hit, *which database* and *which taxonomy* does it belong to. The first half is settled without
-code — the taxonomy itself says where a hit came from (Decisions).
+Design note. Two coupled features: **A** one server holds several sylph databases, **B**
+`sylphd setup` imports sylph-tax taxonomy files next to the GTDB metadata, so hits from viral,
+fungal, MAG and GlobDB databases get a lineage. They were coupled by one question: for a hit,
+*which database* and *which taxonomy* does it belong to. The first half is settled without code —
+the taxonomy itself says where a hit came from (Decisions).
+
+**Status 2026-10-29: phase 1 (A core) is implemented**; phases 2–4 (all of B, plus the extras) are
+not. The implementation measurements are in `scratch/multi-db/REPORT.md` and are folded into the
+sections marked *measured*.
 
 Primary use is the owner's own backend through the CLI. The public web app stays on one database;
 it must keep working but gets no multi-database features here.
 
-Checked against: pysylph `multi-db` @ `f32d840` (the commit in `uv.lock`), sylph @ `4b5c2be`
+Checked against: pysylph `multi-db` @ `f8f45a1` (the commit in `uv.lock`), sylph @ `4b5c2be`
 (`ref/`), sylph-tax @ `d14f286` (v1.9.2), and the Zenodo taxonomy files themselves. Claims I could
 not verify are marked **(unverified)**.
 
@@ -19,8 +23,9 @@ The owner settled the open questions of the first draft. These decisions overrid
 that still suggests otherwise; the sections are updated to match.
 
 - **Target deployment.** One server with GTDB r232 `db/gtdb-r232-c200-dbv2.syl2db` (199,923
-  genomes), UHGV `db/uhgv_c200_dbv1.syldb` (171,338) and fungi RefSeq 2025-10-11
-  `db/fungi-refseq-2025-10-11-c200-dbv1.syldb` (661), all `c200`, `k31`. IMG/VR is **out of scope
+  genomes), UHGV `db/uhgv_c200_dbv1.syldb` (measured in phase 1: **168,536** genomes; the
+  `download` catalogue said 171,338 and is corrected) and fungi RefSeq 2025-10-11
+  `db/fungi-refseq-2025-10-11-c200-dbv1.syldb` (661), all `c200`, `k31` (measured). IMG/VR is **out of scope
   for now** and may be added later. Because `sample.c` must be `<=` the `c` of *every* database, one
   `c100` database would force `c100` sketches for all samples (about twice the sketch size); the
   `c100` UHGV variant is therefore **not** used.
@@ -148,12 +153,14 @@ that still suggests otherwise; the sections are updated to match.
 
 ### sylphd today
 
+Updated in phase 1: the first four rows describe the code *before* it.
+
 | Where | Assumption |
 |---|---|
-| `server.py: ServerConfig.db_path`, `create_app` | exactly one database |
-| `profiling.py: LoadedDatabase` | `c`, `k` from `db[0]` for a plain database; one `Profiler` per request (`run_sample`, `_assembly_hits`) |
-| `profiling.py: _decode_sketch` | sketch `c` compared with that one database |
-| `server.py: _info` | `database` is one object; the web app reads `database.{name,genomes,c,k}` and `metadata.release` (`web/app.js`, `loadInfo`, `sketchLocally`) |
+| `server.py: ServerConfig.db_path`, `create_app` | exactly one database (**now** `ServerConfig.db_paths: tuple[DatabaseSpec, ...]`, `db_path` kept as the single-database spelling) |
+| `profiling.py: LoadedDatabase` | `c`, `k` from `db[0]` for a plain database; one `Profiler` per request (`run_sample`, `_assembly_hits`) (**now** `DatabaseSet` with one pooled `Profiler` per parameter set) |
+| `profiling.py: _decode_sketch` | sketch `c` compared with that one database (**now** `DatabaseSet.check_sketch`, naming the limiting database) |
+| `server.py: _info` | `database` is one object (**now** the pooled view plus `databases`); the web app reads `database.{name,genomes,c,k}` and `metadata.release` (`web/app.js`, `loadInfo`, `sketchLocally`) |
 | `metadata.py: accession_from_genome_name` | only `GC[AF]_\d+(\.\d+)?`; **every hit from IMG/VR, UHGV, OceanDNA, SoilSMAG, Tara and GlobDB r226 gets no accession and no metadata** |
 | `taxonomy.py: parse_lineage`, `TAXONOMY_COLUMNS` | ranks `d,p,c,o,f,g,s` only; other tokens are dropped; empty ranks filled with `unclassified X`; `t__` forced last |
 | `assembly.py: classify_hits` | GTDB lineage only; no lineage on the best hit means ANI-only labels, on another hit `unknown lineage` |
@@ -180,13 +187,13 @@ read-only property so existing tests and callers work.
 
 ```json
 {"database": {"name": "gtdb-r232-c200-dbv2.syl2db, uhgv_c200_dbv1.syldb,
-                        fungi-refseq-2025-10-11-c200-dbv1.syldb", "genomes": 371922,
+                        fungi-refseq-2025-10-11-c200-dbv1.syldb", "genomes": 369120,
               "c": 200, "k": 31, "screen_c": null, "two_stage": false, "sha256": null},
  "databases": [{"name": "gtdb", "file": "gtdb-r232-c200-dbv2.syl2db", "path": "...",
                 "size": "...", "sha256": null, "genomes": 199923, "c": 200, "k": 31,
                 "screen_c": "...", "two_stage": true},
                {"name": "uhgv", "file": "uhgv_c200_dbv1.syldb", "...": "...",
-                "genomes": 171338, "c": 200, "k": 31, "screen_c": null, "two_stage": false},
+                "genomes": 168536, "c": 200, "k": 31, "screen_c": null, "two_stage": false},
                {"name": "fungi", "file": "fungi-refseq-2025-10-11-c200-dbv1.syldb", "...": "...",
                 "genomes": 661, "c": 200, "k": 31, "screen_c": null, "two_stage": false}]}
 ```
@@ -209,16 +216,24 @@ read-only property so existing tests and callers work.
 | uploaded sketch `k` | `_decode_sketch` | `== k`, as today |
 | uploaded sketch `c` | `_decode_sketch` | `<= minimum c`; name the limiting database in the 400 |
 | `.syldb` / `.syl2db` | nothing | any mix |
+| genomes of one plain `.syldb` | server startup | may differ in `c` (the database's `c` is their minimum); a mixed `k` is refused, naming the database |
 
-Detail: `LoadedDatabase` reads `c` from `db[0]` for a plain database. Genomes of one plain database
-may differ in `c`; pysylph checks them all per call and raises `ValueError`, which `_handle`
-currently turns into a 500. Map that `ValueError` to a 400 in phase -1 (small independent fix,
-see Phasing). The target set is GTDB r232 `c200` + UHGV `c200` + fungi RefSeq `c200`, all `k31`,
+Detail: genomes of one plain database may differ in `c`, and pysylph checks them all per call
+(`ValueError`, a 400 since phase -1). To advertise the *effective* `c`, phase 1 walks the genomes
+of every plain `.syldb` once at load: `c` becomes their minimum and a mixed `k` fails at startup
+with the database named (before, `c` came from `db[0]` only, so a mixed-c file advertised more
+than every genome allows and every request failed, naming a genome). Measured: **+44 ms for
+UHGV's 168,536 genomes** (0.26 µs per genome, one Python `GenomeSketch` wrapper each, no k-mer
+decoding), 0 ms for fungi's 661; `.syl2db` files are not scanned (their `c` is uniform). This is
+cheap enough to keep; without it the server would have to assume a uniform `c`/`k`.
+
+The target set is GTDB r232 `c200` + UHGV `c200` + fungi RefSeq `c200`, all `k31`,
 so the effective `c` is 200 and no client sees a change. UHGV also ships a `c100` variant; it is
 **not used**, because `sample.c <= min c` would force `c100` sketches for every sample (about
 twice the sketch size of `c200`). GTDB `c1000` + a `c200` database would sample at 200, which is
-fine (denser sample than genome). That every prebuilt database has `k=31` I did not check beyond
-the catalogue **(unverified)**.
+fine (denser sample than genome). The target trio has `k=31` and `c=200` in every database
+(measured in phase 1, by loading the files); no other prebuilt database was opened, so `k` beyond
+the trio is still unchecked.
 
 A plain database sketched with `--disable-profiling` makes sylph refuse `profile`; pysylph has no
 such check and `GenomeSketch` exposes no accessor for it, so sylphd cannot detect it
@@ -228,14 +243,22 @@ such check and `GenomeSketch` exposes no accessor for it, so sylphd cannot detec
 
 - Each `.syl2db` costs its screening index in RAM (about 2 GB for GTDB r232 `c200`, from the
   design notes; GlobDB's is **(unverified)**) plus page cache for the dense stage.
-- A `.syldb` is fully in RAM (UHGV 218 MB, fungi 748 MB; GTDB r232 as a `.syldb` would be 25.9 GB)
+- A `.syldb` is fully in RAM (UHGV 227 MB, fungi 784 MB; GTDB r232 as a `.syldb` would be 25.9 GB)
   **and is scanned for every sample** (`get_stats` over all genomes; only `.syl2db` is screened).
-  In the target set that is 171,338 viral plus 661 fungal genomes per sample, about 17× fewer than
-  the 2.9 M of IMG/VR (which is out of scope), so the plain scan should stay cheap
-  **(unverified, not measured)**. sylph advises against `.syl2db` for small genomes, so a
-  plain `.syldb` is the right form for UHGV and fungi.
+  In the target set that is 168,536 viral plus 661 fungal genomes per sample, about 17× fewer than
+  the 2.9 M of IMG/VR (which is out of scope). sylph advises against `.syl2db` for small genomes,
+  so a plain `.syldb` is the right form for UHGV and fungi.
+- **Measured on the target trio (phase 1)**: RSS after the load is 3.22 GiB with the two plain
+  databases against 2.21 GiB for GTDB alone, an increase of 1.01 GiB (their files are 227 MB +
+  784 MB = 217 MiB + 747 MiB); the peak is 5.45 GiB, reached while loading (GTDB alone: 4.43 GiB),
+  and requests add about 20 MB. The plain scan costs **about 30 ms per sample**: a `profile`
+  request takes 33–34 ms instead of 1.3–1.8 ms, paired 51–58 ms instead of 21.6 ms, `/assembly`
+  40–49 ms instead of 1 ms. Absolute cost, not relative, is what matters here, and 35 ms per
+  sample keeps the server interactive.
 - Load databases concurrently (`concurrent.futures` threads around `LoadedDatabase`), since both
-  loaders release the GIL. Log name, genomes, `c`, `k` and load time of each.
+  loaders release the GIL. Log name, genomes, `c`, `k` and load time of each. **Measured**: GTDB
+  2.2–2.5 s, UHGV 0.4–0.5 s, fungi 0.5–2.6 s, wall 2.3–2.6 s for the trio (the slowest database,
+  not the sum).
 - Compute `--hash` per database only on request, as now.
 
 ### A5. `query` versus `profile`
@@ -295,14 +318,18 @@ are not re-argued:
   lower `--max-jobs`; document it.
 - `Profiler` construction is **not cheap** with two or more databases: `check_database_params`
   hashes `(file name, first contig)` of every genome on every construction, and the design notes'
-  "new `Profiler` per request (cheap)" no longer holds. Measured only on a 6-genome toy: about
-  0.3 µs per genome, which extrapolates to about a second for 3 M genomes, less for the target
-  trio's 372 k **(estimate, not measured at scale)**.
+  "new `Profiler` per request (cheap)" no longer holds. **Measured on the target trio**: 93 ms for
+  369,120 genomes (0.25 µs per genome, the same rate as the 6-genome toy; about 0.75 s for 3 M
+  genomes). One database is free (no duplicate scan). The scan holds the GIL.
   **Solution (owner, no fork change):** keep a small LRU of `Profiler`s in sylphd keyed by
   `(database subset, params)` (the parameters are few; `/assembly` varies only `min_ani`), warm the
   default one at startup, and reuse it across requests. The optional pysylph
   `check_duplicates=False` switch stays unimplemented until measurements show the cache is not
-  enough; then it is a separate, additive fork change.
+  enough; then it is a separate, additive fork change. **Phase 1**: implemented as an `OrderedDict`
+  of 8 entries keyed by `ProfileParams` (a frozen dataclass, so hashable), guarded by a lock that
+  only protects the dictionary; the default entry is warmed at startup (0.09 s) and the first
+  `/assembly` request after startup pays its own 93 ms construction (measured: 152 ms instead of
+  40–49 ms).
 - `max_upload_mb` guidance in the public-server guide assumes `c=200`; mention the `c=100` case
   (not used by the target set, see A3).
 
@@ -564,7 +591,10 @@ before step 0:
    target trio; `k` mismatch refuses to start; sketch `c` above the minimum is a 400 naming the
    database; **single-database `/info` and `/assembly` JSON equal a golden file**; a second
    request reuses the cached `Profiler`. Then a manual run on the real trio, recording load time,
-   RSS and per-sample plain-scan time.
+   RSS and per-sample plain-scan time. **Done 2026-10-29**: load 2.3–2.6 s for the trio (GTDB
+   2.2–2.5 s, UHGV 0.4–0.5 s, fungi 0.5–2.6 s, in parallel), RSS 3.22 GiB after the load and
+   5.45 GiB peak (GTDB alone: 2.21/4.43 GiB), `Profiler` construction 93 ms, plain-database scan
+   ~30 ms per sample. Numbers and method in `scratch/multi-db/REPORT.md`.
 2. **B schema and `setup`.** Format v3, `taxonomy_*` tables, `--taxonomy SPEC` (`UHGV_default`,
    `FungiRefSeq-latest` for the target), `--update`, reader for v2/v3, `download
    --taxonomy`/`--list-taxonomies` (httpx mocked as in `test_download.py`). Tests: v2 file loads
@@ -623,10 +653,11 @@ source (owner decision, 2026-10-29), with hints and warnings; see B6.
   and keep the rules in one pure function.
 - **Upstream files.** Zenodo records and the GlobDB host are external; the GlobDB r232 file has no
   published MD5. Catalogue entries need size and MD5 captured at release time, like databases.
-- **Cost surprises.** `Profiler` construction (A9) and per-sample plain-database scans (A4). The
-  cache covers the first; the second is measured on the real trio in phase 1, since the target
-  plain databases hold ~17× fewer genomes than IMG/VR. `c=100` sketches are avoided by the c200
-  choice.
+- **Cost surprises.** `Profiler` construction (A9) and per-sample plain-database scans (A4).
+  Measured on the real trio in phase 1: construction 93 ms for 369 k genomes (cached, and the
+  default is warmed at startup), and the plain databases add ~30 ms per sample (33 ms instead of
+  1.3 ms for `profile`, 40–49 ms instead of 1 ms for `/assembly`), so the two cost surprises are
+  bounded. `c=100` sketches are avoided by the c200 choice.
 - **Duplicate genomes** across databases behave deterministically but not intuitively (database
   kind decides precedence). Documented, not hidden; the target trio has no overlaps.
 - **Ambiguous keys.** Different sources with colliding keys resolve by probe order and `ord`. The
@@ -653,9 +684,19 @@ column, `UNKNOWN`), sylph-tax merge (sorted rows), the Zenodo files (formats and
 IMG/VR load into the proposed layout (228 MiB), pysylph `Profiler` construction on a toy pair
 (duplicate warning at construction). Database sizes and genome counts above are the catalogue
 entries in `download.py`, cross-checked against the local `db/` files.
-Not verified: anything about real prebuilt databases (genome naming, `k`, `c` per genome,
-profiling k-mers, memory and per-sample time of a plain database), duplicate behaviour of pooled
-reassignment at runtime, `Profiler` construction time at scale, GlobDB's screening-index size, and
-the database-to-taxonomy pairings in B7.
+
+Verified by running in phase 1 (2026-10-29, machine with 16 cores and 30 GiB RAM): the target trio
+loads (`k=31`, `c=200`, 199,923 + 168,536 + 661 genomes; the UHGV file has 168,536 genomes and its
+MD5 matches the catalogue entry, whose genome count was wrong and is corrected), load time 2.3–2.6 s wall for the trio and 2.2 s
+for GTDB alone, RSS 3.22 GiB after the load and 5.45 GiB peak for the trio (2.21/4.43 GiB for GTDB
+alone), `Profiler` construction 93 ms for 369 k genomes, the plain-database scan ~30 ms per sample
+(33 ms versus 1.3 ms for `profile`; 40–49 ms versus 1 ms for `/assembly`), a shared `Profiler`
+used from 8 threads with identical results, and no duplicate-genome warning for the trio.
+
+Still not verified: how the prebuilt databases name their genomes (beyond "the pooled results carry
+no origin", which is by design) and their `c` per genome (only `uhgv_c200_dbv1.syldb` was checked:
+all 168,536 genomes have `c=200`), profiling k-mers (a `.syldb` built with `--disable-profiling`),
+duplicate behaviour of pooled reassignment at runtime, GlobDB's screening-index size, and the
+database-to-taxonomy pairings in B7.
 
 The Decisions section is the owner's; where it contradicts an analysis below, the decision wins.

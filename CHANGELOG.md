@@ -8,6 +8,34 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **Several databases in one server.** `sylphd serve --db [NAME=]PATH` is repeatable; `NAME`
+  (letters, digits, `_`, `.`, `-`) is the name `/info` reports and defaults to the file name, and
+  duplicate names are refused. The databases are loaded in parallel threads and profiled as one
+  pool, exactly like `sylph profile db1 db2 sample`: `/profile`, `/query` and `/assembly` run
+  against all of them, so genomes of all databases compete in the reassignment and abundances add
+  up to 100 %. All databases must share `k` (a mismatch is refused at startup, naming the
+  databases and their `k`); `c` may differ, and samples are then sketched at the smallest `c`
+  (logged as a warning because sketches get bigger). Any mix of `.syl2db` and `.syldb` works.
+  `GET /info` keeps `database` as the **pooled view** (`name`/`path` joined, `size`/`genomes`
+  summed, `c` the minimum, `screen_c`/`two_stage` only when all agree) so existing clients and the
+  web app are unchanged, and adds `databases`: one object per database with `name`, `file`,
+  `path`, `size`, `sha256`, `genomes`, `c`, `k`, `screen_c` and `two_stage`. Rows and `/assembly`
+  hits carry no per-database field: the taxonomy says where a hit came from. `sylphd info` lists
+  the databases when there is more than one. A sketch with `k` other than the common `k`, or a `c`
+  above the pool's minimum, is a `400` that names the offending database.
+- **A plain `.syldb` reports the smallest `c` of its genomes** (they may differ in `c`), and a
+  plain database whose genomes were sketched with different `k` is refused at startup with the
+  database named, instead of advertising the first genome's values and failing on the first
+  request with a genome-named error. The scan reads only `c`/`k` (measured: +44 ms for 168,536
+  genomes, 0 ms for 661); `.syl2db` files are not scanned.
+- **Cached `Profiler` objects.** One `pysylph.Profiler` per parameter set is kept (an LRU of 8) and
+  shared by all worker threads, instead of building one per request. With two or more databases the
+  constructor scans every genome for duplicates (measured: 93 ms for the target trio's 369 k
+  genomes), so without the cache every request would pay that; the default profiler is built at
+  startup. `pysylph.Profiler` is read-only and safe to share (its `query`/`profile` take `&self` and
+  release the GIL), so the lock only guards the cache dictionary. pysylph's duplicate-genome
+  `UserWarning` (raised by the constructor) is captured and logged once as a bounded summary
+  (count and the first names) instead of vanishing with the first construction.
 - **`sylphd profile --estimate-read-counts`** (sylph's experimental `--estimate-read-counts`):
   `Sequence_abundance` then holds the estimated number of reads per genome instead of a relative
   abundance. It implies `--estimate-unknown`, so the coverage column is labelled `True_cov` as
@@ -49,6 +77,11 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- `sylphd serve` logs each database it loads (name, kind, genomes, `c`, `k`, load time) and the
+  total load time, plus the `Profiler` construction time, on the `sylphd` logger at the
+  `--log-level`; a differing `c` between databases is a warning. `ServerConfig` gains a
+  keyword-only `db_paths` (the positional `ServerConfig(db_path, meta_path, ...)` still works for
+  one database; giving both is an error), and `create_app` takes a `DatabaseSet`.
 - `sylphd profile --taxmatrix` now follows `sylph-tax merge` row for row: with two or more
   samples the clade names are sorted lexicographically (one sample keeps the `.sylphmpa` order,
   which is rank by rank, then by abundance), and a missing value is `0`. Before, rows were in
@@ -66,6 +99,13 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Documented
 
+- Multi-database serving: `docs/commands/serve.md` (repeatable `--db`, `NAME=PATH` aliases, the
+  `k`/`c` rules, parallel loading, lower `--max-jobs` because each sample scans the plain
+  databases), `docs/commands/info.md` (pooled values and the per-database list),
+  `docs/reference/http-api.md` (`databases`, the pooled `database` object, the 400 that names the
+  limiting database), and `docs/project/design-notes.md` (the cached `Profiler` replaced "a new
+  `Profiler` per request"). The design note now carries the measured load times, memory, profiler
+  construction and per-sample plain-scan cost of the target GTDB + UHGV + fungi trio.
 - Per-contig docs state that `no_hit` can be a two-stage-screen miss rather than proof of absence
   (measured on a real *Leptospira* assembly: 30 of 236 contigs with a genuine 98-100 % match were
   dropped, including one at 22.9 kb), how to read `screen_c` from `sylphd info` / `GET /info`, that
@@ -80,6 +120,9 @@ All notable changes to `sylphd` are documented here. The format follows
   than the sample sketch, which sylph treats as fatal) now becomes an HTTP **400** with pysylph's
   message instead of a 500. Only the `Profiler` constructor and the `profile`/`query` call are
   translated, so unrelated internal errors still surface as a 500.
+- The `download` catalogue gave `uhgv_c200_dbv1.syldb` **171,338** genomes; the published file holds
+  **168,536** (checked with `len(pysylph.Database)`; its MD5 matches the catalogue entry). The c100
+  entry was left unchanged because there is no local copy to check it against.
 
 ## [0.2.0] - 2026-10-29
 

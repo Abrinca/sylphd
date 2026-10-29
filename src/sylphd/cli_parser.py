@@ -85,7 +85,14 @@ def build_parser() -> argparse.ArgumentParser:
         "serve", help="run the server (one process, one worker)"
     )
     serve_parser.add_argument(
-        "--db", required=True, metavar="PATH", help=".syl2db or .syldb database to load"
+        "--db",
+        action="append",
+        required=True,
+        metavar="[NAME=]PATH",
+        help=(
+            "a .syl2db or .syldb database to load; repeatable, and all must "
+            "share k. NAME is the name /info reports, by default the file name"
+        ),
     )
     serve_parser.add_argument(
         "--meta", metavar="PATH", help="SQLite metadata database built by 'sylphd setup'"

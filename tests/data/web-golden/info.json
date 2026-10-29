@@ -1,0 +1,34 @@
+{
+  "service": "sylphd",
+  "version": "<version>",
+  "pysylph_version": "<version>",
+  "python_version": "<version>",
+  "database": {
+    "name": "ecoli.syl2db",
+    "path": "<path>",
+    "size": 419015,
+    "sha256": null,
+    "genomes": 3,
+    "c": 200,
+    "k": 31,
+    "screen_c": 3000,
+    "two_stage": true
+  },
+  "metadata": null,
+  "limits": {
+    "max_jobs": 2,
+    "max_upload_mb": 512,
+    "max_sketches": 4096,
+    "allow_sequences": false,
+    "max_sequence_mb": null,
+    "rate_limit": null,
+    "max_queue": null
+  },
+  "endpoints": [
+    "/health",
+    "/info",
+    "/profile",
+    "/query",
+    "/assembly"
+  ]
+}

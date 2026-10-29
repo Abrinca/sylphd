@@ -7,7 +7,9 @@ Design notes
   ``anyio.to_thread.run_sync``; a semaphore caps the number of concurrent
   profiling jobs (``--max-jobs``) and queues the rest, optionally up to
   ``--max-queue`` jobs (one job per sample).
-* A fresh ``Profiler`` is built per request: it holds references only.
+* One ``Profiler`` per parameter set is cached and shared by all requests:
+  with two or more databases its constructor scans every genome, and it is
+  safe to use from several threads at once.
 * One process, one worker: the whole point is sharing the in-memory index.
 """
 
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import signal
 import socket
@@ -22,17 +25,18 @@ import stat
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import anyio
 import pysylph
 import uvicorn
 from starlette.applications import Starlette
 from starlette.datastructures import UploadFile
-from starlette.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -48,10 +52,11 @@ from .limits import (
     RateLimitMiddleware,
 )
 from .metadata import MetadataDB
-from .paths import SOCKET_MODE, parse_tcp
+from .paths import SOCKET_MODE
 from .profiling import (
     BadRequest,
-    LoadedDatabase,
+    DatabaseSet,
+    DatabaseSpec,
     run_assembly,
     run_assembly_sketch,
     run_sample,
@@ -90,7 +95,12 @@ MIN_ANI_RANGE = (70.0, 100.0)
 class ServerConfig:
     """Everything ``sylphd serve`` needs."""
 
-    db_path: Path
+    #: ``--db`` of a single-database server, the historical spelling, still
+    #: usable positionally.  Do not set it together with :attr:`db_paths`.
+    db_path: Path | None = None
+    #: The databases to load, in order (``--db`` repeated).  Keyword-only, so
+    #: the positional arguments keep their historical meaning.
+    db_paths: tuple[DatabaseSpec, ...] = field(default=(), kw_only=True)
     meta_path: Path | None = None
     max_jobs: int = 2
     max_upload_mb: int = 512
@@ -116,6 +126,19 @@ class ServerConfig:
     about: About = field(default_factory=lambda: About(None))
     #: Set when serving on a Unix socket, so the app can adjust its mode.
     socket_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.db_paths:
+            if self.db_path is not None:
+                raise ValueError(
+                    "give either db_path (one database) or db_paths (several), "
+                    "not both"
+                )
+            self.db_path = self.db_paths[0].path
+        elif self.db_path is None:
+            raise ValueError("at least one database is required")
+        else:
+            self.db_paths = (DatabaseSpec(Path(self.db_path)),)
 
 
 class BodyLimitMiddleware:
@@ -209,6 +232,7 @@ async def _info(request: Request) -> JSONResponse:
             "pysylph_version": pysylph.__version__,
             "python_version": ".".join(str(part) for part in sys.version_info[:3]),
             "database": state.database.info(),
+            "databases": state.database.entries(),
             "metadata": metadata.summary() if metadata is not None else None,
             "limits": {
                 "max_jobs": state.max_jobs,
@@ -418,7 +442,7 @@ def _query_float(
         value = float(raw)
     except ValueError:
         raise ValueError(f"'{key}' must be a number") from None
-    if not value == value or value in (float("inf"), float("-inf")):
+    if not math.isfinite(value):
         raise ValueError(f"'{key}' must be a finite number")
     if value < minimum or value > maximum:
         raise ValueError(f"'{key}' must be between {minimum:g} and {maximum:g}")
@@ -625,12 +649,12 @@ def _lifespan(config: ServerConfig) -> Any:
 def create_app(
     config: ServerConfig,
     *,
-    database: LoadedDatabase | None = None,
+    database: DatabaseSet | None = None,
     metadata: MetadataDB | None = None,
 ) -> Starlette:
-    """Build the ASGI application (loading the database unless provided)."""
-    loaded = database if database is not None else LoadedDatabase(
-        config.db_path, compute_hash=config.compute_hash
+    """Build the ASGI application (loading the databases unless provided)."""
+    loaded = database if database is not None else DatabaseSet.load(
+        config.db_paths, compute_hash=config.compute_hash
     )
     metadata_store = metadata
     if metadata_store is None and config.meta_path is not None:

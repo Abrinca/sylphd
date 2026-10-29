@@ -32,7 +32,18 @@ Reports:
 
 - `service`, `version`, `pysylph_version`, `python_version`;
 - `database`: `name`, `path`, `size`, `sha256` (`null` unless `--hash`), `genomes`, `c`, `k`,
-  `screen_c` (`null` for a plain `.syldb`) and `two_stage`;
+  `screen_c` (`null` for a plain `.syldb`) and `two_stage`. A plain `.syldb` reports the
+  **smallest `c` of its genomes** (genomes may differ in `c`; a sample must be sparser than all of
+  them). Genomes that differ in `k` are refused at startup. This is the **pooled view** of a
+  multi-database server: `name` and `path` are the database names (the `--db NAME=PATH` alias,
+  else the file name) and paths joined with `", "`, `size` and `genomes` the sums, `c` the
+  **smallest** `c` (sketch samples with it), `k` the common `k`, `sha256` `null` for more than one
+  database, and `screen_c`/`two_stage` only when every database agrees (`null`/`false` otherwise).
+  A single-database server reports exactly what it always did;
+- `databases`: one object per database, always present (a single entry on a single-database
+  server): `name` (alias or file name), `file` (the file name, since `name` may be an alias),
+  `path`, `size`, `sha256`, `genomes`, `c`, `k`, `screen_c` and `two_stage`. Results carry no
+  per-database field: a hit belongs to the database whose taxonomy it has;
 - `metadata`: `path`, `size`, `columns`, `rows`, `release`, `built`, `format_version`, `reps_only`
   and `sources`, or `null` without `--meta`;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
@@ -73,11 +84,17 @@ At most 4096 sketches fit in one request. Non-file form fields such as `params` 
 | `fields` | list of metadata columns; omitted means all, `[]` means none; needs a metadata database |
 | `mode` | optional, must match the endpoint (`query` or `profile`) |
 
-Unknown keys are rejected with a 400. The client sketches with the database's `c` and `k`. A
-sketch must match `k` exactly and must not be sparser than the database (`c <= db.c`); otherwise
-the request fails with a 400. The same 400 covers a sketch that pysylph itself refuses to profile
-against the database, for example one denser than a genome of a database whose genomes have
-different `c`: the response carries pysylph's message, not a generic 500.
+Unknown keys are rejected with a 400. The client sketches with `database.c` and `database.k` from
+`GET /info`. A sketch must match `k` exactly and must not be sparser than the database
+(`c <= db.c`); otherwise the request fails with a 400. A larger `c` means a *sparser* sketch, so a
+sketch with `c=250` is refused by a database with `c=200`; a sketch with `c=100` is accepted (it is
+denser, and sylph samples down while profiling). On a server with several databases, `k` must
+match all of them and `c` must not exceed the **smallest** `c`; the 400 names the database(s) that
+cause the refusal, for example `sketch c=250 is sparser than the c=200 of uhgv`. The same 400
+covers a sketch that pysylph itself refuses to profile against the database, for example one
+sparser than a genome of a database whose genomes have different `c`: the response carries
+pysylph's message, not a generic 500. `POST /query` and `POST /profile` run against the whole pool, i.e.
+`sylph query db1 db2 ...` / `sylph profile db1 db2 ...`.
 
 The response is a JSON list with one object per sample, in request order:
 
@@ -113,8 +130,8 @@ Finds the closest database genomes of **one assembly**. The body is either
     sequence. The web app (in the browser) and `sylphd assembly` (on the command line) send this.
     The sketch is made with the database's `c` and `k` (`/info` reports them), as one single-end
     sample whose "reads" are the assembly's records. It is validated like the sketches of
-    `/profile` (header check before decoding, `k` must equal the database's, `c` must not be
-    sparser), and bounded by the general `--max-upload-mb`, not by `--max-sequence-mb`; or
+    `/profile` (header check before decoding, `k` must equal the database's, `c` must not exceed
+    the database's), and bounded by the general `--max-upload-mb`, not by `--max-sequence-mb`; or
 
 * **raw FASTA or FASTQ**, plain or gzip, which the server sketches itself. Only with
   `--allow-sequences`, otherwise a `404` whose message says so. The gzip magic bytes (`\x1f\x8b`)
@@ -139,7 +156,9 @@ sequences are accepted.
 
 Both bodies get exactly the same treatment from then on: the server profiles the sketch with
 `no_adjust=True` and keeps the `top` hits sorted by ANI. The same assembly gives the same hits,
-assignment and closest hit whichever way it is sent.
+assignment and closest hit whichever way it is sent. `/assembly` queries the whole pool, so a hit
+list may mix databases; a hit from a database without GTDB metadata has `null` metadata columns
+and is classified `unknown lineage` (the taxonomy columns say which database it belongs to).
 
 ```json
 {"query": {"name": "assembly", "records": 1, "length": 6013491,
@@ -164,6 +183,8 @@ assignment and closest hit whichever way it is sent.
            "ncbi_organism_name": "Escherichia coli K-12", "...": null}]}
 ```
 
+- **`database`** is the pooled view (see `GET /info`); the response has no `databases` key, add
+  `GET /info` when a client needs the per-database list.
 - **`query.input`** is `"sequence"` or `"sketch"`, how the assembly arrived. For a sketch,
   `query.records`, `length` and `gc` are the values of the optional query parameters, or `null`
   when the client did not send them (the server cannot know them); `sketch_kmers` is read from the
