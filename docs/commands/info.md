@@ -18,7 +18,7 @@ Prints what the server reports about itself:
   source (name, number of keys, whether it is the virtual GTDB source or an imported file, whether
   it carries virus hosts, MD5), then `taxonomy overlaps:` with one line per pair of sources that
   share keys (`First and Second: 7 shared keys; examples: ...; the source imported later wins`) —
-  see [`setup`](setup.md#import-one-taxonomy-per-database);
+  see [`setup`](../reference/metadata.md#overlapping-sources);
 - versions of sylphd, pysylph and Python;
 - limits: jobs, upload size, sketch count, and a `web:` line with the raw-sequence assembly
   (`--allow-sequences`), rate-limit and queue settings.
