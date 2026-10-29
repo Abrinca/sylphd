@@ -64,6 +64,23 @@ server log.
 `/health` and `/info` are always served and never limited. At most 4096 sketches fit in one
 `/query` or `/profile` request; `/info` reports the cap as `max_sketches`.
 
+### Sizing the upload limit
+
+Sketches are small compared with the data behind them, but they grow with sequencing depth
+(and with sequencing errors). Reference points at `c=200`:
+
+| Input | Sketch |
+|---|---|
+| bacterial assembly (~2.6 Mb) | ~0.1 MB |
+| 1.55 GB ONT `fastq.gz` (2.1 Gb) | 5.8 MB |
+| 56 GB paired-end reads (uncompressed) | 76 MB |
+
+On the server, a 200 MB sketch (16.7 million k-mers) decodes in about 0.8 s and needs about
+0.8 GB of RAM while it is profiled, so peak extra memory is roughly `--max-jobs` × 0.8 GB at that
+size. Queued `/profile` uploads are spooled to disk (the temp dir), not held in RAM. The public
+instance uses `--max-upload-mb 200` on a 2-core, 12 GB VM. Keep a reverse proxy's body limit a
+little above `--max-upload-mb`, so oversized uploads get sylphd's own error message.
+
 ## Client identity and `--trusted-proxy`
 
 The rate limit needs to know who the client is. The identity is the **socket peer**. Behind a
