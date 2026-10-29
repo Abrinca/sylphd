@@ -6,15 +6,15 @@ Design notes
 * Blocking ``pysylph`` calls run in worker threads through
   ``anyio.to_thread.run_sync``; a semaphore caps the number of concurrent
   profiling jobs (``--max-jobs``) and queues the rest, optionally up to
-  ``--max-queue`` requests.
+  ``--max-queue`` jobs (one job per sample).
 * A fresh ``Profiler`` is built per request: it holds references only.
 * One process, one worker: the whole point is sharing the in-memory index.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
+import logging
 import os
 import signal
 import socket
@@ -39,16 +39,7 @@ from starlette.routing import Route
 
 from . import __version__
 from .about import About
-from .assembly import (
-    DECOMPRESSION_FACTOR,
-    INTERPRETATION_THRESHOLDS,
-    SequenceError,
-    SequenceTooLarge,
-    classify_hits,
-    gunzip_limited,
-    is_gzip,
-    parse_assembly,
-)
+from .assembly import INTERPRETATION_THRESHOLDS, SequenceError, SequenceTooLarge
 from .limits import (
     QUEUE_RETRY_SECONDS,
     JobSlots,
@@ -56,11 +47,19 @@ from .limits import (
     RateLimiter,
     RateLimitMiddleware,
 )
-from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
+from .metadata import MetadataDB
 from .paths import SOCKET_MODE, parse_tcp
-from .protocol import ProfileParams, ProtocolError, result_row
-from .sketchcheck import SketchFormatError, parse_sketch_header
+from .profiling import (
+    BadRequest,
+    LoadedDatabase,
+    run_assembly,
+    run_assembly_sketch,
+    run_sample,
+)
+from .protocol import ProfileParams, ProtocolError
 from .sketching import InputError, check_sample_name, sample_name_from_path
+
+log = logging.getLogger("uvicorn.error")
 
 #: Maximum number of sketches accepted in one request.
 MAX_SKETCHES = 4096
@@ -87,10 +86,6 @@ MIN_TOP, MAX_TOP = 1, 50
 MIN_ANI_RANGE = (70.0, 100.0)
 
 
-class BadRequest(ValueError):
-    """A client error detected while running a job in a worker thread."""
-
-
 @dataclass
 class ServerConfig:
     """Everything ``sylphd serve`` needs."""
@@ -107,7 +102,7 @@ class ServerConfig:
     max_sequence_mb: int = 20
     #: ``(count, window_seconds)`` for the per-client rate limit, or ``None``.
     rate_limit: tuple[int, float] | None = None
-    #: How many requests may wait for a job slot; ``None`` is unlimited.
+    #: How many jobs (samples) may wait for a job slot; ``None`` is unlimited.
     max_queue: int | None = None
     #: Peers whose ``X-Forwarded-For`` header is trusted (IPs or ``"unix"``).
     trusted_proxies: tuple[str, ...] = ()
@@ -121,58 +116,6 @@ class ServerConfig:
     about: About = field(default_factory=lambda: About(None))
     #: Set when serving on a Unix socket, so the app can adjust its mode.
     socket_path: Path | None = None
-
-
-class LoadedDatabase:
-    """A loaded sylph database plus the identity reported by ``/info``."""
-
-    def __init__(self, path: str | os.PathLike[str], *, compute_hash: bool = False):
-        self.path = Path(path)
-        if not self.path.is_file():
-            raise FileNotFoundError(f"database not found: {self.path}")
-        self.two_stage = self.path.name.endswith(".syl2db")
-        if self.two_stage:
-            self.db: Any = pysylph.TwoStageDatabase.load(str(self.path))
-            self.k = int(self.db.k)
-            self.c = int(self.db.c)
-            self.screen_c: int | None = int(self.db.screen_c)
-        else:
-            self.db = pysylph.Database.load(str(self.path))
-            if len(self.db) == 0:
-                raise ValueError(f"database is empty: {self.path}")
-            self.k = int(self.db[0].k)
-            self.c = int(self.db[0].c)
-            self.screen_c = None
-        self.genomes = len(self.db)
-        self.size = self.path.stat().st_size
-        self.sha256: str | None = None
-        if compute_hash:
-            self.sha256 = _sha256(self.path)
-
-    @property
-    def name(self) -> str:
-        return self.path.name
-
-    def info(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "path": str(self.path),
-            "size": self.size,
-            "sha256": self.sha256,
-            "genomes": self.genomes,
-            "c": self.c,
-            "k": self.k,
-            "screen_c": self.screen_c,
-            "two_stage": self.two_stage,
-        }
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 class BodyLimitMiddleware:
@@ -369,6 +312,10 @@ async def _assembly(request: Request) -> JSONResponse:
                 return _too_large_response(limit, is_sketch)
         except ValueError:
             pass
+    try:
+        state.jobs.check()
+    except QueueFullError:
+        return _busy()
     chunks: list[bytes] = []
     received = 0
     async for chunk in request.stream():
@@ -382,29 +329,30 @@ async def _assembly(request: Request) -> JSONResponse:
 
     start = time.perf_counter()
     try:
-        async with state.jobs.slot():
-            if is_sketch:
-                result = await anyio.to_thread.run_sync(
-                    _run_assembly_sketch,
-                    state.database,
-                    state.metadata,
-                    name,
-                    payload,
-                    top,
-                    min_ani,
-                    stats,
-                )
-            else:
-                result = await anyio.to_thread.run_sync(
-                    _run_assembly,
-                    state.database,
-                    state.metadata,
-                    name,
-                    payload,
-                    top,
-                    min_ani,
-                    limit,
-                )
+        with state.jobs.admit():
+            async with state.jobs.slot():
+                if is_sketch:
+                    result = await anyio.to_thread.run_sync(
+                        run_assembly_sketch,
+                        state.database,
+                        state.metadata,
+                        name,
+                        payload,
+                        top,
+                        min_ani,
+                        stats,
+                    )
+                else:
+                    result = await anyio.to_thread.run_sync(
+                        run_assembly,
+                        state.database,
+                        state.metadata,
+                        name,
+                        payload,
+                        top,
+                        min_ani,
+                        limit,
+                    )
     except QueueFullError:
         return _busy()
     except BadRequest as error:
@@ -413,9 +361,9 @@ async def _assembly(request: Request) -> JSONResponse:
         return _error(str(error), 413)
     except SequenceError as error:
         return _error(str(error), 400)
-    except Exception as error:  # pragma: no cover - defensive
-        # Never echo the payload: the type is enough to debug a failure.
-        return _error(f"assembly profiling failed ({type(error).__name__})", 500)
+    except Exception:  # pragma: no cover - defensive
+        log.exception("assembly profiling failed")
+        return _error("assembly profiling failed", 500)
 
     elapsed_ms = round((time.perf_counter() - start) * 1000.0, 1)
     database = state.database
@@ -477,142 +425,6 @@ def _query_float(
     return value
 
 
-def _run_assembly(
-    database: LoadedDatabase,
-    metadata: MetadataDB | None,
-    name: str,
-    payload: bytes,
-    top: int,
-    min_ani: float,
-    max_sequence_bytes: int,
-) -> dict[str, Any]:
-    """Parse, sketch and profile one assembly.  Runs in a worker thread."""
-    data = payload
-    if is_gzip(data):
-        data = gunzip_limited(data, max_sequence_bytes * DECOMPRESSION_FACTOR)
-    parsed = parse_assembly(data)
-
-    sketcher = pysylph.Sketcher(c=database.c, k=database.k)
-    sketch = sketcher.sketch_single(name, list(parsed.sequences))
-    result = _assembly_hits(database, metadata, sketch, top, min_ani)
-    result["query"] = {
-        "name": name,
-        "records": parsed.records,
-        "length": parsed.length,
-        "gc": parsed.gc,
-        "sketch_kmers": len(sketch.kmer_counts),
-        "input": "sequence",
-    }
-    return result
-
-
-def _run_assembly_sketch(
-    database: LoadedDatabase,
-    metadata: MetadataDB | None,
-    name: str,
-    payload: bytes,
-    top: int,
-    min_ani: float,
-    stats: dict[str, Any],
-) -> dict[str, Any]:
-    """Profile a precomputed assembly sketch.  Runs in a worker thread.
-
-    The sketch is validated exactly like ``/profile`` uploads; everything after
-    that is shared with the raw-sequence path.  The server cannot know the
-    number of records, the length or the GC content of an assembly it never
-    saw, so those come from the optional (informational) query parameters of
-    the client, else ``null``.
-    """
-    sketch, header = _decode_sketch(database, name, payload)
-    result = _assembly_hits(database, metadata, sketch, top, min_ani)
-    result["query"] = {
-        "name": name,
-        "records": stats["records"],
-        "length": stats["length"],
-        "gc": stats["gc"],
-        "sketch_kmers": header.kmer_count,
-        "input": "sketch",
-    }
-    return result
-
-
-def _decode_sketch(
-    database: LoadedDatabase, name: str, payload: bytes
-) -> tuple[Any, Any]:
-    """Validate sketch bytes against the database and decode them.
-
-    Checks the fixed header before decoding: sylph's deserializer allocates
-    from the k-mer count prefix, and a huge count aborts the whole process.
-    This also lets a c/k mismatch be rejected without deserializing anything.
-    """
-    try:
-        header = parse_sketch_header(payload)
-    except SketchFormatError as error:
-        raise BadRequest(f"sample {name!r}: not a valid sample sketch ({error})") from error
-    if header.k != database.k:
-        raise BadRequest(
-            f"sample {name!r}: sketch k={header.k} does not match the database k={database.k}"
-        )
-    if header.c > database.c:
-        raise BadRequest(
-            f"sample {name!r}: sketch c={header.c} is sparser than the database c={database.c}"
-        )
-    try:
-        sketch = pysylph.SampleSketch.from_bytes(payload)
-    except (ValueError, OSError) as error:
-        raise BadRequest(f"sample {name!r}: not a valid sample sketch ({error})") from error
-    return sketch, header
-
-
-def _assembly_hits(
-    database: LoadedDatabase,
-    metadata: MetadataDB | None,
-    sketch: Any,
-    top: int,
-    min_ani: float,
-) -> dict[str, Any]:
-    """Query ``sketch`` (naive ANI), join metadata and classify the hits."""
-    profiler = pysylph.Profiler(
-        database.db,
-        no_adjust=True,
-        minimum_ani=min_ani,
-        screen_ani=min(min_ani, 85.0),
-    )
-    results = sorted(profiler.query(sketch), key=lambda result: float(result.ani), reverse=True)
-    results = results[:top]
-
-    columns = tuple(metadata.columns) if metadata is not None else METADATA_COLUMNS
-    accessions = [
-        accession_from_genome_name(result.genome_sketch.name) for result in results
-    ]
-    found = (
-        metadata.lookup(accession for accession in accessions if accession)
-        if metadata is not None
-        else {}
-    )
-
-    hits: list[dict[str, Any]] = []
-    for rank, result in enumerate(results, start=1):
-        genome = result.genome_sketch
-        accession = accession_from_genome_name(genome.name)
-        contained, total = (int(value) for value in result.containment)
-        row: dict[str, Any] = {
-            "rank": rank,
-            "ani": float(result.ani),
-            "containment": [contained, total],
-            "containment_fraction": round(contained / total, 3) if total else 0.0,
-            "genome_file": genome.name,
-            "accession": accession,
-        }
-        record = found.get(accession, {}) if accession else {}
-        for column in columns:
-            row[column] = record.get(column)
-        hits.append(row)
-
-    assignment, closest = classify_hits(hits)
-    return {"assignment": assignment, "closest": closest, "hits": hits}
-
-
 async def _handle(request: Request, mode: str) -> JSONResponse:
     state = request.app.state
     content_type = request.headers.get("content-type", "")
@@ -623,78 +435,97 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
         )
 
     try:
-        form = await request.form(
-            max_files=MAX_SKETCHES,
-            max_fields=16,
-            max_part_size=1024 * 1024,
-        )
-    except StarletteHTTPException as error:
-        return _error(str(error.detail), error.status_code)
+        state.jobs.check()
+    except QueueFullError:
+        return _busy()
 
-    raw_params = form.get("params")
+    upload = await _read_upload(request, mode)
+    if isinstance(upload, JSONResponse):
+        return upload
+    params, fields, names, payloads = upload
+
+    samples: list[dict[str, Any] | None] = [None] * len(payloads)
     try:
-        params_data: Any = {} if raw_params is None else json.loads(str(raw_params))
-    except json.JSONDecodeError as error:
-        return _error(f"invalid JSON in 'params': {error}", 400)
-    if not isinstance(params_data, dict):
-        return _error("'params' must be a JSON object", 400)
-
-    try:
-        params = ProfileParams.from_mapping(params_data)
-    except ProtocolError as error:
-        return _error(str(error), 400)
-
-    declared_mode = params_data.get("mode")
-    if declared_mode is not None and declared_mode != mode:
-        return _error(
-            f"params.mode is {declared_mode!r} but this is the /{mode} endpoint", 400
-        )
-
-    fields = _validate_fields(params_data.get("fields"), state.metadata)
-    if isinstance(fields, JSONResponse):
-        return fields
-
-    sketches = form.getlist("sketch")
-    if not sketches:
-        return _error("no 'sketch' part in the request", 400)
-    for part in sketches:
-        if not isinstance(part, UploadFile):
-            return _error("'sketch' parts must be file uploads", 400)
-
-    names = _resolve_names(params_data.get("names"), sketches)
-    if isinstance(names, JSONResponse):
-        return names
-
-    try:
-        payloads = []
-        for part in sketches:
-            payloads.append(await part.read())
-    except Exception as error:
-        return _error(f"failed to read a 'sketch' part: {error}", 500)
-
-    samples: list[dict[str, Any] | None] = [None] * len(sketches)
-    try:
-        async with anyio.create_task_group() as task_group:
-            for index, (name, payload) in enumerate(zip(names, payloads)):
-                task_group.start_soon(
-                    _run_slot, state, mode, params, fields, name, payload, samples, index
-                )
+        with state.jobs.admit(len(payloads)):
+            async with anyio.create_task_group() as task_group:
+                for index, (name, payload) in enumerate(zip(names, payloads)):
+                    task_group.start_soon(
+                        _run_slot, state, mode, params, fields, name, payload, samples, index
+                    )
+    except QueueFullError:
+        return _busy()
     except BadRequest as error:
         return _error(str(error), 400)
     except BaseExceptionGroup as group:
         for error in group.exceptions:
             if isinstance(error, BadRequest):
                 return _error(str(error), 400)
-        return _error(f"profiling failed: {group}", 500)
-    except Exception as error:  # pragma: no cover - defensive
-        return _error(f"profiling failed: {error}", 500)
-    if any(sample is _QUEUE_FULL for sample in samples):
-        return _busy()
+        log.exception("profiling failed")
+        return _error("profiling failed", 500)
+    except Exception:  # pragma: no cover - defensive
+        log.exception("profiling failed")
+        return _error("profiling failed", 500)
     return JSONResponse(samples)
 
 
-#: Marker stored for a sample whose job was refused because the queue was full.
-_QUEUE_FULL = object()
+async def _read_upload(
+    request: Request, mode: str
+) -> tuple[ProfileParams, Sequence[str] | None, list[str], list[bytes]] | JSONResponse:
+    """Parse the multipart form into ``(params, fields, names, payloads)``.
+
+    Returns the error response instead when the request is invalid.  The form
+    (and its temporary files) is closed before returning.
+    """
+    state = request.app.state
+    try:
+        async with request.form(
+            max_files=MAX_SKETCHES,
+            max_fields=16,
+            max_part_size=1024 * 1024,
+        ) as form:
+            raw_params = form.get("params")
+            try:
+                params_data: Any = {} if raw_params is None else json.loads(str(raw_params))
+            except json.JSONDecodeError as error:
+                return _error(f"invalid JSON in 'params': {error}", 400)
+            if not isinstance(params_data, dict):
+                return _error("'params' must be a JSON object", 400)
+
+            try:
+                params = ProfileParams.from_mapping(params_data)
+            except ProtocolError as error:
+                return _error(str(error), 400)
+
+            declared_mode = params_data.get("mode")
+            if declared_mode is not None and declared_mode != mode:
+                return _error(
+                    f"params.mode is {declared_mode!r} but this is the /{mode} endpoint",
+                    400,
+                )
+
+            fields = _validate_fields(params_data.get("fields"), state.metadata)
+            if isinstance(fields, JSONResponse):
+                return fields
+
+            sketches = form.getlist("sketch")
+            if not sketches:
+                return _error("no 'sketch' part in the request", 400)
+            for part in sketches:
+                if not isinstance(part, UploadFile):
+                    return _error("'sketch' parts must be file uploads", 400)
+
+            names = _resolve_names(params_data.get("names"), sketches)
+            if isinstance(names, JSONResponse):
+                return names
+
+            try:
+                payloads = [await part.read() for part in sketches]
+            except Exception:
+                log.exception("failed to read an uploaded sketch part")
+                return _error("failed to read a 'sketch' part", 500)
+            return params, fields, names, payloads
+    except StarletteHTTPException as error:
+        return _error(str(error.detail), error.status_code)
 
 
 def _busy() -> JSONResponse:
@@ -715,58 +546,18 @@ async def _run_slot(
     samples: list[dict[str, Any] | None],
     index: int,
 ) -> None:
-    try:
-        async with state.jobs.slot():
-            samples[index] = await anyio.to_thread.run_sync(
-                _run_sample,
-                state.database,
-                state.metadata,
-                mode,
-                params,
-                fields,
-                name,
-                payload,
-                params.no_adjust,
-            )
-    except QueueFullError:
-        samples[index] = _QUEUE_FULL
-
-
-def _run_sample(
-    database: LoadedDatabase,
-    metadata: MetadataDB | None,
-    mode: str,
-    params: ProfileParams,
-    fields: Sequence[str] | None,
-    name: str,
-    payload: bytes,
-    hide_ani_ci: bool = False,
-) -> dict[str, Any]:
-    """Deserialize, validate and profile one sketch.  Runs in a worker thread."""
-    sketch, _ = _decode_sketch(database, name, payload)
-
-    profiler = pysylph.Profiler(database.db, **params.profiler_kwargs())
-    results = profiler.profile(sketch) if mode == "profile" else profiler.query(sketch)
-
-    rows: list[dict[str, Any]] = []
-    if metadata is None:
-        for result in results:
-            rows.append(result_row(result, name, mode=mode, hide_ani_ci=hide_ani_ci))
-    else:
-        accessions = [accession_from_genome_name(result.genome_sketch.name) for result in results]
-        found = metadata.lookup(accession for accession in accessions if accession)
-        for result, accession in zip(results, accessions):
-            rows.append(
-                result_row(
-                    result,
-                    name,
-                    mode=mode,
-                    metadata=found.get(accession, {}) if accession else {},
-                    fields=fields,
-                    hide_ani_ci=hide_ani_ci,
-                )
-            )
-    return {"name": name, "kind": mode, "rows": rows}
+    async with state.jobs.slot():
+        samples[index] = await anyio.to_thread.run_sync(
+            run_sample,
+            state.database,
+            state.metadata,
+            mode,
+            params,
+            fields,
+            name,
+            payload,
+            params.no_adjust,
+        )
 
 
 def _validate_fields(value: Any, metadata: MetadataDB | None) -> Sequence[str] | None | JSONResponse:

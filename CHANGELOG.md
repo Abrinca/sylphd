@@ -17,6 +17,19 @@ All notable changes to `sylphd` are documented here. The format follows
   stops with an error.
 - `sylphd taxprof`/`--taxmatrix`: an existing directory works as an output prefix without a trailing
   `/`; strain rows (`t__`) are always listed after the species rows (also in the web app).
+- **Job admission.** `--max-queue` now limits jobs (samples), not requests: a request is admitted
+  as a whole or refused with `503` before anything runs, the check happens before the upload body is
+  read, and concurrent requests can no longer slip past a zero-length queue. A batch larger than
+  `--max-jobs` + `--max-queue` is always refused.
+- Unexpected profiling failures are logged on the server (without uploaded data); clients get a
+  generic message. The multipart form is closed deterministically.
+- The profiling jobs and `LoadedDatabase` moved from `server.py` to `profiling.py`; the argument
+  parser moved from `cli.py` to `cli_parser.py`.
+- `query`, `profile` and `assembly` check their output paths before sketching or contacting the server.
+- `sketch-wasm/demo/` was removed: the web page in `web/` is the one copy of the sketching workers.
+  `sketch-wasm/build.sh` builds into `web/wasm` by default.
+- Deployment: `/srv/sylphd` and `releases/` are owned by root; the updater builds a release as the
+  service user inside a directory it hands over and makes the finished release root-owned.
 - The package version lives only in `src/sylphd/__init__.py`.
 - The browser tests (XSS check of the operator text, `.sylsp` header parser, taxonomy parity) run in
   GitHub Actions (`web-tests.yml`) and fail there instead of being skipped.
@@ -39,6 +52,14 @@ All notable changes to `sylphd` are documented here. The format follows
   the server (it is only a label in the results); the Reads tab warns when the first read names of
   R1 and R2 differ; "no size limit" now says 2 GiB; the new logo is used and the stale
   `apple-touch-icon` link is gone.
+- **Gzip.** The server and the client read concatenated gzip members (`cat a.gz b.gz`) as the browser
+  does, and reject truncated streams with a clear error. The browser sketcher rejects gzip headers
+  over 64 KiB and an out-of-range `chunk_size`.
+- Browser, paired reads: memory stays bounded when R1 and R2 have different read lengths (the
+  sketcher is fed the mate that is behind in records). GC of an assembly is counted by the sketcher,
+  so FASTA comments and blank lines no longer distort it. Read names with `_R1_001` are recognised
+  by `sylphd` as well, as in the web page.
+- Docs: `--max-queue`, the memory use of an upload and the sketch-size numbers were corrected.
 - Docs: `--allow-sequences` is optional (the web page and the shipped unit do not need it), the
   containment denominator is the reference genome's k-mer count, and several other statements that no
   longer matched the code were corrected.

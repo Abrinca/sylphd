@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import anyio
 import pytest
 from starlette.testclient import TestClient
 
@@ -24,7 +25,7 @@ from sylphd.assembly import (
     parse_assembly,
 )
 from sylphd.cli import _gtdb_species
-from sylphd.limits import client_identity, parse_rate_limit
+from sylphd.limits import JobSlots, QueueFullError, client_identity, parse_rate_limit
 from sylphd.metadata import METADATA_COLUMNS
 from sylphd.server import ServerConfig, create_app
 
@@ -249,6 +250,19 @@ class TestAssemblyHelpers:
         with pytest.raises(SequenceError):
             gunzip_limited(b"not gzip", 10)
 
+    def test_gunzip_limited_concatenated_members(self) -> None:
+        first, second = gzip.compress(b">a\nACGT\n"), gzip.compress(b">b\nGGCC\n")
+        assert gunzip_limited(first + second, 100) == b">a\nACGT\n>b\nGGCC\n"
+        assert parse_assembly(gunzip_limited(first + second, 100)).records == 2
+        with pytest.raises(SequenceTooLarge):
+            gunzip_limited(first + second, 12)  # one total budget for all members
+
+    def test_gunzip_limited_rejects_truncated_stream(self) -> None:
+        data = gzip.compress(b">a\nACGT\n") + gzip.compress(b">b\nGGCC\n")
+        for cut in (8, len(data) // 2 + 3):
+            with pytest.raises(SequenceError, match="truncated|not valid"):
+                gunzip_limited(data[:-cut], 100)
+
     def test_gtdb_species(self) -> None:
         assert (
             _gtdb_species("d__Bacteria;p__P;c__C;o__O;f__F;g__G;s__Escherichia coli")
@@ -382,7 +396,7 @@ class TestQueueLimit:
             release.wait(timeout=10)
             return {"name": "blocked", "kind": "query", "rows": []}
 
-        monkeypatch.setattr("sylphd.server._run_sample", blocking_run_sample)
+        monkeypatch.setattr("sylphd.server.run_sample", blocking_run_sample)
         app = create_app(
             ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1, max_queue=0)
         )
@@ -405,6 +419,85 @@ class TestQueueLimit:
                 assert "busy" in rejected.json()["error"]
                 release.set()
                 assert future.result(timeout=10).status_code == 200
+
+    def test_simultaneous_admission_is_atomic(self) -> None:
+        slots = JobSlots(max_jobs=1, max_queue=0)
+        refused = []
+
+        async def job() -> None:
+            try:
+                with slots.admit():
+                    async with slots.slot():
+                        await anyio.sleep(0.05)
+            except QueueFullError:
+                refused.append(1)
+
+        async def run() -> None:
+            async with anyio.create_task_group() as group:
+                for _ in range(5):
+                    group.start_soon(job)
+
+        anyio.run(run)
+        assert len(refused) == 4
+
+    def test_batch_over_capacity_runs_nothing(self, monkeypatch) -> None:
+        calls = []
+
+        def run_sample(*args, **kwargs):
+            calls.append(1)
+            return {"name": "x", "kind": "query", "rows": []}
+
+        monkeypatch.setattr("sylphd.server.run_sample", run_sample)
+        app = create_app(
+            ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1, max_queue=0)
+        )
+        sketch = O157_SKETCH.read_bytes()
+        with TestClient(app) as test_client:
+            rejected = test_client.post(
+                "/query",
+                data={"params": json.dumps({"names": ["a", "b"]})},
+                files=[("sketch", ("a.sylsp", sketch)), ("sketch", ("b.sylsp", sketch))],
+            )
+            assert rejected.status_code == 503
+            assert calls == []
+            accepted = test_client.post(
+                "/query",
+                data={"params": "{}"},
+                files=[("sketch", ("a.sylsp", sketch))],
+            )
+            assert accepted.status_code == 200
+
+    @pytest.mark.parametrize(
+        "path, content_type",
+        [
+            ("/query", "multipart/form-data; boundary=x"),
+            ("/assembly", "application/vnd.sylph.sketch"),
+        ],
+    )
+    def test_full_queue_is_refused_before_the_body_is_read(
+        self, path: str, content_type: str
+    ) -> None:
+        app = create_app(
+            ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1, max_queue=0)
+        )
+        sent = []
+
+        async def receive() -> dict:
+            raise AssertionError("the request body was read")
+
+        async def send(message: dict) -> None:
+            sent.append(message)
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": path,
+            "query_string": b"",
+            "headers": [(b"content-type", content_type.encode())],
+        }
+        with app.state.jobs.admit():
+            anyio.run(app, scope, receive, send)
+        assert sent[0]["status"] == 503
 
 
 class TestCORS:

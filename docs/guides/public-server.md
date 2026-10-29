@@ -54,14 +54,20 @@ server log.
 
 | Option | Default | Applies to | Meaning |
 |---|---|---|---|
-| `--max-jobs N` | `2` | `/profile`, `/query`, `/assembly` | profiling jobs running at once; further requests queue |
+| `--max-jobs N` | `2` | `/profile`, `/query`, `/assembly` | profiling jobs running at once; further jobs queue. A job is one sample of a `/profile` or `/query` request, or one `/assembly` upload |
 | `--max-upload-mb N` | `512` | all `POST`s | request body limit (413 above it) |
 | `--max-sequence-mb N` | `20` | raw `/assembly` | upload limit of a raw sequence before decompression; gzip bodies may decompress to 5× this. Sketch uploads use `--max-upload-mb` |
 | `--rate-limit N/min` | off | `/profile`, `/query`, `/assembly` | per-client limit (`N/min` or `N/s`); over the limit: `429` with `Retry-After` |
-| `--max-queue N` | unlimited | the same | requests allowed to wait for a job slot; beyond that `503` with `Retry-After: 1` |
+| `--max-queue N` | unlimited | the same | jobs (samples) allowed to wait for a job slot; beyond that `503` with `Retry-After: 1` |
 
 `/health` and `/info` are always served and never limited. At most 4096 sketches fit in one
 `/query` or `/profile` request; `/info` reports the cap as `max_sketches`.
+
+`--max-queue` counts jobs, not HTTP requests, and a request is accepted or refused as a whole:
+if all its samples do not fit within `--max-jobs` + `--max-queue`, it gets a `503` before any
+sample runs. A request with more samples than that is never accepted, so keep batches small
+(or the queue large). A full queue is also detected before the request body is read, so
+a refused upload costs almost nothing.
 
 ### Sizing the upload limit
 
@@ -75,8 +81,12 @@ Sketches are small compared with the data behind them, but they grow with sequen
 | 56 GB paired-end reads (uncompressed) | 76 MB |
 
 On the server, a 200 MB sketch (16.7 million k-mers) decodes in about 0.8 s and needs about
-0.8 GB of RAM while it is profiled, so peak extra memory is roughly `--max-jobs` × 0.8 GB at that
-size. Queued `/profile` uploads are spooled to disk (the temp dir), not held in RAM. The public
+0.8 GB of RAM while it is profiled, so the running jobs need roughly `--max-jobs` × 0.8 GB at that
+size. In addition, an accepted upload is held in RAM as raw bytes from the moment it has been
+read until its job has finished, so the waiting jobs cost their upload size each (multipart
+parts are spooled to a temporary file while they arrive, but are read back into memory before
+profiling). With `--max-queue` set, at most `--max-jobs` + `--max-queue` jobs are admitted;
+without it nothing bounds the number of waiting uploads. The public
 instance uses `--max-upload-mb 200` on a 2-core, 12 GB VM. Keep a reverse proxy's body limit a
 little above `--max-upload-mb`, so oversized uploads get sylphd's own error message.
 
@@ -164,10 +174,10 @@ scripts/preview-pages.sh
 
 The script builds the docs and assembles the site like the Pages workflow (the web app at `/`,
 the docs at `/docs/`), so links from the page into the docs work. It also builds the WebAssembly
-sketcher of the Reads mode into `web/wasm/` (needs `cargo` and `wasm-bindgen-cli`; `SKIP_WASM=1`
-skips it). Serving `web/` alone with `python -m http.server -d web` also works for the Assembly
-mode, but the docs links then return 404, and Reads mode needs `web/wasm/`
-(`sketch-wasm/build.sh ../web/wasm`).
+sketcher (needed by the Reads and Assembly modes, which sketch in the browser) into `web/wasm/`
+(needs `cargo` and `wasm-bindgen-cli`; `SKIP_WASM=1` skips it). Serving `web/` alone with
+`python -m http.server -d web` also works, but the docs links then return 404, and without
+`web/wasm/` (`sketch-wasm/build.sh`) neither mode can sketch; only a ready-made `.sylsp` upload works.
 
 For local development start the server with `--cors-origin local`. The browser must be allowed by
 the server's CORS origins, and an HTTPS page can only call an HTTPS API (or localhost).

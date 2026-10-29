@@ -4,10 +4,10 @@ import { readFileSync, createReadStream } from "node:fs";
 import { createGunzip } from "node:zlib";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { initSync, WasmGunzip } from "../demo/pkg/sylph_sketch.js";
+import { initSync, WasmGunzip } from "../../web/wasm/sylph_sketch.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-initSync({ module: readFileSync(path.join(here, "../demo/pkg/sylph_sketch_bg.wasm")) });
+initSync({ module: readFileSync(path.join(here, "../../web/wasm/sylph_sketch_bg.wasm")) });
 const file = process.argv[2];
 const verify = !process.argv.includes("--no-verify");
 

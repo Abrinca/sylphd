@@ -36,8 +36,8 @@ _READ_SUFFIXES = (
     ".sam",
     ".sylsp",
 )
-_PAIR_SUFFIXES = ("_R1", "_R2", ".R1", ".R2", "_1", "_2")
-_PAIR_SUFFIX_RE = re.compile(r"(_R[12]|\.R[12]|_[12])$", re.IGNORECASE)
+# same rule as web/reads.js: sample_R1, sample.R2, sample_1 and Illumina's sample_S1_L001_R1_001
+_PAIR_SUFFIX_RE = re.compile(r"[_.]R?[12](_001)?$", re.IGNORECASE)
 
 SKETCH_SUFFIX = ".sylsp"
 
@@ -314,6 +314,7 @@ def sketch_sample(sample: SampleInput, *, c: int, k: int) -> SampleSketch:
         return sketcher.sketch_single(sample.name, reads)
     except (
         OSError,
+        EOFError,
         ValueError,
         dnaio.FileFormatError,
         dnaio.UnknownFileFormat,
@@ -368,7 +369,13 @@ def sketch_assembly(
 
     try:
         sketch = Sketcher(c=c, k=k).sketch_single(name, sequences())
-    except (OSError, ValueError, dnaio.FileFormatError, dnaio.UnknownFileFormat) as error:
+    except (
+        OSError,
+        EOFError,
+        ValueError,
+        dnaio.FileFormatError,
+        dnaio.UnknownFileFormat,
+    ) as error:
         raise InputError(f"cannot sketch {path}: {error}") from error
     if not records or not length:
         raise InputError(f"{path} contains no sequences")

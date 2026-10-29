@@ -4,8 +4,9 @@
 //! mates are matched by record order) or one interleaved stream
 //! (`push_interleaved`). The mode is fixed by the first push.
 //!
-//! In two-stream mode a mate that arrives before its partner is queued, so feed
-//! R1 and R2 alternately (the demo does) to keep memory flat.
+//! In two-stream mode a mate that arrives before its partner is queued. Equal
+//! byte chunks do not hold equally many records (75 bp vs 150 bp mates), so
+//! feed the mate that is behind: `unmatched()` says which one.
 
 use std::collections::VecDeque;
 
@@ -227,6 +228,12 @@ impl StreamSketcher {
         }
     }
 
+    /// Two-stream mode: mates queued while waiting for their partners; positive
+    /// when R1 is ahead (feed R2 next), negative when R2 is ahead.
+    pub fn unmatched(&self) -> i64 {
+        self.queue1.len() as i64 - self.queue2.len() as i64
+    }
+
     /// Reads (or read pairs) sketched so far.
     pub fn reads(&self) -> u64 {
         self.builder.reads
@@ -235,6 +242,11 @@ impl StreamSketcher {
     /// Bases sketched so far (both mates for pairs).
     pub fn bases(&self) -> u64 {
         self.builder.bases
+    }
+
+    /// G and C bases among `bases()`.
+    pub fn gc(&self) -> u64 {
+        self.builder.gc
     }
 
     /// Distinct k-mers in the sketch so far.

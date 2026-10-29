@@ -202,8 +202,14 @@ pub struct SketchBuilder {
     pub reads: u64,
     /// Number of bases seen (both mates for pairs).
     pub bases: u64,
+    /// G and C bases (either case) among `bases`.
+    pub gc: u64,
     scratch1: Vec<u64>,
     scratch2: Vec<u64>,
+}
+
+fn count_gc(seq: &[u8]) -> u64 {
+    seq.iter().filter(|b| matches!(b, b'G' | b'C' | b'g' | b'c')).count() as u64
 }
 
 impl SketchBuilder {
@@ -235,6 +241,7 @@ impl SketchBuilder {
             mean_read_length: 0.0,
             reads: 0,
             bases: 0,
+            gc: 0,
             scratch1: Vec::new(),
             scratch2: Vec::new(),
         })
@@ -266,6 +273,7 @@ impl SketchBuilder {
         }
         self.reads += 1;
         self.bases += seq.len() as u64;
+        self.gc += count_gc(seq);
         self.mean_read_length += ((seq.len() as f64) - self.mean_read_length) / self.reads as f64;
     }
 
@@ -283,6 +291,7 @@ impl SketchBuilder {
 
         self.reads += 1;
         self.bases += (seq1.len() + seq2.len()) as u64;
+        self.gc += count_gc(seq1) + count_gc(seq2);
         self.mean_read_length += ((seq1.len() as f64) - self.mean_read_length) / self.reads as f64;
 
         let no_dedup = !self.deduplicate;

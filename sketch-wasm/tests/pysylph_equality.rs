@@ -88,7 +88,7 @@ fn sketch_case(case: &serde_json::Value, chunk: usize) -> Vec<u8> {
             }
         }
         "paired" => {
-            // alternate between the two streams, like the browser demo
+            // alternate between the two streams, like the browser
             let raw = |p: &Path| -> Box<dyn Read> { Box::new(File::open(p).unwrap()) };
             let (mut r1, mut r2) = if raw_gz {
                 (raw(&files[0]), raw(&files[1]))

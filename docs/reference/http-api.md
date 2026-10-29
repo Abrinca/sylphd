@@ -113,7 +113,7 @@ Finds the closest database genomes of **one assembly**. The body is either
 
 * **raw FASTA or FASTQ**, plain or gzip, which the server sketches itself. Only with
   `--allow-sequences`, otherwise a `404` whose message says so. The gzip magic bytes (`\x1f\x8b`)
-  select decompression; the `Content-Type` header is otherwise informational, but must be one of:
+  select decompression (concatenated gzip members are read in turn; a truncated stream is a `400`); the `Content-Type` header is otherwise informational, but must be one of:
 
     ```text
     Content-Type: text/plain | application/octet-stream | application/gzip
@@ -213,7 +213,7 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 | `413` | the body exceeds `--max-upload-mb`, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
 | `415` | `/query` and `/profile` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |
 | `429` | rate limited (`--rate-limit`); with `Retry-After` in seconds |
-| `503` | the job queue is full (`--max-queue`); with `Retry-After: 1` |
+| `503` | the job queue is full (`--max-queue`), or the request has more samples than fit in it; nothing was run; with `Retry-After: 1` |
 | `500` | profiling failed inside the server |
 
 ## Browser access

@@ -36,7 +36,8 @@ processed in the order positional files, `-r`, `-1/-2`, `--interleaved`, `--samp
 
 A sample name defaults to the file's base name without compression and read suffixes
 (`.gz`, `.fastq`, `.fq`, `.fasta`, `.fa`, `.fna`, `.sylsp`, ...). For paired samples `_R1`, `_R2`,
-`.R1`, `.R2`, `_1` and `_2` are removed too, so `sample-a_R1.fastq.gz` becomes `sample-a`.
+`.R1`, `.R2`, `_1`, `_2` and Illumina's `_R1_001` are removed too, so `sample-a_R1.fastq.gz`
+becomes `sample-a`.
 
 Two samples with the same name are an error. Use `--sample-name NAME` to rename a single sample, or
 `--sample NAME:SPEC` to name a sample explicitly.

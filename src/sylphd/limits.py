@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import math
 import time
-from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Callable
+from contextlib import asynccontextmanager, contextmanager
+from typing import Any, AsyncIterator, Callable, Iterator
 
 import anyio
 
@@ -26,7 +26,7 @@ QUEUE_RETRY_SECONDS = 1
 
 
 class QueueFullError(Exception):
-    """More requests are waiting for a job slot than ``--max-queue`` allows."""
+    """More jobs are waiting for a job slot than ``--max-queue`` allows."""
 
 
 class RateLimiter:
@@ -163,11 +163,16 @@ class RateLimitMiddleware:
 
 
 class JobSlots:
-    """A semaphore for profiling jobs plus a cap on the waiting queue.
+    """A semaphore for profiling jobs plus a cap on the jobs waiting for it.
 
-    ``max_queue=None`` means unlimited (the default, as before).  With a cap,
-    a request that would have to wait when ``max_queue`` requests (or jobs)
-    already wait is refused instead, so the queue cannot grow without bound.
+    A job is one sample of a ``/profile`` or ``/query`` request, or one
+    ``/assembly`` upload.  ``max_queue=None`` means unlimited (the default).
+    With a cap, at most ``max_jobs + max_queue`` jobs are admitted at a time;
+    a request that does not fit is refused as a whole, so the queue cannot
+    grow without bound.
+
+    Usage: :meth:`check` early (before reading a body), then :meth:`admit`
+    for all the jobs of a request, then :meth:`slot` around each job.
     """
 
     def __init__(self, max_jobs: int, max_queue: int | None = None) -> None:
@@ -175,28 +180,35 @@ class JobSlots:
             raise ValueError("max_jobs must be >= 1")
         self.max_jobs = max_jobs
         self.max_queue = max_queue
-        self.running = 0
-        self.waiting = 0
+        self._admitted = 0
         self._semaphore = anyio.Semaphore(max_jobs)
 
-    @asynccontextmanager
-    async def slot(self) -> AsyncIterator[None]:
+    def check(self, count: int = 1) -> None:
+        """Raise :class:`QueueFullError` unless ``count`` more jobs fit now."""
         if (
             self.max_queue is not None
-            and self.running >= self.max_jobs
-            and self.waiting >= self.max_queue
+            and self._admitted + count > self.max_jobs + self.max_queue
         ):
             raise QueueFullError(
-                f"more than {self.max_queue} request(s) are already waiting"
+                f"{self._admitted} job(s) are already running or waiting "
+                f"(limit {self.max_jobs} + {self.max_queue} queued)"
             )
-        self.waiting += 1
-        try:
-            await self._semaphore.acquire()
-        finally:
-            self.waiting -= 1
-        self.running += 1
+
+    @contextmanager
+    def admit(self, count: int = 1) -> Iterator[None]:
+        """Reserve room for ``count`` jobs, or raise :class:`QueueFullError`.
+
+        Never awaits, so concurrent requests cannot both pass the check.
+        """
+        self.check(count)
+        self._admitted += count
         try:
             yield
         finally:
-            self.running -= 1
-            self._semaphore.release()
+            self._admitted -= count
+
+    @asynccontextmanager
+    async def slot(self) -> AsyncIterator[None]:
+        """Wait for a free job slot (the job must have been admitted)."""
+        async with self._semaphore:
+            yield

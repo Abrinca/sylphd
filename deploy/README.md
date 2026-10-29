@@ -72,8 +72,9 @@ owned by `sylphd:sylphd`.
    ssh opc@HOST 'cd /tmp/sylphd-deploy && sudo DOMAIN=sylphd.example.org ./setup-server.sh'
    ```
 
-   The script creates the `sylphd` user and `/srv/sylphd/{db,releases,run,python}`,
-   installs uv and a uv-managed CPython 3.14, installs Caddy from the
+   The script creates the `sylphd` user and `/srv/sylphd/{db,releases,run,python}`
+   (`/srv/sylphd` and `releases/` are owned by root, which is what the updater
+   writes to; the service account only reads them), installs uv and a uv-managed CPython 3.14, installs Caddy from the
    `@caddy/caddy` COPR, writes the units, the Caddyfile and the site drop-ins,
    applies the SELinux labels/policy, opens the firewalld services, configures
    dnf-automatic and enables the timers. Re-running it is the supported way to

@@ -70,21 +70,29 @@ def _describe_limit(limit: int) -> str:
 
 
 def gunzip_limited(data: bytes, limit: int) -> bytes:
-    """Decompress gzip ``data``, refusing output larger than ``limit`` bytes."""
-    too_large = SequenceTooLarge(
-        f"decompressed assembly exceeds the {_describe_limit(limit)} limit"
-    )
-    decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    try:
-        out = decompressor.decompress(data, limit + 1)
-        if len(out) > limit or decompressor.unconsumed_tail:
-            raise too_large
-        out += decompressor.flush()
-    except zlib.error as error:
-        raise SequenceError("body is not valid gzip data") from error
-    if len(out) > limit:
-        raise too_large
-    return out
+    """Decompress gzip ``data``, refusing output larger than ``limit`` bytes.
+
+    Concatenated gzip members (``cat a.gz b.gz``) are decompressed in turn,
+    under one total ``limit``; every member must be complete.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while data:
+        decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        try:
+            chunk = decompressor.decompress(data, limit + 1 - total)
+        except zlib.error as error:
+            raise SequenceError("body is not valid gzip data") from error
+        total += len(chunk)
+        if total > limit:
+            raise SequenceTooLarge(
+                f"decompressed assembly exceeds the {_describe_limit(limit)} limit"
+            )
+        if not decompressor.eof:
+            raise SequenceError("gzip data is truncated (incomplete stream)")
+        chunks.append(chunk)
+        data = decompressor.unused_data
+    return b"".join(chunks)
 
 
 @dataclass(frozen=True)

@@ -91,6 +91,15 @@ fn header_fields() {
 }
 
 #[test]
+fn oversized_header_is_an_error() {
+    // FNAME that never ends: rejected at the header size limit, not rescanned forever
+    let mut gz = vec![0x1f, 0x8b, 8, 0x08, 0, 0, 0, 0, 0, 255];
+    gz.extend(vec![b'a'; 10_000_000]);
+    let err = decode(&gz, 1 << 20).unwrap_err();
+    assert!(err.contains("header too large"), "{err}");
+}
+
+#[test]
 fn trailing_zero_padding_is_ignored_but_junk_is_not() {
     let data = payload(1000);
     let mut gz = member(&data, Compression::default());

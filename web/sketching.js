@@ -60,10 +60,9 @@
 
   // Sketch `files` (File/Blob list; gzip is detected by content) with the database's c and k.
   //   layout: 'single' (all files in order, one sample) | 'paired' (files = [R1, R2]) | 'interleaved'
-  //   stats:  also count the GC bases (assemblies: records, length and GC for the summary)
   //   onProgress({ streams: [{read, decompressed, finished}], sketch: {reads, bases, kmers, wasmMemory, ...} })
   // Returns { done: Promise<{ sketch: Uint8Array, stats }>, cancel() }; cancelling rejects with an AbortError.
-  function start({ files, layout = 'single', c, k, name, stats = false, onProgress = () => {} }) {
+  function start({ files, layout = 'single', c, k, name, onProgress = () => {} }) {
     let kill = () => {};
     let cancelled = false;
     const done = new Promise((resolve, reject) => {
@@ -109,7 +108,7 @@
             [channels[i].port1]);
         });
         sketchWorker.postMessage(
-          { module, ports: channels.map((ch) => ch.port2), paired, interleaved: layout === 'interleaved', c, k, deduplicate: true, name, gc: stats },
+          { module, ports: channels.map((ch) => ch.port2), paired, interleaved: layout === 'interleaved', c, k, deduplicate: true, name },
           channels.map((ch) => ch.port2));
       })().catch(reject);
     });
@@ -161,5 +160,21 @@
     }
   }
 
-  window.SylphdSketch = { unsupported, loadModule, start, isSylsp, readSylspHeader };
+  // Why the ready-made sketch `file` (with its readSylspHeader result, or { error }) cannot be sent to
+  // the server described by `info` (/info), or null: unreadable, c/k the server does not accept, too
+  // big. `what` ('assembly' | 'reads') names the input in the "sketch it again" hint.
+  function sketchProblem(file, header, info, what) {
+    if (header.error) return `${file.name} is ${header.error}.`;
+    const db = (info && info.database) || {};
+    if (Number.isFinite(db.c) && Number.isFinite(db.k) && (header.k !== db.k || header.c > db.c)) {
+      return `This sketch was made with c=${header.c}, k=${header.k}, but the server uses c=${db.c}, k=${db.k}. A sketch must have the same k and may not be sparser (c ≤ ${db.c}); sketch the ${what} again here.`;
+    }
+    const maxMb = (info && info.limits && info.limits.max_upload_mb) || 0;
+    if (maxMb && file.size > maxMb * 1048576) {
+      return `This sketch is ${(file.size / 1048576).toFixed(1)} MB, over the server's upload limit of ${maxMb} MB.`;
+    }
+    return null;
+  }
+
+  window.SylphdSketch = { unsupported, loadModule, start, isSylsp, readSylspHeader, sketchProblem };
 })();

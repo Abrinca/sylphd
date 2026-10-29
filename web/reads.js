@@ -49,7 +49,7 @@
   const safeName = (s) => String(s || 'sample').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'sample';
 
   /* ----------------------------------------------------- support checks */
-  const { unsupported, loadModule, isSylsp, readSylspHeader } = window.SylphdSketch;
+  const { unsupported, loadModule, isSylsp, readSylspHeader, sketchProblem } = window.SylphdSketch;
 
   /* --------------------------------------------------------- file names */
   const COMPRESSION = /\.(gz|bgz|bgzf)$/i;
@@ -280,15 +280,8 @@
     } else if (st.kind === 'multisketch') {
       block.push('Upload one .sylsp sketch at a time: a result shows one sample. Remove the others.');
     } else if (st.kind === 'sketch') {
-      const h = st.header;
-      const db = dbParams();
-      const maxMb = (S.info() && S.info().limits && S.info().limits.max_upload_mb) || 0;
-      if (h && h.error) block.push(`${st.files[0].name} is ${h.error}.`);
-      else if (h && db && (h.k !== db.k || h.c > db.c)) {
-        block.push(`This sketch was made with c=${h.c}, k=${h.k}, but the server uses c=${db.c}, k=${db.k}. A sketch must have the same k and may not be sparser (c ≤ ${db.c}); sketch the reads again here.`);
-      } else if (maxMb && st.files[0].size > maxMb * 1048576) {
-        block.push(`This sketch is ${fmtBytes(st.files[0].size)}, over the server's upload limit of ${maxMb} MB.`);
-      }
+      const problem = st.header && sketchProblem(st.files[0], st.header, S.info(), 'reads');
+      if (problem) block.push(problem);
     } else if (n === 2 && st.layout === 'paired') {
       if (!st.pairDetected) warn.push('The file names do not look like a pair (_R1/_R2, _1/_2): check that the order is R1, R2, or choose “Two single-end files”.');
       if (st.pairMismatch) warn.push('The first read names of R1 and R2 differ: these files may not belong together.');
@@ -883,10 +876,6 @@
   }
 
   /* ------------------------------------------------------- genome table */
-  const lineagePairs = (str) => (!has(str) ? [] : String(str).split(';').map((p) => {
-    const m = /^([a-z]+)__(.*)$/.exec(p.trim());
-    return m ? { rank: m[1], name: m[2] } : { rank: '', name: p.trim() };
-  }));
   const RANK_LABEL = { d: 'Domain', p: 'Phylum', c: 'Class', o: 'Order', f: 'Family', g: 'Genus', s: 'Species' };
   const covOf = (r) => (isNum(r.Eff_cov) ? r.Eff_cov : isNum(r.True_cov) ? r.True_cov : null);
 
@@ -894,7 +883,7 @@
     const { rows, params } = run.result;
     const covLabel = params.estimate_unknown ? 'True cov.' : 'Eff. cov.';
     const hits = rows.map((r, i) => {
-      const lin = lineagePairs(r.gtdb_taxonomy);
+      const lin = S.parseLineage(r.gtdb_taxonomy);
       const sp = lin.find((e) => e.rank === 's');
       return { r, i: i + 1, lin, species: sp ? sp.name : '' };
     });

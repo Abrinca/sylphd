@@ -5,13 +5,13 @@
 //   ./build.sh && cargo test --release && node tests/node_check.mjs [--big]
 import { readFileSync, createReadStream } from "node:fs";
 import { gunzipSync, createGunzip } from "node:zlib";
-import { initSync, WasmSketcher, WasmGunzip, WasmCrc } from "../demo/pkg/sylph_sketch.js";
+import { initSync, WasmSketcher, WasmGunzip, WasmCrc } from "../../web/wasm/sylph_sketch.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
-initSync({ module: readFileSync(path.join(here, "../demo/pkg/sylph_sketch_bg.wasm")) });
+initSync({ module: readFileSync(path.join(here, "../../web/wasm/sylph_sketch_bg.wasm")) });
 
 const cases = JSON.parse(readFileSync(path.join(here, "cases.json"), "utf8"));
 const abs = (f) => (path.isAbsolute(f) ? f : path.join(root, f));

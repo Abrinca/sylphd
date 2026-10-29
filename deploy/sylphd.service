@@ -42,7 +42,7 @@ Environment=SYLPH_META=meta-r232-reps.sqlite
 # receives sketches; add --allow-sequences only if you want it to accept raw
 # FASTA/FASTQ on POST /assembly too.
 #   --max-jobs 2             profiling jobs running at once
-#   --max-queue 16           requests allowed to wait for a job slot
+#   --max-queue 16           jobs (samples) allowed to wait for a job slot
 #   --rate-limit 10/min      per-client limit on the three POST endpoints
 #   --trusted-proxy unix     believe X-Forwarded-For from the local socket
 #   --cors-origin *          any origin may call the API from a browser

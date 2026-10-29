@@ -349,7 +349,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       if (isNum(db.genomes)) facts.push(fact('Genomes', fmtInt(db.genomes), 'Number of reference genomes in the database'));
       if (isNum(db.c) && isNum(db.k)) facts.push(fact('Sketch', `c=${db.c} · k=${db.k}`, 'sylph subsampling rate c and k-mer size k; sketches must match (same k, c no larger than this)'));
       if (isNum(lim.max_upload_mb)) {
-        facts.push(fact('Upload', `≤ ${lim.max_upload_mb} MB`, 'Maximum size of the sketch you can send, not of your sequence files. For scale: a 1.5 GB ONT fastq.gz sketches to about 6 MB, 56 GB of paired-end reads to about 76 MB.'));
+        facts.push(fact('Upload', `≤ ${lim.max_upload_mb} MB`, 'Maximum size of the sketch you can send, not of your sequence files. Typical sketch sizes are listed in the public-server guide under "Sizing the upload limit" (docs/guides/public-server/).'));
       }
       if (lim.rate_limit && isNum(lim.rate_limit.count)) {
         const w = Math.round(lim.rate_limit.window_seconds);
@@ -464,16 +464,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   // Why an uploaded sketch cannot be sent, or null: unreadable, wrong c/k for the server, too big.
   function sketchProblem() {
     if (!input.sylsp) return null;
-    const h = input.header;
-    if (!h) return 'pending';
-    if (h.error) return `${input.file.name} is ${h.error}.`;
-    const db = (serverInfo && serverInfo.database) || {};
-    if (isNum(db.c) && isNum(db.k) && (h.k !== db.k || h.c > db.c)) {
-      return `This sketch was made with c=${h.c}, k=${h.k}, but the server uses c=${db.c}, k=${db.k}. A sketch must have the same k and may not be sparser (c ≤ ${db.c}); sketch the assembly again here.`;
-    }
-    const limit = sketchLimitBytes();
-    if (limit && input.size > limit) return `This sketch is ${fmtBytes(input.size)}, over the server's upload limit of ${fmtBytes(limit)}.`;
-    return null;
+    if (!input.header) return 'pending';
+    return window.SylphdSketch.sketchProblem(input.file, input.header, serverInfo, 'assembly');
   }
 
   function refreshInput() {
@@ -618,7 +610,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     const total = file.size;
     const t0 = performance.now();
     sketchHandle = window.SylphdSketch.start({
-      files: [file], layout: 'single', c: db.c, k: db.k, name: (input.file ? input.file.name : '') || 'assembly', stats: true,
+      files: [file], layout: 'single', c: db.c, k: db.k, name: (input.file ? input.file.name : '') || 'assembly',
       onProgress: (p) => {
         const read = p.streams.reduce((n, x) => n + (x.read || 0), 0);
         const sk = p.sketch || {};
@@ -757,6 +749,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   /* ----------------------------------------------------------- results */
   const RANKS = { d: 'Domain', p: 'Phylum', c: 'Class', o: 'Order', f: 'Family', g: 'Genus', s: 'Species' };
 
+  // 'd__A;p__B;...' -> [{ rank: 'd', name: 'A' }, ...] for display (taxonomy.js has the aggregation rules)
   function parseLineage(str) {
     if (!has(str)) return [];
     return String(str).split(';').map((p) => {
@@ -1202,7 +1195,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
 
   /* ----------------------------------------------- shared with the other scripts */
   window.Sylphd = {
-    el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtSecs, fmtDur, isNum, has, notice, download,
+    parseLineage, el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtSecs, fmtDur, isNum, has, notice, download,
     accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal,
     api: API, apiOverride,
     info: () => serverInfo,

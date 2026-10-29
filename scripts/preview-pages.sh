@@ -7,10 +7,11 @@
 #   scripts/preview-pages.sh            # http://127.0.0.1:8000/
 #   scripts/preview-pages.sh 8080       # another port
 #
-# The "Reads" mode needs the WebAssembly sketcher, built from sketch-wasm/ into
-# web/wasm/ (gitignored; needs cargo, the wasm32-unknown-unknown target and
-# wasm-bindgen-cli, see sketch-wasm/README.md). SKIP_WASM=1 skips that build;
-# without the module the page still works but the Reads mode says so.
+# The "Reads" and "Assembly" modes sketch in the browser with the WebAssembly
+# sketcher, built from sketch-wasm/ into web/wasm/ (gitignored; needs cargo, the
+# wasm32-unknown-unknown target and wasm-bindgen-cli, see sketch-wasm/README.md).
+# SKIP_WASM=1 skips that build; without the module the page still loads but
+# neither mode can sketch (only uploading a ready-made .sylsp works).
 #
 # The page uses the local API (devApiBase in web/config.js) when opened from
 # localhost; start a server with `--cors-origin local`, or add ?api=... .
@@ -23,7 +24,7 @@ if [ -z "${SKIP_WASM:-}" ]; then
   if command -v cargo >/dev/null; then
     sketch-wasm/build.sh ../web/wasm
   else
-    echo "warning: cargo not found, building without the Reads mode's wasm module" >&2
+    echo "warning: cargo not found, building without the wasm sketcher" >&2
   fi
 fi
 rm -rf public

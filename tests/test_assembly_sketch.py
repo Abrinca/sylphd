@@ -20,7 +20,7 @@ from starlette.testclient import TestClient
 
 from sylphd.client import SKETCH_CONTENT_TYPE
 from sylphd.server import ServerConfig, create_app
-from sylphd.sketching import sketch_assembly
+from sylphd.sketching import InputError, sketch_assembly
 
 from conftest import CLODF13_FASTA, ECOLI_TWO_STAGE, K12_R1
 
@@ -330,3 +330,23 @@ class TestCLI:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.splitlines()[1].split("\t")[:3] == ["1", "100.00", "same species"]
+
+
+class TestGzipMembers:
+    """The client reads gzip like the server's raw-upload path does."""
+
+    def test_concatenated_members_are_all_read(self, tmp_path) -> None:
+        member = CLODF13_FASTA.read_bytes()
+        single = tmp_path / "one.fa.gz"
+        single.write_bytes(member)
+        double = tmp_path / "two.fa.gz"
+        double.write_bytes(member + member)
+        _, one = sketch_assembly(single, "x", c=200, k=31)
+        _, two = sketch_assembly(double, "x", c=200, k=31)
+        assert two.records == 2 * one.records
+
+    def test_truncated_gzip_is_an_input_error(self, tmp_path) -> None:
+        path = tmp_path / "cut.fa.gz"
+        path.write_bytes(CLODF13_FASTA.read_bytes()[:-100])
+        with pytest.raises(InputError, match="cannot sketch"):
+            sketch_assembly(path, "x", c=200, k=31)

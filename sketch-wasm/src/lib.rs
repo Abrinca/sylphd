@@ -78,7 +78,8 @@ impl WasmSketcher {
         self.inner.push(data).map_err(js_err)
     }
 
-    /// Paired-end, first mates. Alternate with `push_r2` to keep memory flat.
+    /// Paired-end, first mates. Keep `push_r1` and `push_r2` within about a
+    /// chunk of records of each other (see `unmatched`) to keep memory flat.
     pub fn push_r1(&mut self, data: &[u8]) -> Result<(), JsError> {
         self.inner.push_r1(data).map_err(js_err)
     }
@@ -119,6 +120,12 @@ impl WasmSketcher {
         self.inner.end_file().map_err(js_err)
     }
 
+    /// Two-stream paired mode: queued mates still waiting for their partner;
+    /// positive when R1 is ahead (feed R2 next), negative when R2 is ahead.
+    pub fn unmatched(&self) -> f64 {
+        self.inner.unmatched() as f64
+    }
+
     /// Reads (pairs, in paired mode) sketched so far.
     pub fn reads(&self) -> f64 {
         self.inner.reads() as f64
@@ -127,6 +134,11 @@ impl WasmSketcher {
     /// Bases sketched so far.
     pub fn bases(&self) -> f64 {
         self.inner.bases() as f64
+    }
+
+    /// G and C bases (either case) among `bases()`.
+    pub fn gc(&self) -> f64 {
+        self.inner.gc() as f64
     }
 
     /// Distinct k-mers in the sketch so far.
@@ -150,6 +162,9 @@ impl WasmSketcher {
 /// ...
 /// post(gz.finish(), gz.take_trailers());    // last partial chunk; throws if truncated
 /// ```
+/// Largest accepted `chunk_size` (keeps `chunk + chunk / 4` far from overflow).
+const MAX_CHUNK: usize = 256 << 20;
+
 #[wasm_bindgen]
 pub struct WasmGunzip {
     decoder: gzip::GzipDecoder,
@@ -163,12 +178,15 @@ pub struct WasmGunzip {
 #[wasm_bindgen]
 impl WasmGunzip {
     /// `chunk_size`: size of the decompressed pieces `pull` returns (default
-    /// 2 MiB). `crc`: `"inline"` (default, check CRC32 while decoding),
+    /// 2 MiB, at most 256 MiB). `crc`: `"inline"` (default, check CRC32 while decoding),
     /// `"deferred"` (do not compute it here; `take_trailers` gives what a
     /// `WasmCrc` on another thread needs to check it) or `"off"`.
     #[wasm_bindgen(constructor)]
     pub fn new(chunk_size: Option<usize>, crc: Option<String>) -> Result<WasmGunzip, JsError> {
-        let chunk = chunk_size.unwrap_or(2 << 20).max(1);
+        let chunk = chunk_size.unwrap_or(2 << 20);
+        if !(1..=MAX_CHUNK).contains(&chunk) {
+            return Err(js_err(format!("chunk_size must be 1..={MAX_CHUNK}")));
+        }
         let mode = match crc.as_deref() {
             None | Some("inline") => gzip::CrcMode::Inline,
             Some("deferred") => gzip::CrcMode::Deferred,

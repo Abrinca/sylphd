@@ -1,12 +1,12 @@
-// Copy of sketch-wasm/demo/sketch-worker.js, plus interleaved input; the web page's reads.js drives it.
 // Stage 2 of the pipeline: decompressed chunks -> WASM sketcher -> .sylsp bytes.
 //
 // Receives chunks from one decompress worker (single-end) or two (paired: R1
 // and R2). Every processed chunk is acked on the port it came from, which
 // gives the decompress worker a credit for the next one.
 //
-// Paired input is consumed in lock-step (one R1 chunk, then one R2 chunk), so
-// the sketcher never has to queue more than about one chunk of unmatched mates.
+// Paired input: the sketcher queues a mate until its partner arrives, and equal byte chunks hold
+// different numbers of records (75 bp vs 150 bp mates). So the mate that is behind in records
+// (sketcher.unmatched()) is fed next, which keeps the queue at about one chunk of records.
 //
 // Messages to the main thread: {type: 'progress'}, {type: 'done', sketch, stats}, {type: 'error'}
 
@@ -22,12 +22,11 @@ self.onmessage = async ({ data }) => {
   }
 };
 
-async function run({ module, ports, paired, interleaved = false, c, k, deduplicate, name, gc = false }) {
+async function run({ module, ports, paired, interleaved = false, c, k, deduplicate, name }) {
   const t0 = performance.now();
   const wasm = await init({ module_or_path: module });
   const sketcher = new WasmSketcher(c, k, deduplicate);
 
-  const gcCounter = gc && !paired ? makeGcCounter() : null;
   const queues = ports.map(() => []);
   const crcs = ports.map(() => new WasmCrc());
   const stats = { sketchMs: 0, crcMs: 0, idleMs: 0, chunks: 0, maxQueued: 0, decompressedBytes: 0 };
@@ -56,7 +55,6 @@ async function run({ module, ports, paired, interleaved = false, c, k, deduplica
     const bytes = new Uint8Array(item.buf);
     let t = performance.now();
     sketcher[method](bytes);
-    if (gcCounter) gcCounter.scan(bytes);
     stats.sketchMs += performance.now() - t;
     if (item.trailers) {
       // gzip CRC32 check, deferred from the decompress worker (see WasmGunzip 'deferred')
@@ -86,14 +84,10 @@ async function run({ module, ports, paired, interleaved = false, c, k, deduplica
       const [h0, h1] = [queues[0][0], queues[1][0]];
       if (!h0 || !h1) break; // wait for both mates
       if (h0.t === 'end' && h1.t === 'end') { finish(); return; }
-      for (const i of [0, 1]) {
-        const head = queues[i][0];
-        if (head.t === 'chunk') {
-          feed(methods[i], head, i);
-          queues[i].shift();
-          ports[i].postMessage(1);
-        }
-      }
+      let i = sketcher.unmatched() > 0 ? 1 : 0;
+      if (queues[i][0].t !== 'chunk') i = 1 - i; // that mate has ended; finish() reports the count mismatch
+      feed(methods[i], queues[i].shift(), i);
+      ports[i].postMessage(1);
     }
     report();
   }
@@ -109,7 +103,7 @@ async function run({ module, ports, paired, interleaved = false, c, k, deduplica
       name,
       paired,
       interleaved,
-      gcBases: gcCounter ? gcCounter.gc() : null,
+      gcBases: sketcher.gc(),
       sketchBytes: sketch.byteLength,
       reads: sketcher.reads(),
       bases: sketcher.bases(),
@@ -136,33 +130,4 @@ async function run({ module, ports, paired, interleaved = false, c, k, deduplica
     };
   });
   self.postMessage({ type: 'ready' });
-}
-
-// Counts G/C (either case) in the sequence lines of FASTA (any line not starting with '>') or 4-line
-// FASTQ (line 2 of every record), for the GC percentage of an assembly. Chunks split anywhere.
-function makeGcCounter() {
-  const GC = new Uint8Array(256);
-  for (const ch of 'GCgc') GC[ch.charCodeAt(0)] = 1;
-  let fmt = 0; // 1 = FASTA, 2 = FASTQ, 0 = not decided yet
-  let atStart = true;
-  let skip = false;
-  let lineNo = 0;
-  let count = 0;
-  return {
-    gc: () => count,
-    scan(bytes) {
-      for (let i = 0; i < bytes.length; i++) {
-        const b = bytes[i];
-        if (b === 10) { atStart = true; lineNo++; continue; }
-        if (atStart) {
-          if (b === 13 || b === 32) continue;
-          if (fmt === 0) fmt = b === 62 ? 1 : b === 64 ? 2 : 0;
-          atStart = false;
-          skip = fmt === 1 ? b === 62 : fmt === 2 ? lineNo % 4 !== 1 : true;
-          if (skip) continue;
-        } else if (skip) continue;
-        count += GC[b];
-      }
-    },
-  };
 }

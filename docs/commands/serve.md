@@ -37,10 +37,10 @@ bytes are rejected. The socket file is removed on shutdown, including on `SIGTER
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--max-jobs N` | `2` | profiling jobs running at once; further requests queue |
+| `--max-jobs N` | `2` | profiling jobs (one per sample) running at once; further jobs queue |
 | `--max-upload-mb N` | `512` | request body limit in MB |
 | `--max-sequence-mb N` | `20` | limit of a *raw-sequence* `/assembly` upload, before decompression; gzip bodies are decompressed up to 5× this. Sketch uploads are limited by `--max-upload-mb` instead |
-| `--max-queue N` | unlimited | requests allowed to wait for a job slot; beyond that the server answers `503` with `Retry-After` |
+| `--max-queue N` | unlimited | jobs (samples) allowed to wait for a job slot; a request whose samples do not all fit is refused whole with `503` and `Retry-After` |
 | `--rate-limit N/min` | off | per-client limit on `/assembly`, `/profile` and `/query`, for example `10/min`; `N/s` also works. Replies are `429` with `Retry-After` |
 
 Uploaded sketches are also checked structurally before they are decoded; see the

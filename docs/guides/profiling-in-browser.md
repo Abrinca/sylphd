@@ -18,7 +18,7 @@ sketch leaves your computer.
    green. The page sketches with the server's `c` and `k`, which it reads from `GET /info`.
 2. Drop FASTQ or FASTA files (plain or `.gz`), or choose them:
     - **one file**: single-end reads, or *interleaved pairs* (`R1, R2, R1, R2, …`);
-    - **two files**: paired-end `R1` + `R2`. Names like `_R1`/`_R2`, `_1`/`_2` or `.R1`/`.R2` are
+    - **two files**: paired-end `R1` + `R2`. Names like `_R1`/`_R2`, `_R1_001`/`_R2_001`, `_1`/`_2` or `.R1`/`.R2` are
       recognised and put in order; *Swap R1 / R2* flips them, and *Two single-end files* combines
       them into one single-end sample instead. The page compares the name of the first record of each
       file (ignoring `/1`, `/2` and the Illumina comment after the first space) and warns if they
@@ -66,14 +66,16 @@ server before uploading. The sketch must have the same `k` as the server and may
 which the server uses. The sample name comes from the file name, the profile is the same as for the
 reads. A result shows one sample, so **one `.sylsp` at a time** (the page says so if you drop
 several), and a sketch cannot be mixed with reads. The *Upload* chip in the header is the largest
-sketch the server takes: a 1.5 GB ONT `fastq.gz` sketches to about 6 MB, 56 GB of paired-end reads
-to about 76 MB.
+sketch the server takes; typical sketch sizes are in
+[Sizing the upload limit](public-server.md#sizing-the-upload-limit).
 
 ## Limits and what to expect
 
 - **Speed:** a 1.55 GB gzipped ONT file (254k reads, 2.1 Gbp) is sketched in about 10 s in
   Chromium (pysylph: 6–7 s), then the server takes a few seconds. Firefox needs about 14 s.
-  Decompression is the bottleneck, so plain FASTQ is not faster to sketch than gzip.
+  Decompression is the bottleneck for gzip input; plain FASTQ skips it and is limited by the
+  sketching itself (about 5.5 s of the 10 s here, estimated, not measured end to end), so it is
+  faster than the same reads as `.gz`.
 - **Memory:** WebAssembly in a browser tab is limited to 4 GB. Bacterial isolates and long-read
   samples need tens of MB; deep short-read metagenomes with hundreds of millions of distinct k-mers
   can reach the limit. The page warns when the sketcher uses more than 1.5 GB and stops with a clear

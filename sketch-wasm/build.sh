@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Builds the wasm module and the JS glue (ES module, --target web).
 #
-#   ./build.sh              # -> demo/pkg/   (the spike demo)
-#   ./build.sh ../web/wasm  # -> any other directory (the web page; this is what
-#                           #    scripts/preview-pages.sh and the Pages workflow do)
+#   ./build.sh              # -> ../web/wasm (the web page; scripts/preview-pages.sh and the
+#                           #    Pages workflow pass the same directory)
+#   ./build.sh some/dir     # -> any other directory
 #
 # Needs: rustc with the wasm32-unknown-unknown target, and wasm-bindgen-cli at
 # the same version as the `wasm-bindgen` crate (see Cargo.toml):
@@ -12,7 +12,7 @@
 # wasm-opt (binaryen) is used if found on PATH, or set WASM_OPT=/path/to/wasm-opt.
 set -euo pipefail
 cd "$(dirname "$0")"
-OUT_DIR="${1:-demo/pkg}"
+OUT_DIR="${1:-../web/wasm}"
 WASM_BINDGEN="${WASM_BINDGEN:-$(command -v wasm-bindgen || echo "$HOME/.cargo/bin/wasm-bindgen")}"
 cargo build --release --target wasm32-unknown-unknown --locked
 "$WASM_BINDGEN" --target web --out-dir "$OUT_DIR" --out-name sylph_sketch \

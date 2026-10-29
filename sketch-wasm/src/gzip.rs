@@ -70,6 +70,10 @@ impl Crc32Tracker {
     }
 }
 
+/// Longest member header accepted (FEXTRA alone can be 64 KiB); bounds the
+/// rescan of an unterminated FNAME/FCOMMENT.
+const MAX_HEADER: usize = 64 * 1024 + 1024;
+
 pub struct GzipDecoder {
     stage: Stage,
     header: Vec<u8>,
@@ -205,6 +209,9 @@ impl GzipDecoder {
                     while used < input.len() {
                         self.header.push(input[used]);
                         used += 1;
+                        if self.header.len() > MAX_HEADER {
+                            return Err("gzip header too large".into());
+                        }
                         if let Some(len) = parse_header(&self.header)? {
                             debug_assert_eq!(len, self.header.len());
                             self.header.clear();

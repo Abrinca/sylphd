@@ -131,7 +131,7 @@ log "verifying SHA256SUMS"
     done
     sha256sum -c --ignore-missing SHA256SUMS
 ) || die "checksum verification failed; nothing was changed"
-chown -R sylphd:sylphd "$tmp"
+chmod 0755 "$tmp"   # root's staging directory; sylphd only reads the wheels
 
 # --- build the release -------------------------------------------------------
 log "refreshing CPython $PYTHON_SERIES to the newest patch release"
@@ -141,6 +141,8 @@ as_sylphd "$UV" python install "$PYTHON_SERIES" --upgrade ||
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 release="$RELEASES/$tag-$stamp"
 log "creating $release"
+# releases/ is root's: create the directory here and hand it to sylphd to build in.
+install -d -o sylphd -g sylphd -m 0755 "$release"
 as_sylphd "$UV" venv --python "$PYTHON_SERIES" "$release" ||
     die "could not create the virtualenv"
 
@@ -149,7 +151,12 @@ as_sylphd "$UV" pip install \
     --python "$release/bin/python" \
     --find-links "$tmp" \
     --only-binary pysylph,dnaio \
+    --compile-bytecode \
     "sylphd==$version" || die "installation failed"
+
+# The finished release belongs to root: the service runs it but cannot change
+# it (hence --compile-bytecode above).  chown -R does not follow symlinks.
+chown -R root:root "$release"
 
 # setup-server.sh labels releases/ as usr_t (systemd's unconfined_service_t may
 # only entrypoint bin_t/shell_exec_t/usr_t files); apply it to the new tree.

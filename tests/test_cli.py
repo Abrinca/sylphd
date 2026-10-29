@@ -420,6 +420,29 @@ class TestLocalCLI:
         assert cli.main(["setup", "-m", "x.tsv", "-o", "x.sqlite"]) == 1
         assert f"error: {error}" in capsys.readouterr().err
 
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["query", str(O157_SKETCH), "-o", "{dir}/missing/out.tsv"],
+            ["profile", str(O157_SKETCH), "--taxprof", "{dir}/missing/p-"],
+            ["profile", str(O157_SKETCH), "--taxmatrix", "{dir}/missing/m-"],
+            ["profile", str(O157_SKETCH), "--taxonomy", "kraken", "--taxprof", "{dir}/p-"],
+        ],
+    )
+    def test_output_problems_fail_before_contacting_the_server(
+        self, args: list[str], tmp_path: Path
+    ) -> None:
+        # the socket does not exist: reaching the server would fail differently
+        result = _run(
+            *(a.format(dir=tmp_path) for a in args),
+            "--socket",
+            str(tmp_path / "none.sock"),
+            check=False,
+        )
+        assert result.returncode in (1, 2)
+        assert "cannot talk" not in result.stderr
+        assert "error:" in result.stderr
+
     def test_sample_name_requires_one_sample(self) -> None:
         result = _run(
             "query",

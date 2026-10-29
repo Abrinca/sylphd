@@ -308,7 +308,7 @@ class TestErrors:
         def boom(*args, **kwargs):
             raise RuntimeError("boom")
 
-        monkeypatch.setattr("sylphd.server._run_sample", boom)
+        monkeypatch.setattr("sylphd.server.run_sample", boom)
         response = _post(client, "query", [("o157", O157_SKETCH.read_bytes())])
         assert response.status_code == 500
         assert "profiling failed" in response.json()["error"]
@@ -473,7 +473,7 @@ class TestConcurrency:
             release.wait(timeout=10)
             return {"name": "blocked", "kind": "query", "rows": []}
 
-        monkeypatch.setattr("sylphd.server._run_sample", blocking_run_sample)
+        monkeypatch.setattr("sylphd.server.run_sample", blocking_run_sample)
         app = create_app(
             ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1),
             database=client.app.state.database,
@@ -492,6 +492,19 @@ class TestConcurrency:
                 release.set()
                 response = future.result(timeout=10)
                 assert response.status_code == 200
+
+    def test_unexpected_failure_is_logged_but_not_sent_to_the_client(
+        self, client: TestClient, monkeypatch, caplog
+    ) -> None:
+        def broken_run_sample(*args, **kwargs):
+            raise RuntimeError("secret internal detail")
+
+        monkeypatch.setattr("sylphd.server.run_sample", broken_run_sample)
+        with caplog.at_level("ERROR", logger="uvicorn.error"):
+            response = _post(client, "query", [("o157", O157_SKETCH.read_bytes())])
+        assert response.status_code == 500
+        assert response.json() == {"error": "profiling failed"}
+        assert "secret internal detail" in caplog.text
 
     def test_semaphore_released_after_error(self, client: TestClient) -> None:
         app = create_app(
@@ -524,7 +537,7 @@ class TestConcurrency:
             finished.set()
             return {"name": "blocked", "kind": "query", "rows": []}
 
-        monkeypatch.setattr("sylphd.server._run_sample", blocking_run_sample)
+        monkeypatch.setattr("sylphd.server.run_sample", blocking_run_sample)
         app = create_app(
             ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1),
             database=client.app.state.database,

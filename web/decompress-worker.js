@@ -1,4 +1,3 @@
-// Copy of sketch-wasm/demo/decompress-worker.js (keep in sync), used by the web page's reads.js.
 // Stage 1 of the pipeline: File -> (gunzip in WASM) -> ~2 MB chunks -> sketch worker.
 //
 // One instance per input stream (single-end: all files in order; paired: one
@@ -76,7 +75,7 @@ async function run({ module, port, files, stream, chunkSize, credits: initialCre
   for (const file of files) {
     const gz = await isGzip(file);
     // engine 'native' (DecompressionStream) is an experiment for comparisons: it
-    // rejects multi-member gzip, so the demo always uses 'wasm'.
+    // rejects multi-member gzip, so the page always uses 'wasm'.
     const native = gz && engine === 'native';
     const decoder = gz && !native ? new WasmGunzip(chunkSize, crc) : null;
     let source = file.stream();

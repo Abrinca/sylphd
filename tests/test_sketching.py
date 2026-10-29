@@ -32,6 +32,7 @@ class TestSampleNames:
             ("/data/sample-a_R2.fq", True, "sample-a"),
             ("/data/sample-a_1.fq.gz", True, "sample-a"),
             ("/data/sample-a_2.fq.gz", True, "sample-a"),
+            ("/data/sample-a_S1_L001_R1_001.fastq.gz", True, "sample-a_S1_L001"),
             ("/data/sample-a_R1.fastq.gz", False, "sample-a_R1"),
         ],
     )

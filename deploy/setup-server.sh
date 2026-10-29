@@ -69,14 +69,15 @@ id -u "$SYLPH_USER" >/dev/null 2>&1 ||
     useradd --system --gid "$SYLPH_USER" --home-dir "$ROOT" \
         --shell /sbin/nologin "$SYLPH_USER"
 
+# Root owns $ROOT and releases/: the updater creates its staging directory in
+# releases/ and switches `current` in $ROOT, so the service account must not be
+# able to write there; it only reads them.  The database files in db/ are
+# placed by hand (their ownership is never touched, only the directory's).
+install -d -o root -g root -m 0755 "$ROOT" "$ROOT/releases"
 install -d -o "$SYLPH_USER" -g "$SYLPH_USER" -m 0755 \
-    "$ROOT" "$ROOT/db" "$ROOT/releases" "$ROOT/run" "$ROOT/python"
+    "$ROOT/db" "$ROOT/run" "$ROOT/python" "$ROOT/.local" "$ROOT/.local/share"
 install -d -o "$SYLPH_USER" -g "$SYLPH_USER" -m 0700 \
     "$ROOT/.cache" "$ROOT/.local/share/uv"
-
-# The database and metadata files are placed here by hand; only fix ownership
-# of the directory (never rewrite the 20 GB file).
-chown "$SYLPH_USER:$SYLPH_USER" "$ROOT" "$ROOT/db" "$ROOT/releases" "$ROOT/run" "$ROOT/python"
 
 # ---------------------------------------------------------------------------
 # 2. firewalld
@@ -157,7 +158,7 @@ log "CPython 3.14"
 # uv has no setting for the managed-Python directory, so expose it through the
 # default discovery path too: plain `uv python find 3.14` then works whenever
 # HOME=/srv/sylphd.
-ln -sfn "$ROOT/python" "$ROOT/.local/share/uv/python"
+runuser -u "$SYLPH_USER" -- ln -sfn "$ROOT/python" "$ROOT/.local/share/uv/python"
 
 cat >/etc/profile.d/sylphd-uv.sh <<'EOF'
 # Managed CPython for the sylphd service account.

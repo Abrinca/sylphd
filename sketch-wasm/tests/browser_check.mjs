@@ -1,6 +1,7 @@
-// Browser check of the demo pipeline (Firefox or Chromium) with playwright-core.
-//   ./build.sh && cargo test --release && python3 tests/make_fixtures.py   (in sketch-wasm/ and the repo root)
-//   python3 -m http.server -d demo 8799 &
+// Browser check of the production pipeline (web/sketching.js and its workers, Firefox or Chromium)
+// with playwright-core.
+//   ./build.sh && cargo test --release && python3 tests/make_fixtures.py   (in sketch-wasm/)
+//   python3 -m http.server -d ../web 8799 &                                (in sketch-wasm/)
 //   PLAYWRIGHT_DIR=/path/to/node_modules node tests/browser_check.mjs [firefox|chromium] [--big | --only-big]
 // Compares the SHA-256 of the k-mer entries of every sketch with the native sketch that
 // `cargo test` wrote to target/equality, and expects the corrupt gzip fixtures to fail.
@@ -23,8 +24,12 @@ console.log(kind, browser.version());
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('console.error', m.text()); });
-await page.goto('http://127.0.0.1:8799/index.html');
-await page.evaluate(() => { document.getElementById('send').checked = false; });
+// A bare page next to web/sketching.js (same origin, so its workers and ./wasm load as in production).
+await page.route('**/browser-check.html', (route) => route.fulfill({
+  contentType: 'text/html',
+  body: '<input id="file" type="file" multiple><script src="sketching.js"></script>',
+}));
+await page.goto('http://127.0.0.1:8799/browser-check.html');
 
 // [name, input files, paired, native sketch in target/equality (null: must fail)]
 const small = [
@@ -49,19 +54,20 @@ const digest = (buf) => {
 let failed = 0;
 for (const [name, files, paired, native] of runs) {
   const fail = (why) => { failed++; console.log('FAIL', name, why); };
-  await page.evaluate((p) => { document.getElementById('paired').checked = p; }, paired);
   await page.setInputFiles('#file', files.map(R));
-  try {
-    await page.waitForFunction(() => window.__lastStats || window.__lastError, null, { timeout: 120000 });
-  } catch { fail('timeout'); continue; }
-  const r = await page.evaluate(async () => {
-    const s = window.__lastStats;
-    if (!s) return { error: window.__lastError };
-    const buf = new Uint8Array(await window.__lastSketch.arrayBuffer());
-    const n = Number(new DataView(buf.buffer).getBigUint64(0, true));
-    const h = await crypto.subtle.digest('SHA-256', buf.subarray(0, 8 + 12 * n));
-    return { sha: [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12), reads: s.reads, kmers: s.kmers, wall: Math.round(s.wallMs), read: Math.round(s.readMs), gunzip: Math.round(s.gunzipMs), sketch: Math.round(s.sketchMs), crc: Math.round(s.crcMs), idle: Math.round(s.idleMs) };
-  });
+  const r = await page.evaluate(async (layout) => {
+    try {
+      const run = window.SylphdSketch.start({ files: [...document.getElementById('file').files], layout, c: 200, k: 31, name: 'check' });
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 120000));
+      const { sketch, stats } = await Promise.race([run.done, timeout]);
+      const n = Number(new DataView(sketch.buffer, sketch.byteOffset).getBigUint64(0, true));
+      const h = await crypto.subtle.digest('SHA-256', sketch.subarray(0, 8 + 12 * n));
+      const r = (x) => Math.round(x);
+      return { sha: [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12), reads: stats.reads, kmers: stats.kmers, gc: stats.gcBases, lifetime: r(stats.lifetimeMs), sketch: r(stats.sketchMs), crc: r(stats.crcMs), idle: r(stats.idleMs) };
+    } catch (e) {
+      return { error: e.message };
+    }
+  }, paired ? 'paired' : 'single');
   if (native === null) {
     if (r.error) console.log('OK  ', name, 'failed as expected:', r.error);
     else fail('should have failed');
