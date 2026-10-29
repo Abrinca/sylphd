@@ -41,7 +41,7 @@ Reports:
   `{"format": "markdown", "text": "..."}` with the contents of the `--about` file (UTF-8, at most
   16 KiB, surrounding whitespace removed). The server re-reads the file when it changes. `format`
   names how `text` is to be rendered and leaves room for other formats; today it is always
-  `markdown`. The web page renders a small safe subset and never HTML, see
+  `markdown`. The web page renders a safe subset (marked + DOMPurify, never HTML), see
   [Describing your instance](../guides/public-server.md#describing-your-instance). Clients must
   treat `text` as untrusted;
 - `limits`: `max_jobs`, `max_upload_mb`, `max_sketches`, `allow_sequences`, `max_sequence_mb`

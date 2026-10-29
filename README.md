@@ -87,6 +87,13 @@ and GTDB. The full list with all references is in the
 [documentation](https://abrinca.github.io/sylphd/docs/project/citing/) and at the bottom of the web
 app.
 
+## Third-party code
+
+The web page vendors [marked](https://github.com/markedjs/marked) (MIT) and
+[DOMPurify](https://github.com/cure53/DOMPurify) (Apache-2.0) to render a server's description
+safely; see [`web/vendor/README.md`](web/vendor/README.md). The WebAssembly sketcher in
+`sketch-wasm/` ports code from sylph and pysylph (MIT); see its README.
+
 ## License
 
 sylphd is licensed under the GNU Affero General Public License, version 3 or later

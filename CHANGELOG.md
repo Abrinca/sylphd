@@ -12,9 +12,10 @@ All notable changes to `sylphd` are documented here. The format follows
   the file changes) and `--name TEXT` (at most 80 characters) are reported by `GET /info` as `name`
   and `about` (`{"format": "markdown", "text": ...}`), absent when not set. The web page replaces
   the lone status pill with a server panel: status, name, address, *Change server*, the fact chips
-  and the operator's text under *From the server operator*, rendered by a small Markdown renderer
-  (`web/markdown.js`: no HTML, only http, https and mailto links) and marked as unverified when
-  you are connected to a server other than the default.
+  and the operator's text under *From the server operator*, rendered with the vendored
+  [marked](https://marked.js.org/) and [DOMPurify](https://github.com/cure53/DOMPurify) (an
+  allowlist: raw HTML, images and tables are not rendered, only http, https and mailto links) and
+  marked as unverified when you are connected to a server other than the default.
 - **Web page: upload a ready-made sketch.** The Reads tab accepts one `.sylsp` instead of reads
   (no sketching: the step is shown as skipped), and the Assembly tab sends a dropped `.sylsp` to
   `POST /assembly` as it is, marked *uploaded sketch*. The page reads the sketch header and

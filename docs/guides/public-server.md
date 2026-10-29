@@ -139,15 +139,13 @@ eukaryotes (fungi, human, etc.).
   `/info` request and re-reads it when they change. If the new file cannot be read (too large, not
   UTF-8, removed) the last good text stays and a warning is logged once. A bad file at startup is an
   error, as is a `--name` over 80 characters. The file may be at most 16 KiB.
-- **Markdown only, never HTML:** the page can be pointed at any server with `?api=`, so the text is
-  untrusted and server-provided HTML would let a malicious server script the page. The page renders
-  this subset with its own small renderer (it builds DOM nodes and never parses HTML): paragraphs
-  (a single line break is a line break), `**bold**`, `*italic*` or `_italic_`, `` `code` ``,
-  `[text](url)` and bare `https://` links, `-`/`*`/`+` and `1.` lists (one level), `#` headings
-  (shown small), `>` quotes and backslash escapes. Links open in a new tab and only `http:`,
-  `https:` and `mailto:` become links; any other target (`javascript:`, `data:`, relative or
-  `//host` addresses) stays plain text. Images are not supported and are shown as text. Raw HTML,
-  such as `<b>` or `<script>`, is shown as plain text.
+- **Markdown, never HTML:** the page can be pointed at any server with `?api=`, so the text is
+  untrusted. The page renders a Markdown subset with [marked](https://marked.js.org/) and sanitizes
+  the result with [DOMPurify](https://github.com/cure53/DOMPurify) and an allowlist: paragraphs,
+  `**bold**`, `*italic*`, `` `code` ``, code blocks, `[text](url)` links, lists, `#` headings (shown
+  small) and `>` quotes. Only `http:`, `https:` and `mailto:` links are kept, and they open in a new
+  tab. Anything else (raw HTML, images, tables, other link targets) is not rendered; the text of a
+  dropped tag stays as text.
 - **Trust:** when a visitor has connected to a server other than the page's default, the page adds
   "This text comes from the server you connected to; sylphd does not verify it."
 

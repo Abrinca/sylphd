@@ -274,7 +274,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   function renderAbout() {
     const about = serverInfo && serverInfo.about;
     const md = about && about.format === 'markdown' && typeof about.text === 'string' ? about.text : '';
-    if (!md || !window.SylphdMarkdown) {
+    if (!md || !window.SylphdAbout) {
       aboutShown = null;
       ui.spAbout.hidden = true;
       ui.spAboutBody.replaceChildren();
@@ -284,7 +284,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     ui.spAboutNote.hidden = !API || API === defaultApi;
     if (md === aboutShown) return;
     aboutShown = md;
-    ui.spAboutBody.replaceChildren(window.SylphdMarkdown.render(md, document));
+    ui.spAboutBody.replaceChildren(window.SylphdAbout.render(md));
     setAboutCollapsed(true);
     requestAnimationFrame(measureAbout);
   }
