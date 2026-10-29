@@ -59,7 +59,9 @@ the sketches to the server. For the ANI hits without abundances see [`query`](qu
 | `--taxmatrix-value {relative,sequence,ani,coverage}` | `relative` | value used in `--taxmatrix`: `relative` (`Taxonomic_abundance`) or `sequence` (`Sequence_abundance`), or `ani`/`coverage` for the strain-level columns, as `sylph-tax merge --column ANI\|Coverage` |
 
 These need a server with `--meta`; `tax` additionally needs a metadata file with sylph-tax
-sources, where the **default `--taxprof` writes three files per sample** (`.gtdb`, `.ncbi`, `.tax`)
+sources. The aggregation happens on the server (`/profile` `taxprof`): the command writes the
+returned `.sylphmpa` text and only lays out the matrix across samples. `tax` needs a metadata file
+with sylph-tax sources, where the **default `--taxprof` writes three files per sample** (`.gtdb`, `.ncbi`, `.tax`)
 instead of two — pass `--taxonomy gtdb,ncbi` for the old set. `tax` is bit-exact `sylph-tax taxprof` over all sources (opaque lineages, `UNKNOWN`,
 `NO_TAXONOMY`, level-based ordering); `gtdb` and `ncbi` keep sylphd's own normalisation. With two
 or more samples the matrix rows are sorted lexicographically, like `sylph-tax merge`. See

@@ -134,8 +134,17 @@ class SylphClient:
         params: ProfileParams | None = None,
         fields: Sequence[str] | None = None,
         tax_sources: Sequence[str] | None = None,
+        taxprof: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        return self._post("profile", samples, params, fields, tax_sources)
+        """Profile samples; ``taxprof`` asks the server to aggregate clades.
+
+        Each returned sample then carries a ``taxprof`` object keyed by
+        taxonomy (``gtdb``/``ncbi``/``tax``) with the structured clades and the
+        rendered ``.sylphmpa`` text.
+        """
+        return self._post(
+            "profile", samples, params, fields, tax_sources, taxprof
+        )
 
     def query(
         self,
@@ -322,6 +331,7 @@ class SylphClient:
         params: ProfileParams | None,
         fields: Sequence[str] | None,
         tax_sources: Sequence[str] | None = None,
+        taxprof: Sequence[str] | None = None,
     ) -> httpx.Request:
         """Build the multipart request ``_post`` sends (shared with ``query_size``)."""
         names = [name for name, _ in samples]
@@ -335,7 +345,11 @@ class SylphClient:
         return self._client.build_request(
             "POST",
             mode,
-            data={"params": params_json(mode, params, names, fields, tax_sources)},
+            data={
+                "params": params_json(
+                    mode, params, names, fields, tax_sources, taxprof
+                )
+            },
             files=files,
         )
 
@@ -346,11 +360,14 @@ class SylphClient:
         params: ProfileParams | None,
         fields: Sequence[str] | None,
         tax_sources: Sequence[str] | None = None,
+        taxprof: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         if not samples:
             raise ValueError("no samples to send")
         response = self._send(
-            self._prepare_post(mode, samples, params, fields, tax_sources)
+            self._prepare_post(
+                mode, samples, params, fields, tax_sources, taxprof
+            )
         )
         result = response.json()
         if not isinstance(result, list):

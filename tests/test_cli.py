@@ -569,6 +569,29 @@ class TestTaxonomyOutputs:
         rows = {line.split("\t")[0]: line.split("\t") for line in gtdb[2:]}
         assert float(rows["d__Bacteria"][1]) == pytest.approx(100.0)
 
+    def test_taxprof_is_aggregated_by_the_server(
+        self, taxonomy_server, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The CLI only writes the server's clades/text: no client aggregation."""
+        _, directory = taxonomy_server
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise AssertionError("the CLI aggregated taxonomy rows itself")
+
+        monkeypatch.setattr("sylphd.taxonomy.aggregate_rows", boom)
+        result = self._profile(
+            taxonomy_server,
+            "--taxonomy",
+            "gtdb",
+            "--taxprof",
+            str(directory / "srv-"),
+            "--taxmatrix",
+            str(directory / "srv-"),
+        )
+        assert result.returncode == 0, result.stderr
+        assert (directory / "srv-one.gtdb.sylphmpa").is_file()
+        assert (directory / "srv-gtdb.tsv").is_file()
+
     def test_taxonomy_selection_and_visible_fields(self, taxonomy_server) -> None:
         _, directory = taxonomy_server
         result = self._profile(
@@ -826,7 +849,8 @@ class TestNonGtdbClassification:
             str(socket_path),
         )
         assert result.returncode == 0, result.stderr
-        assert len(result.stdout.splitlines()) == 3  # header + two contigs
+        # part0 has only 7 sketched k-mers, so it is counted, not listed
+        assert len(result.stdout.splitlines()) == 2  # header + part1
         assert result.stderr.count("UHGV (viruses)") == 1
         assert result.stderr.count("\n") == 3  # query line, consensus, caveat
 

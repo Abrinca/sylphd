@@ -14,7 +14,7 @@
   <script src="vendor/purify.min.js" defer></script>
   <script src="about.js" defer></script>
   <script src="app.js" defer></script>
-  <script src="taxonomy.js" defer></script>
+  <script src="contigs.js" defer></script>
   <script src="reads.js" defer></script>
 </head>
 <body>
@@ -51,7 +51,7 @@
       </section>
       <p class="privacy">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1 2 3.5v4.2c0 3.4 2.4 6.1 6 7.3 3.6-1.2 6-3.9 6-7.3V3.5L8 1Zm-1 9.6L4.6 8.2l1-1L7 8.6l3.4-3.4 1 1L7 10.6Z"/></svg>
-        <span><strong>Privacy:</strong> <strong>your sequences never leave your computer.</strong> Assemblies and reads are sketched in your browser and only the sketch (k-mer hashes and counts, no sequence) is sent to the server, which does not store or log it. Only sizes, timings and request outcomes are recorded.</span>
+        <span><strong>Privacy:</strong> <strong>your sequences never leave your computer.</strong> Assemblies and reads are sketched in your browser and only the sketch (k-mer hashes and counts, no sequence) is sent to the server, which does not store or log it. In per-contig mode that is one small sketch per record, plus its length, GC and k-mer count. Only sizes, timings and request outcomes are recorded.</span>
       </p>
       <p class="privacy terms-note">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 2.2a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM7 6.5h2V12H7V6.5Z"/></svg>
@@ -108,7 +108,7 @@
           <ul class="mode-facts">
             <li>Drop FASTQ or FASTA reads (<code>.gz</code> is fine): short, long or paired; or upload a <code>.sylsp</code> sketch you made earlier</li>
             <li><strong>Sketched locally in your browser:</strong> reads never leave your computer, only a sketch of a few MB is uploaded</li>
-            <li>Abundance by species up to phylum, GTDB or NCBI taxonomy, downloads</li>
+            <li>Abundance by species up to phylum, GTDB, NCBI or all taxonomy sources, downloads</li>
           </ul>
           <p class="mode-unsupported" hidden>Not available: this browser cannot run the sketcher.</p>
           <span class="mode-cta">Profile reads <span aria-hidden="true">→</span></span>
@@ -152,7 +152,7 @@
         </div>
         <p id="input-msg" class="input-msg" role="alert" hidden></p>
 
-        <div class="options">
+        <div class="options" id="assembly-options">
           <label class="field">
             <span>Top hits</span>
             <input type="number" id="top" min="1" max="50" step="1" value="10" inputmode="numeric">
@@ -161,6 +161,46 @@
             <span>Minimum ANI (%)</span>
             <input type="number" id="min-ani" min="70" max="100" step="0.1" value="80" inputmode="decimal">
           </label>
+        </div>
+
+        <div class="per-contig-bar" id="per-contig-bar" hidden>
+          <label class="check pc-toggle" for="per-contig">
+            <input type="checkbox" id="per-contig">
+            <span><strong>Per contig</strong>: classify every contig as its own sample and show the taxonomic consensus — the MAG contamination check. Only sketches are sent, as above.</span>
+          </label>
+          <p class="detail" id="per-contig-note" role="note" hidden></p>
+        </div>
+
+        <div class="pc-options" id="per-contig-options" hidden>
+          <div class="options">
+            <label class="field">
+              <span>Minimum contig length (bp)</span>
+              <input type="number" id="pc-min-length" min="0" step="1000" value="20000" inputmode="numeric">
+            </label>
+            <button type="button" id="pc-reset-remembered" class="link-btn pc-reset" hidden>Reset remembered choices</button>
+            <label class="field">
+              <span>Top hits per contig</span>
+              <input type="number" id="pc-top" min="1" max="50" step="1" value="1" inputmode="numeric">
+            </label>
+            <label class="field">
+              <span>Minimum ANI (%)</span>
+              <input type="number" id="pc-min-ani" min="70" max="100" step="0.1" value="80" inputmode="decimal">
+            </label>
+          </div>
+          <details class="adv">
+            <summary>Consensus options</summary>
+            <div class="options">
+              <label class="field">
+                <span>Consensus ratio (R)</span>
+                <input type="number" id="pc-ratio" min="1" step="0.1" value="1.5" inputmode="decimal">
+              </label>
+              <label class="field">
+                <span>Consensus Z (noise, SD)</span>
+                <input type="number" id="pc-z" min="0" step="0.1" value="2" inputmode="decimal">
+              </label>
+            </div>
+            <p class="detail">A species joins the consensus when its divergence is within <strong>R</strong> times the best hit’s plus <strong>Z</strong> standard deviations of the ANI sampling noise. The defaults (1.5 and 2) resolve well-covered contigs to species and widen to genus or family only where the evidence is ambiguous.</p>
+          </details>
         </div>
 
         <div class="actions">

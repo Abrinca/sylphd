@@ -75,8 +75,8 @@ Reports:
 - `params`: the keys each POST endpoint accepts, so a client does not have to probe with 400s:
   `{"/profile": [...], "/query": [...], "/contigs": [...], "/assembly": [...]}`. The lists are
   derived from the validators: `/query` and `/profile` list the `ProfileParams` fields plus
-  `names`, `fields`, `mode` and `tax_sources`; `/contigs` lists its `params` keys (including
-  `contigs`); `/assembly` lists its query-string parameters.
+  `names`, `fields`, `mode` and `tax_sources`, and `/profile` adds `taxprof`; `/contigs` lists its
+  `params` keys (including `contigs`); `/assembly` lists its query-string parameters.
 
 ## `POST /query` and `POST /profile` { #post-query-and-post-profile }
 
@@ -102,6 +102,7 @@ At most 4096 sketches fit in one request. Non-file form fields such as `params` 
 | `names` | list with one name per sketch (defaults to the part file names, else `sample-N`) |
 | `fields` | list of metadata columns; omitted means all, `[]` means none; needs a metadata database |
 | `tax_sources` | list of taxonomy source names: resolve hits against these sources only (default: all of them; an empty list is the same). Unknown names, or a server without sylph-tax sources, are a 400 |
+| `taxprof` | `profile` only: taxonomies to aggregate on the server, from `gtdb`, `ncbi` and `tax`. Validated against the metadata file's columns and sylph-tax sources (a 400 names what is missing). Each returned sample then carries `taxprof[taxonomy]` (see below) |
 | `mode` | optional, must match the endpoint (`query` or `profile`) |
 
 Unknown keys are rejected with a 400. The client sketches with `database.c` and `database.k` from
@@ -154,6 +155,38 @@ The server resolves them with sylph-tax's own probe rules over the hit's `Genome
 `Contig_name` (see [the metadata reference](metadata.md#resolving-a-hit)), so `query` and
 `profile` rows carry them too. Their presence is additive: a format 2 file reports exactly the old
 columns and rows. `/assembly` hits carry the same four fields.
+
+### Server-side taxonomic profiles (`taxprof`) { #taxprof }
+
+With `"taxprof": ["gtdb", "ncbi", "tax"]` the server aggregates the sample's rows once and adds a
+`taxprof` object to the sample. It returns the structured clades **and** the rendered
+`.sylphmpa` text, so clients neither aggregate nor format:
+
+```json
+"taxprof": {
+  "gtdb": {
+    "columns": ["clade_name", "relative_abundance", "sequence_abundance",
+                "ANI (if strain-level)", "Coverage (if strain-level)"],
+    "taxonomies_used": ["gtdb"],
+    "clades": [
+      {"clade_name": "d__Bacteria", "relative_abundance": 100.0,
+       "sequence_abundance": 100.0, "ani": null, "coverage": null},
+      {"clade_name": "d__Bacteria|...|t__GCA_000005845.2", "relative_abundance": 100.0,
+       "sequence_abundance": 100.0, "ani": 99.79, "coverage": 1.234}
+    ],
+    "sylphmpa": "#SampleID\tsample-a\tTaxonomies_used:['gtdb']\nclade_name\t..."
+  }
+}
+```
+
+`clades` is the cumulative lineage table (`clade_name` joins the levels with `|`; only strain rows
+carry `ani`/`coverage`), ordered exactly as `sylph-tax taxprof` orders the file. `sylphmpa` is
+that file, newline-terminated, byte for byte. For `tax`, `taxonomies_used` lists the source names
+the profile was resolved against (`tax_sources`, in `ord` order). `gtdb`/`ncbi` come from the
+metadata columns of the same name; `tax` needs a metadata file with sylph-tax sources. The
+server adds the taxonomy columns the requested taxonomies need to `rows` even when `fields` hides
+them. `taxprof` is `/profile` only (`/query` rejects it), and one requested taxonomy the metadata
+file cannot provide is a 400.
 
 ## `POST /assembly` { #post-assembly }
 

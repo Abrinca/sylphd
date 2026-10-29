@@ -8,6 +8,16 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **Taxonomic profiles are computed on the server.** `POST /profile` accepts
+  `params.taxprof: ["gtdb", "ncbi", "tax"]` (validated against the metadata file's columns and
+  sylph-tax sources, and advertised in `/info` under `/profile`) and every returned sample then
+  carries `taxprof[taxonomy] = {columns, taxonomies_used, clades, sylphmpa}`: the aggregated clade
+  table (`clade_name`, `relative_abundance`, `sequence_abundance`, `ani`/`coverage` on strain
+  rows) **and** the exact `.sylphmpa` text, so neither the CLI nor the web page formats or
+  aggregates anything. The logic exists once, in `sylphd/taxonomy.py`; `sylphd profile
+  --taxprof/--taxmatrix` writes the server's text/clades (the matrix remains a trivial
+  clades-by-sample rendering), and the web Reads tab charts the server's clades, including the
+  `tax` profile of UHGV/fungi hits. `web/taxonomy.js` and its JavaScript parity tests are gone.
 - **`/info` says what each database is and which taxonomy it really uses.** Every entry of
   `databases` gains `kind` (`two-stage` for a `.syl2db`, `plain` for a `.syldb`) and `gtdb`
   (`true` when a sample of up to 100 genome names of that database are GTDB accessions of the
@@ -249,6 +259,14 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **`--per-contig` counts skipped records instead of listing them.** Records below
+  `--min-contig-length` (`summary.skipped_short: {contigs, bp}`) and records not sent for too few
+  sketched k-mers or zero genome-style k-mers (`summary.skipped_few_kmers`) are no longer kept as
+  per-record objects and no longer produce TSV rows or JSON `contigs` entries; the stderr summary
+  says `N contigs (X kb) below 20000 bp not classified`. This keeps memory and output flat for
+  FASTQ input with millions of short reads. Name-uniqueness bookkeeping in `sketch_contigs` now
+  covers only sent records (skipped records consume no name and do not grow the `counts`/`used`
+  sets). Record indexes keep the input order, so skipped records leave gaps.
 - **`sylphd assembly --per-contig` now needs a server with `POST /contigs`** (this version or
   newer; an older server answers `404`). The command still reads the file, sketches every record
   and measures its genome-style k-mer count locally, but the contig-relative ANI, the ranking, the

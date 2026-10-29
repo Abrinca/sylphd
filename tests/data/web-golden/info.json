@@ -44,7 +44,8 @@
       "names",
       "fields",
       "mode",
-      "tax_sources"
+      "tax_sources",
+      "taxprof"
     ],
     "/query": [
       "minimum_ani",

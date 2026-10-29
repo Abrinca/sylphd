@@ -1,13 +1,16 @@
 # Taxonomic profiles
 
-`sylphd profile` can fold its ANI hits into per-rank taxonomic profiles on the client. This mirrors
-`sylph-tax taxprof` and `sylph-tax merge`, but needs no extra tools and no server support beyond
-the metadata database.
+`sylphd profile` writes per-rank taxonomic profiles that the **server** aggregates. The server is
+the only place the logic lives (`sylphd/taxonomy.py`): it folds its ANI hits into the clade tables
+and returns both the structured clades and the rendered `.sylphmpa` text in the `/profile`
+response (`params.taxprof`). The CLI writes that text and uses the clades for the matrix; it does
+not re-aggregate rows. The result mirrors `sylph-tax taxprof` and `sylph-tax merge`, but needs no
+extra tools and no server support beyond the metadata database.
 
 !!! note
-    The server must run with `--meta`: the profiles are built from the `gtdb_taxonomy` and
+    The server must run with `--meta`: the profiles come from the `gtdb_taxonomy` and
     `ncbi_taxonomy` metadata columns, and `tax` from the `tax_*` columns that a metadata file with
-    sylph-tax sources exposes. The client requests the columns of each selected taxonomy even when
+    sylph-tax sources exposes. The server adds the columns of each requested taxonomy even when
     `--fields` hides them from the main TSV. Only `profile` has these flags.
 
 ```bash
@@ -112,10 +115,10 @@ sylphd profile -r sample.fq.gz --taxonomy tax --taxprof results/
 ```
 
 The server resolves every hit to a source, a key and a lineage (`tax_lineage`, `tax_key`,
-`tax_source` and `tax_host` columns); the client only aggregates. Both sides follow sylph-tax
-v1.9.2 rule for rule, and `tests/test_sylphtax_parity.py` compares the output byte for byte with
-the real `sylph-tax taxprof` and `sylph-tax merge` (a committed golden always, the live tool when
-it is installed).
+`tax_source` and `tax_host` columns) and aggregates the profile; the CLI writes it. Both sides
+follow sylph-tax v1.9.2 rule for rule, and `tests/test_sylphtax_parity.py` compares the output
+byte for byte with the real `sylph-tax taxprof` and `sylph-tax merge` (a committed golden always,
+the live tool when it is installed).
 
 Differences from `gtdb`/`ncbi`, all of them sylph-tax's behaviour:
 

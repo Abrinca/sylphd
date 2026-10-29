@@ -52,8 +52,10 @@ with two equal modes selected by the address: the landing page (no hash), `#asse
   downloaded as TSV or JSON.
 - **Reads** sketches reads in the browser (`reads.js`, the two workers `decompress-worker.js` and
   `sketch-worker.js`, and the WebAssembly module from `sketch-wasm/`) and sends only the sketch to
-  `POST /profile`. `taxonomy.js` ports the lineage rules of `sylphd/taxonomy.py` (tested against it
-  in `tests/test_web_taxonomy_js.py`). See [Profiling reads in the browser](../guides/profiling-in-browser.md).
+  `POST /profile`. The taxonomic clades are aggregated **on the server** (`sylphd/taxonomy.py`) and
+  returned in the `taxprof` response; the page charts them and never ports the aggregation
+  (`tests/test_web_reads_taxprof.py` renders them in a real browser). See
+  [Profiling reads in the browser](../guides/profiling-in-browser.md).
 
 The WebAssembly module is not committed: `sketch-wasm/build.sh ../web/wasm` builds it (Rust with the
 `wasm32-unknown-unknown` target and `wasm-bindgen-cli` at the version pinned in

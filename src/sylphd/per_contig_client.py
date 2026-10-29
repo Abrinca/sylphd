@@ -86,6 +86,17 @@ class PerContigOptions:
     consensus_z: float = per_contig.DEFAULT_CONSENSUS_Z
 
 
+@dataclass(frozen=True)
+class Skipped:
+    """Records that were counted but never sent to ``POST /contigs``."""
+
+    contigs: int = 0
+    bp: int = 0
+
+    def as_dict(self) -> dict[str, int]:
+        return {"contigs": self.contigs, "bp": self.bp}
+
+
 @dataclass
 class _Pending:
     record: dict[str, Any]
@@ -101,6 +112,15 @@ def _format_taxon(item: dict[str, Any]) -> str:
     return f"{label} {item['bp']:,} bp ({100.0 * item['fraction']:.1f} %)"
 
 
+def _format_bases(bp: int) -> str:
+    """``80.0 kb`` / ``1.2 Mb``, for the skipped-record line."""
+    if bp >= 1_000_000:
+        return f"{bp / 1_000_000:.1f} Mb"
+    if bp >= 1_000:
+        return f"{bp / 1_000:.1f} kb"
+    return f"{bp} bp"
+
+
 class PerContigRun:
     """Records collected by :func:`run`, plus the writers for them."""
 
@@ -108,46 +128,56 @@ class PerContigRun:
         self,
         records: list[dict[str, Any]],
         *,
-        unsent: list[dict[str, Any]],
         summaries: list[dict[str, Any]],
         options: PerContigOptions,
         params: ProfileParams,
         database: dict[str, Any],
+        skipped_short: Skipped | None = None,
+        skipped_few_kmers: Skipped | None = None,
     ) -> None:
+        #: The records that were sent, in input order.  Records below
+        #: ``min_length`` and records with too few / zero genome-style k-mers
+        #: are *not* kept (a FASTQ input can hold millions of short reads);
+        #: they only survive as counters in :attr:`skipped_short` and
+        #: :attr:`skipped_few_kmers`.
         self.records = records
-        #: Records the server never saw (too short, too few k-mers): they are
-        #: not in any per-request summary.
-        self.unsent = unsent
         #: The ``summary`` of every ``POST /contigs`` response, in order.
         self.summaries = summaries
         self.options = options
         self.params = params
         self.database = database
+        self.skipped_short = skipped_short or Skipped()
+        self.skipped_few_kmers = skipped_few_kmers or Skipped()
 
     # -- documents --------------------------------------------------------
     def summary(self) -> dict[str, Any]:
         """Counts for the JSON document and the stderr summary.
 
         The per-request summaries are added up (the server reports every
-        consensus taxon, so nothing is lost between chunks) and the contigs the
-        server never saw are added on top.  ``queried`` are the contigs that
-        were actually sent; ``too_short`` ones and those below sylph's k-mer
-        floor are counted separately, so the fractions add up to the queried
-        bases only.  Bases are aggregated by *consensus* taxon and rank, not by
-        the top hit: one organism split over several near-identical GTDB
-        species then counts once, at the rank the data actually supports.
+        consensus taxon, so nothing is lost between chunks).  ``queried`` are
+        the contigs that were actually sent; ``skipped_short`` (below
+        ``--min-contig-length``) and ``skipped_few_kmers`` (too few sketched
+        k-mers, or no genome-style k-mer) are counted separately and never
+        appear as records or TSV rows.  Fractions are over queried bases only.
+        Bases are aggregated by *consensus* taxon and rank, not by the top hit:
+        one organism split over several near-identical GTDB species then counts
+        once, at the rank the data actually supports.
         """
-        merged = per_contig.merge_summaries([*self.summaries, per_contig.summarize(self.unsent)])
-        skipped = [record for record in self.records if record["status"] == "too_short"]
+        merged = per_contig.merge_summaries(self.summaries)
+        # Kept contigs the server itself refused for too few k-mers are in the
+        # per-request summaries; the ones the client skipped never were.
+        few = Skipped(
+            contigs=self.skipped_few_kmers.contigs + merged["too_few_kmers_contigs"],
+            bp=self.skipped_few_kmers.bp + merged["too_few_kmers_bp"],
+        )
+        sent = Skipped(contigs=merged["contigs"], bp=merged["bp"])
         return {
-            "contigs": merged["contigs"],
-            "bp": merged["bp"],
+            "contigs": sent.contigs + self.skipped_short.contigs + self.skipped_few_kmers.contigs,
+            "bp": sent.bp + self.skipped_short.bp + self.skipped_few_kmers.bp,
             "queried_contigs": merged["queried_contigs"],
             "queried_bp": merged["queried_bp"],
-            "skipped_contigs": len(skipped),
-            "skipped_bp": sum(record["length"] for record in skipped),
-            "too_few_kmers_contigs": merged["too_few_kmers_contigs"],
-            "too_few_kmers_bp": merged["too_few_kmers_bp"],
+            "skipped_short": self.skipped_short.as_dict(),
+            "skipped_few_kmers": few.as_dict(),
             "no_hit_contigs": merged["no_hit_contigs"],
             "min_contig_length": self.options.min_length,
             "consensus_bp": per_contig.finalize_summary(merged)["consensus_bp"],
@@ -260,15 +290,17 @@ class PerContigRun:
             f"per-contig: {summary['queried_contigs']} of {summary['contigs']} contig(s), "
             f"{summary['queried_bp']:,} bp queried"
         )
-        if summary["skipped_contigs"]:
+        short = summary["skipped_short"]
+        if short["contigs"]:
             line += (
-                f"; {summary['skipped_contigs']} shorter than {min_length} bp "
-                f"({summary['skipped_bp']:,} bp)"
+                f"; {short['contigs']} contigs ({_format_bases(short['bp'])}) "
+                f"below {min_length} bp not classified"
             )
-        if summary["too_few_kmers_contigs"]:
+        few = summary["skipped_few_kmers"]
+        if few["contigs"]:
             line += (
-                f"; {summary['too_few_kmers_contigs']} with too few k-mers "
-                f"({summary['too_few_kmers_bp']:,} bp)"
+                f"; {few['contigs']} contigs ({_format_bases(few['bp'])}) "
+                "with too few k-mers not classified"
             )
         if summary["no_hit_contigs"]:
             line += f"; {summary['no_hit_contigs']} without a hit"
@@ -426,7 +458,8 @@ def run(
     k = int(database["k"])
 
     records: list[dict[str, Any]] = []
-    unsent: list[dict[str, Any]] = []
+    skipped_short = Skipped()
+    skipped_few_kmers = Skipped()
     summaries: list[dict[str, Any]] = []
     #: The server-side options: what to score against and what to report.  The
     #: client cannot evaluate them (the ANI is contig-relative and needs the
@@ -463,31 +496,23 @@ def run(
         k=k,
         min_length=options.min_length,
     ):
+        if contig.sketch is None:
+            # Below --min-contig-length: count it, keep no per-record object.
+            skipped_short = Skipped(
+                skipped_short.contigs + 1, skipped_short.bp + contig.length
+            )
+            continue
+        if contig.sketch.n_kmers < params.min_number_kmers or not contig.contig_kmers:
+            # sylph's own floor is reference-side, but a sample this small
+            # cannot give a meaningful ANI either; and a tandem repeat has no
+            # genome-style k-mer, so the ANI would divide by zero.  Neither is
+            # sent, and neither is kept as a record.
+            skipped_few_kmers = Skipped(
+                skipped_few_kmers.contigs + 1, skipped_few_kmers.bp + contig.length
+            )
+            continue
         record = _new_record(contig)
         records.append(record)
-        if contig.sketch is None:
-            unsent.append(record)
-            continue
-        if contig.sketch.n_kmers < params.min_number_kmers:
-            # sylph's own floor is reference-side, but a sample this small
-            # cannot give a meaningful ANI either: report it, do not send it.
-            record["status"] = "no_hit"
-            record["reason"] = (
-                f"too few k-mers ({contig.sketch.n_kmers} < "
-                f"{params.min_number_kmers})"
-            )
-            unsent.append(record)
-            continue
-        if not contig.contig_kmers:
-            # The server requires a positive contig_kmers (it is the ANI's
-            # denominator): a tandem repeat has none, since a genome sketch
-            # drops every k-mer that occurs more than once.
-            record["status"] = "no_hit"
-            record["reason"] = (
-                "no genome-style k-mers (every k-mer of the contig is repeated)"
-            )
-            unsent.append(record)
-            continue
         spec = {
             "name": contig.name,
             "contig_kmers": contig.contig_kmers,
@@ -519,11 +544,12 @@ def run(
     flush()
     return PerContigRun(
         records,
-        unsent=unsent,
         summaries=summaries,
         options=options,
         params=params,
         database=database,
+        skipped_short=skipped_short,
+        skipped_few_kmers=skipped_few_kmers,
     )
 
 
@@ -533,7 +559,7 @@ def _new_record(contig: Contig) -> dict[str, Any]:
         "index": contig.index,
         "length": contig.length,
         "gc": contig.gc,
-        "status": "too_short",
+        "status": "no_hit",
         "sketch_kmers": contig.sketch.n_kmers if contig.sketch is not None else None,
         "contig_kmers": contig.contig_kmers,
         "hits": [],

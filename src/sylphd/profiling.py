@@ -41,6 +41,12 @@ from .assembly import (
 from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
 from .protocol import ProfileParams, result_row
 from .sketchcheck import SketchFormatError, SketchHeader, parse_sketch_header
+from .taxonomy import (
+    SYLPHTAX,
+    SYLPHTAX_PROFILE_COLUMNS,
+    TAXONOMY_COLUMNS,
+    build_taxprof,
+)
 
 log = logging.getLogger("sylphd")
 
@@ -676,14 +682,21 @@ def run_sample(
     payload: bytes,
     hide_ani_ci: bool = False,
     tax_sources: Sequence[str] | None = None,
+    taxprof: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Deserialize, validate and profile one sketch.  Runs in a worker thread.
 
     ``tax_sources`` restricts hit resolution to those taxonomy sources
     (``--tax-source``); it is ignored without a metadata database.
+    ``taxprof`` asks for the server-side taxonomic aggregation: the sample
+    then carries a ``taxprof`` object with the structured clades and the
+    rendered ``.sylphmpa`` text of every requested taxonomy.  The taxonomy
+    columns it needs are added to ``fields`` when the client hid them.
     """
     sketch, _ = _decode_sketch(databases, name, payload)
 
+    if taxprof:
+        fields = _taxprof_fields(taxprof, metadata, fields)
     profiler = databases.profiler(params)
     results = _run_profiler(profiler, sketch, mode)
     rows = result_rows(
@@ -695,7 +708,44 @@ def run_sample(
         hide_ani_ci=hide_ani_ci,
         tax_sources=tax_sources,
     )
-    return {"name": name, "kind": mode, "rows": rows, "params": params.to_dict()}
+    sample: dict[str, Any] = {
+        "name": name,
+        "kind": mode,
+        "rows": rows,
+        "params": params.to_dict(),
+    }
+    if taxprof:
+        sources = (
+            list(tax_sources)
+            if tax_sources
+            else (metadata.source_names() if metadata is not None else [])
+        )
+        sample["taxprof"] = build_taxprof(
+            name, taxprof, rows, tax_sources=sources
+        )
+    return sample
+
+
+def _taxprof_fields(
+    taxprof: Sequence[str],
+    metadata: MetadataDB | None,
+    fields: Sequence[str] | None,
+) -> Sequence[str] | None:
+    """Add the columns the requested taxonomies need, keeping the client's order."""
+    if metadata is None:
+        return fields
+    available = set(metadata.field_columns)
+    selected = list(METADATA_COLUMNS if fields is None else fields)
+    for taxonomy in taxprof:
+        needed: Sequence[str] = (
+            SYLPHTAX_PROFILE_COLUMNS
+            if taxonomy == SYLPHTAX
+            else (TAXONOMY_COLUMNS[taxonomy],)
+        )
+        for column in needed:
+            if column in available and column not in selected:
+                selected.append(column)
+    return selected
 
 
 def run_contig_query(

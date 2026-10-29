@@ -153,6 +153,9 @@ PROFILE_PARAM_KEYS: tuple[str, ...] = (
     "fields",
     "mode",
     "tax_sources",
+    # /profile only: the taxonomies whose clade tables and .sylphmpa text the
+    # server should render (`["gtdb", "ncbi", "tax"]`).
+    "taxprof",
 )
 
 
@@ -162,6 +165,7 @@ def params_payload(
     names: Sequence[str],
     fields: Sequence[str] | None = None,
     tax_sources: Sequence[str] | None = None,
+    taxprof: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """The JSON object sent as the ``params`` form field of ``/query``/``/profile``."""
     payload: dict[str, Any] = {
@@ -173,6 +177,8 @@ def params_payload(
         payload["fields"] = list(fields)
     if tax_sources is not None:
         payload["tax_sources"] = list(tax_sources)
+    if taxprof is not None:
+        payload["taxprof"] = list(taxprof)
     return payload
 
 
@@ -182,9 +188,12 @@ def params_json(
     names: Sequence[str],
     fields: Sequence[str] | None = None,
     tax_sources: Sequence[str] | None = None,
+    taxprof: Sequence[str] | None = None,
 ) -> str:
     """The exact ``params`` value the client sends (default ``json.dumps`` separators)."""
-    return json.dumps(params_payload(mode, params, names, fields, tax_sources))
+    return json.dumps(
+        params_payload(mode, params, names, fields, tax_sources, taxprof)
+    )
 
 
 def params_json_size(
@@ -193,13 +202,14 @@ def params_json_size(
     names: Sequence[str],
     fields: Sequence[str] | None = None,
     tax_sources: Sequence[str] | None = None,
+    taxprof: Sequence[str] | None = None,
 ) -> int:
     """Length of :func:`params_json` in characters (one char is one UTF-8 byte here).
 
     ``json.dumps`` escapes non-ASCII characters (``ensure_ascii``), so the
     result is also the byte length of the ``params`` form part.
     """
-    return len(params_json(mode, params, names, fields, tax_sources))
+    return len(params_json(mode, params, names, fields, tax_sources, taxprof))
 
 
 def contigs_payload(

@@ -321,7 +321,8 @@ def test_one_row_per_contig_and_statuses(server, fragmented, capsys) -> None:
     assert "gtdb_taxonomy" in header  # metadata fields follow the leading columns
 
     by_id = {row["contig"]: row for row in rows}
-    assert set(by_id) == {"c1", "c2", "c1_2", "short", "tiny"}
+    # skipped records are counted, not listed: no rows for "short" or "tiny"
+    assert set(by_id) == {"c1", "c2", "c1_2"}
     for name in ("c1", "c2", "c1_2"):
         row = by_id[name]
         assert row["status"] == "ok"
@@ -344,15 +345,10 @@ def test_one_row_per_contig_and_statuses(server, fragmented, capsys) -> None:
         assert row["consensus_taxon"] == "Test"
     # the fixture taxonomy has no s__ rank, so the derived species is empty
     assert by_id["c1"]["gtdb_species"] == ""
-    assert by_id["short"]["status"] == "too_short"
-    assert by_id["short"]["contig_length"] == "500"
-    assert by_id["short"]["rank"] == ""
-    assert by_id["tiny"]["status"] == "no_hit"
-    assert by_id["tiny"]["rank"] == ""
 
     assert "per-contig:" in err
-    assert "shorter than 1000 bp" in err
-    assert "too few k-mers" in err
+    assert "1 contigs (500 bp) below 1000 bp not classified" in err
+    assert "1 contigs (3.0 kb) with too few k-mers not classified" in err
     assert "bp by consensus: Test (class) 18,000 bp (100.0 %)" in err
 
 
@@ -397,12 +393,12 @@ def test_tsv_header_is_stable(server, genome, tmp_path, capsys) -> None:
     assert len(rows[0]) == len(header)
 
 
-def test_zero_genome_kmers_is_no_hit(server, tmp_path, capsys) -> None:
+def test_zero_genome_kmers_is_counted_not_listed(server, tmp_path, capsys) -> None:
     """A tandem repeat has a sample sketch but no genome-style k-mers: no ANI.
 
     Such a contig is not sent: ``contig_kmers`` is the denominator of the ANI,
-    so the endpoint requires it to be positive and the client reports the
-    contig itself.
+    so the endpoint requires it to be positive.  It is counted in
+    ``skipped_few_kmers`` and is neither a JSON record nor a TSV row.
     """
     rng = random.Random(424242)
     unit = "".join(rng.choices("ACGT", k=5000))
@@ -419,13 +415,12 @@ def test_zero_genome_kmers_is_no_hit(server, tmp_path, capsys) -> None:
         "--json",
     )
     payload = json.loads(capsys.readouterr().out)
-    (contig,) = payload["contigs"]
-    assert contig["sketch_kmers"] >= 10  # it could have been sent
-    assert contig["contig_kmers"] == 0  # every k-mer is a duplicate
-    assert contig["status"] == "no_hit"
-    assert "no genome-style k-mers" in contig["reason"]
-    assert contig["hits"] == []
-    assert contig["consensus"] is None
+    assert payload["contigs"] == []
+    summary = payload["summary"]
+    assert summary["contigs"] == 1  # counted in the totals
+    assert summary["skipped_short"] == {"contigs": 0, "bp": 0}
+    assert summary["skipped_few_kmers"] == {"contigs": 1, "bp": 20_000}
+    assert summary["queried_contigs"] == 0
 
 
 def test_short_contigs_are_skipped_by_default(server, genome, tmp_path, capsys) -> None:
@@ -434,10 +429,9 @@ def test_short_contigs_are_skipped_by_default(server, genome, tmp_path, capsys) 
     _run("assembly", path, "--per-contig", "--socket", server)
     header, rows, err = _rows(capsys)
     assert header[:4] == ["contig", "contig_length", "gc", "status"]
-    (row,) = rows
-    assert row["status"] == "too_short"  # 9957 bp < the default 20000
+    assert rows == []  # 9957 bp < 20000: counted, not listed
     assert "0 of 1 contig(s)" in err
-    assert "shorter than 20000 bp" in err
+    assert "1 contigs (10.0 kb) below 20000 bp not classified" in err
 
 
 def test_json_document(server, fragmented, tmp_path, capsys) -> None:
@@ -490,17 +484,15 @@ def test_json_document(server, fragmented, tmp_path, capsys) -> None:
     assert by_id["c1"]["assignment"]["accession"] == "GCA_000000001.1"
     assert by_id["c1"]["closest"]["accession"] == "GCA_000000001.1"
     assert by_id["c1"]["hits"][0]["ani_species_level"] is True
-    assert by_id["short"]["status"] == "too_short"
-    assert by_id["short"]["sketch_kmers"] is None
-    assert by_id["short"]["contig_kmers"] is None
-    assert by_id["tiny"]["status"] == "no_hit"
-    assert "too few k-mers" in by_id["tiny"]["reason"]
+    assert set(by_id) == {"c1", "c2", "c1_2"}
+    # input record numbers are preserved, so skipped records leave gaps
+    assert by_id["c1"]["index"] == 1
 
     summary = payload["summary"]
     assert summary["contigs"] == 5
     assert summary["queried_contigs"] == 3
-    assert summary["skipped_contigs"] == 1
-    assert summary["too_few_kmers_contigs"] == 1
+    assert summary["skipped_short"] == {"contigs": 1, "bp": 500}
+    assert summary["skipped_few_kmers"] == {"contigs": 1, "bp": 3000}
     assert summary["consensus_bp"][0]["taxon"] == "Test"
     assert summary["consensus_bp"][0]["rank"] == "class"
     assert summary["consensus_bp"][0]["fraction"] == 1.0
@@ -576,7 +568,7 @@ def test_requests_follow_the_servers_queue_limit(
     assert [len(batch) for batch in calls] == [2, 1]
     sent = [name for batch in calls for name in batch]
     assert sent == ["c1", "c2", "c1_2"]  # request order is record order
-    assert {row["contig"] for row in rows} == {"c1", "c2", "c1_2", "short", "tiny"}
+    assert {row["contig"] for row in rows} == {"c1", "c2", "c1_2"}
 
 
 def test_long_names_split_chunks_below_the_params_limit(

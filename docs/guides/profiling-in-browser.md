@@ -40,11 +40,13 @@ speed. **Cancel** stops the workers immediately.
 - **Summary:** sample, reads (or read pairs) and bases, sketch size, genomes detected, timings and,
   with *Estimate unknown fraction*, the share of the sample the database does not cover.
 - **Abundance:** a stacked bar and a sorted list per taxon. Choose the **rank** (domain to
-  species), the **taxonomy** (GTDB or NCBI) and the **abundance** (taxonomic or sequence).
-  Abundances are summed up the lineage on the page with the rules of
-  [Taxonomic profiles](taxonomic-profiles.md#lineage-rules): internal gaps become
-  `unclassified <ancestor>`, trailing gaps are dropped, and genomes without a name at the chosen rank
-  are shown as *not classified at that rank*.
+  species), the **taxonomy** (GTDB, NCBI, or *All sources* for the server's sylph-tax profile of
+  UHGV, fungi and other sources) and the **abundance** (taxonomic or sequence). The clades come
+  from the server's `/profile` `taxprof` response (the same aggregation as
+  [Taxonomic profiles](taxonomic-profiles.md#lineage-rules)); the page only groups them by rank.
+  For *All sources* each level is one level of the source's own scheme, so the selector says
+  *Level 1…N* instead of domain/species. Genomes without a name at the chosen level are shown as
+  *not classified at that level*.
 - **Detected genomes:** a sortable table with both abundances, the adjusted ANI (and its 5–95 %
   interval), the effective coverage, the GTDB species and lineage, the NCBI organism and taxid, and
   links to NCBI and GTDB.

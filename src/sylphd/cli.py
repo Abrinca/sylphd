@@ -468,6 +468,7 @@ def cmd_contain(args: argparse.Namespace) -> int:
                     params=params,
                     fields=request_fields,
                     tax_sources=tax_sources or None,
+                    taxprof=list(taxonomies) if write_taxonomy else None,
                 )
             else:
                 result = client.query(sketches, params=params, fields=request_fields)

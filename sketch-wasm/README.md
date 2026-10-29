@@ -333,8 +333,8 @@ chunk into wasm memory (1.5 GB, ~0.1-0.2 s); below the 0.5 s threshold.
 
 ## Integration into `web/`
 
-Done on branch `wasm-sketch`: the web page has a **Reads** mode (`web/reads.js`, `web/taxonomy.js`)
-next to the **Assembly** mode.
+Done on branch `wasm-sketch`: the web page has a **Reads** mode (`web/reads.js`; it charts the
+server's `taxprof` clades) next to the **Assembly** mode.
 
 * Build: `./build.sh ../web/wasm` writes the module and glue into `web/wasm/` (gitignored).
   `scripts/preview-pages.sh` and `.github/workflows/pages.yml` run it (Rust toolchain and

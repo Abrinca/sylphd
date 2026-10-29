@@ -64,6 +64,7 @@ from .profiling import (
 )
 from .protocol import PROFILE_PARAM_KEYS, ProfileParams, ProtocolError
 from .sketching import InputError, check_sample_name, sample_name_from_path
+from .taxonomy import TaxonomyError, parse_taxonomies, resolve_taxonomy_columns
 
 log = logging.getLogger("uvicorn.error")
 
@@ -284,10 +285,11 @@ def _params_info() -> dict[str, list[str]]:
     :data:`sylphd.per_contig.PARAM_KEYS`; ``/assembly`` takes query-string
     parameters, listed in :data:`ASSEMBLY_PARAM_KEYS`.
     """
-    profile_keys = list(PROFILE_PARAM_KEYS)
+    profile_keys = [key for key in PROFILE_PARAM_KEYS if key != "taxprof"]
     return {
-        "/profile": profile_keys,
-        "/query": list(profile_keys),
+        # taxprof is /profile only: query rows have no abundances to aggregate.
+        "/profile": [*profile_keys, "taxprof"],
+        "/query": profile_keys,
         "/contigs": sorted(per_contig.PARAM_KEYS),
         "/assembly": list(ASSEMBLY_PARAM_KEYS),
     }
@@ -709,7 +711,7 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
     upload = await _read_upload(request, mode)
     if isinstance(upload, JSONResponse):
         return upload
-    params, fields, names, payloads, tax_sources = upload
+    params, fields, names, payloads, tax_sources, taxprof = upload
 
     samples: list[dict[str, Any] | None] = [None] * len(payloads)
     try:
@@ -727,6 +729,7 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
                         samples,
                         index,
                         tax_sources,
+                        taxprof,
                     )
     except QueueFullError:
         return _busy()
@@ -747,9 +750,14 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
 async def _read_upload(
     request: Request, mode: str
 ) -> tuple[
-    ProfileParams, Sequence[str] | None, list[str], list[bytes], Sequence[str] | None
+    ProfileParams,
+    Sequence[str] | None,
+    list[str],
+    list[bytes],
+    Sequence[str] | None,
+    Sequence[str] | None,
 ] | JSONResponse:
-    """Parse the multipart form into ``(params, fields, names, payloads, tax_sources)``.
+    """Parse the form into ``(params, fields, names, payloads, tax_sources, taxprof)``.
 
     Returns the error response instead when the request is invalid.  The form
     (and its temporary files) is closed before returning.
@@ -791,6 +799,12 @@ async def _read_upload(
             if isinstance(tax_sources, JSONResponse):
                 return tax_sources
 
+            taxprof = _validate_taxprof(
+                params_data.get("taxprof"), state.metadata, mode
+            )
+            if isinstance(taxprof, JSONResponse):
+                return taxprof
+
             sketches = form.getlist("sketch")
             if not sketches:
                 return _error("no 'sketch' part in the request", 400)
@@ -807,7 +821,7 @@ async def _read_upload(
             except Exception:
                 log.exception("failed to read an uploaded sketch part")
                 return _error("failed to read a 'sketch' part", 500)
-            return params, fields, names, payloads, tax_sources
+            return params, fields, names, payloads, tax_sources, taxprof
     except StarletteHTTPException as error:
         return _error(str(error.detail), error.status_code)
 
@@ -830,6 +844,7 @@ async def _run_slot(
     samples: list[dict[str, Any] | None],
     index: int,
     tax_sources: Sequence[str] | None = None,
+    taxprof: Sequence[str] | None = None,
 ) -> None:
     async with state.jobs.slot():
         samples[index] = await anyio.to_thread.run_sync(
@@ -843,6 +858,7 @@ async def _run_slot(
             payload,
             params.no_adjust,
             tax_sources,
+            taxprof,
         )
 
 
@@ -892,6 +908,35 @@ def _validate_tax_sources(
             400,
         )
     return tuple(dict.fromkeys(value))
+
+
+def _validate_taxprof(
+    value: Any, metadata: MetadataDB | None, mode: str
+) -> Sequence[str] | None | JSONResponse:
+    """Validate ``params.taxprof``: taxonomies the server can aggregate.
+
+    The server is the only place that knows which metadata columns and
+    sylph-tax sources its file has, so the request is checked against them
+    (:func:`sylphd.taxonomy.resolve_taxonomy_columns`): a taxonomy the file
+    cannot produce is a 400, not a silently empty table.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return _error(
+            "'params.taxprof' must be a list of taxonomy names", 400
+        )
+    if not value:
+        return None
+    if mode != "profile":
+        return _error("'params.taxprof' is only available on /profile", 400)
+    try:
+        taxonomies = parse_taxonomies(value)
+        summary = metadata.summary() if metadata is not None else None
+        resolve_taxonomy_columns(taxonomies, summary)
+    except (TaxonomyError, ProtocolError) as error:
+        return _error(str(error), 400)
+    return taxonomies
 
 
 def _resolve_names(value: Any, sketches: Sequence[Any]) -> list[str] | JSONResponse:

@@ -602,6 +602,80 @@ def write_taxmatrix(
     return output
 
 
+def clade_dict(item: CladeAbundance) -> dict[str, Any]:
+    """One clade as the ``/profile`` JSON carries it."""
+    return {
+        "clade_name": item.clade,
+        "relative_abundance": item.relative,
+        "sequence_abundance": item.sequence,
+        "ani": item.ani,
+        "coverage": item.coverage,
+    }
+
+
+def clades_from_dict(rows: Iterable[Mapping[str, Any]]) -> list[CladeAbundance]:
+    """Rebuild :class:`CladeAbundance` values from the ``/profile`` JSON.
+
+    Used by the CLI for ``--taxmatrix`` (and by tests): the server has already
+    done the aggregation, so only the matrix rendering needs the objects.
+    """
+    return [
+        CladeAbundance(
+            clade=str(row["clade_name"]),
+            relative=_number(row.get("relative_abundance")),
+            sequence=_number(row.get("sequence_abundance")),
+            ani=_optional_number(row.get("ani")),
+            coverage=_optional_number(row.get("coverage")),
+        )
+        for row in rows
+    ]
+
+
+def taxprof_payload(
+    name: str,
+    taxonomy: str,
+    clades: Sequence[CladeAbundance],
+    *,
+    taxonomies_used: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """One sample's profile for one taxonomy, as ``POST /profile`` returns it.
+
+    Carries the structured clades (for charts and matrices) **and** the exact
+    ``.sylphmpa`` text (so neither the CLI nor the web page formats anything).
+    """
+    used = [taxonomy] if taxonomies_used is None else list(taxonomies_used)
+    text = "\n".join(
+        taxprof_lines(name, taxonomy, clades, taxonomies_used=used)
+    ) + "\n"
+    return {
+        "columns": list(TAXPROF_COLUMNS),
+        "taxonomies_used": used,
+        "clades": [clade_dict(item) for item in clades],
+        "sylphmpa": text,
+    }
+
+
+def build_taxprof(
+    name: str,
+    taxonomies: Sequence[str],
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    tax_sources: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Aggregate one sample's ``/profile`` rows for every requested taxonomy."""
+    materialized = list(rows)
+    payload: dict[str, Any] = {}
+    for taxonomy in taxonomies:
+        used = list(tax_sources) if taxonomy == SYLPHTAX else [taxonomy]
+        payload[taxonomy] = taxprof_payload(
+            name,
+            taxonomy,
+            aggregate_rows(materialized, taxonomy),
+            taxonomies_used=used,
+        )
+    return payload
+
+
 def taxprof_path(prefix: str, name: str, taxonomy: str) -> Path:
     return Path(f"{prefix}{_safe_name(name)}.{taxonomy}.sylphmpa")
 
@@ -660,19 +734,25 @@ def write_outputs(
 
     written: list[Path] = []
     for taxonomy in taxonomies:
-        table = aggregate_samples(samples, taxonomy)
+        # Prefer the server's aggregation (`/profile` `taxprof`): the CLI must
+        # not fold rows itself.  `aggregate_samples` stays for direct callers
+        # and tests; a response without `taxprof` (an older server) still works.
+        table, texts = _profile_tables(samples, taxonomy)
         used = list(tax_sources) if taxonomy == SYLPHTAX else [taxonomy]
         if taxprof_prefix is not None:
             for name, clades in table:
-                written.append(
-                    write_taxprof(
-                        taxprof_path(taxprof_prefix, name, taxonomy),
-                        name,
-                        taxonomy,
-                        clades,
-                        taxonomies_used=used,
+                path = taxprof_path(taxprof_prefix, name, taxonomy)
+                text = texts.get(name)
+                if text is None:
+                    written.append(
+                        write_taxprof(
+                            path, name, taxonomy, clades, taxonomies_used=used
+                        )
                     )
-                )
+                else:
+                    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                        handle.write(text)
+                    written.append(path)
         if taxmatrix_prefix is not None:
             written.append(
                 write_taxmatrix(
@@ -680,3 +760,21 @@ def write_outputs(
                 )
             )
     return written
+
+
+def _profile_tables(
+    samples: Sequence[Mapping[str, Any]], taxonomy: str
+) -> tuple[list[tuple[str, list[CladeAbundance]]], dict[str, str]]:
+    """Per-sample clades (and ready ``.sylphmpa`` text) for one taxonomy."""
+    table: list[tuple[str, list[CladeAbundance]]] = []
+    texts: dict[str, str] = {}
+    for sample in samples:
+        name = sample_name(sample)
+        payload = (sample.get("taxprof") or {}).get(taxonomy)
+        if isinstance(payload, Mapping) and isinstance(payload.get("clades"), list):
+            table.append((name, clades_from_dict(payload["clades"])))
+            if isinstance(payload.get("sylphmpa"), str):
+                texts[name] = payload["sylphmpa"]
+        else:
+            table.append((name, aggregate_rows(sample.get("rows") or (), taxonomy)))
+    return table, texts

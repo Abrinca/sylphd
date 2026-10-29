@@ -533,8 +533,10 @@ sees a collision without re-running `setup`. `--tax-source` stays the per-reques
   - Header `clade_name<TAB><sample>...` and tab separators, as `to_csv(sep="\t")` writes them.
   The existing `CladeAbundance.ani`/`.coverage` fields already carry the values; only
   `clade_matrix_lines` needs to sort and to handle the two extra columns.
-- `web/taxonomy.js` is a port of `taxonomy.py`; leave it GTDB/NCBI-only. `tests/test_web_taxonomy_js.py`
-  keeps guarding the port; do not extend `tax` to JavaScript.
+- ~~`web/taxonomy.js` is a port of `taxonomy.py`; leave it GTDB/NCBI-only.~~ Superseded (owner
+  decision, 2026-10-29): the logic exists once, on the server. `/profile` `taxprof` returns the
+  clades and the `.sylphmpa` text, the CLI writes them, and the web page charts the server's
+  clades — including `tax` — so `web/taxonomy.js` and its JS parity test are gone.
 
 ### B5. Virus-host annotation
 
@@ -580,7 +582,8 @@ species. For a non-GTDB best hit today: ANI-only labels, `taxon` null.
 - The CLI table gained `taxon` and `taxonomy_source`; the per-contig table gained `taxon`.
 - The web app's `decorate` falls back to the last value of the additive `taxonomy` object when
   there is no `gtdb_taxonomy`, so a non-GTDB hit shows its vOTU/species instead of the accession.
-  Nothing else in the page changed; the JS port (`web/taxonomy.js`) stays GTDB/NCBI-only.
+  Nothing else in the page changed there. (Later, the JS port `web/taxonomy.js` was removed: the
+  server now computes the clades and the page renders them, `tax` included.)
 
 (3) **Decided: 95 % ANI for every source**, no per-source threshold for now. Add hints and warnings
 instead (all implemented):

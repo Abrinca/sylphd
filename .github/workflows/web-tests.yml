@@ -2,8 +2,9 @@ name: Web tests
 
 # The browser and node tests of the web page (XSS check of the rendered operator text in headless
 # Chromium, JS ports against the Python code). They need no Rust build: the Python side is stdlib
-# only, so pytest runs with --noconftest (tests/conftest.py imports pysylph). With CI set, a
-# skipped test fails.
+# only, so pytest runs with --noconftest (tests/conftest.py imports pysylph). The taxprof render
+# test needs the project deps (it starts a real server), so it runs in the main test suite. With
+# CI set, a skipped test fails.
 on:
   push:
     branches:
@@ -11,7 +12,6 @@ on:
     paths:
       - "web/**"
       - "tests/test_web_about_browser.py"
-      - "tests/test_web_taxonomy_js.py"
       - "tests/test_web_sylsp_js.py"
       - "tests/package*.json"
       - "tests/data/*.sylsp"
@@ -22,7 +22,6 @@ on:
     paths:
       - "web/**"
       - "tests/test_web_about_browser.py"
-      - "tests/test_web_taxonomy_js.py"
       - "tests/test_web_sylsp_js.py"
       - "tests/package*.json"
       - "tests/data/*.sylsp"
@@ -53,4 +52,4 @@ jobs:
         run: >
           PYTHONPATH=src uv run --no-project --python 3.14 --with pytest==9.2.0
           pytest --noconftest -q -rs
-          tests/test_web_about_browser.py tests/test_web_taxonomy_js.py tests/test_web_sylsp_js.py
+          tests/test_web_about_browser.py tests/test_web_sylsp_js.py

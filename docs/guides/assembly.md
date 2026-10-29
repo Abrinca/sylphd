@@ -97,8 +97,8 @@ relations use that value; `--min-ani` filters on it too. The query is sent permi
 (`minimum_ani=0`, `screen_ani=0`, `min_contain=3`, `no_adjust`) so the server cannot drop a short
 contig on the way.
 
-The output has one row per contig and hit with `contig`, `contig_length`, `gc`, `status`
-(`ok`, `too_short` or `no_hit`), `rank`, `ani`, `shared_kmers`, `contig_kmers`,
+The output has one row per sent contig and hit with `contig`, `contig_length`, `gc`, `status`
+(`ok` or `no_hit`), `rank`, `ani`, `shared_kmers`, `contig_kmers`,
 `explained_fraction`, `reference_ani`, `relation`, `shared_rank`, `ani_species_level`, `accession`,
 `gtdb_species`, `taxon`, `n_close`, `consensus_rank` and `consensus_taxon`, then the metadata
 columns (`--fields`). `taxon` is the hit's finest named rank from whatever source resolved it.
@@ -134,8 +134,10 @@ MG1655 is `G047199095 sp047199095` in r232, not `Escherichia coli`. Add
 `--fields ncbi_organism_name` (or `all`, the default) for the NCBI name of each hit.
 
 **Short contigs and the screen.** Contigs shorter than `--min-contig-length` (20000 bp by default)
-are reported as `too_short` and not queried; a contig with fewer than sylph's 10 sketched k-mers,
-or with an empty genome sketch (a tandem repeat), is `no_hit` rather than a spurious match. At `c=200` a 20 kb contig has ~85 genome-style k-mers, which
+are not queried and have no row; they are counted in the summary (`skipped_short`, and
+`skipped_few_kmers` for a contig with fewer than sylph's 10 sketched k-mers or with an empty genome
+sketch, such as a tandem repeat). A contig that was sent but matches nothing is `no_hit` rather
+than a spurious match. At `c=200` a 20 kb contig has ~85 genome-style k-mers, which
 gives roughly ±0.5 % ANI; at 10 kb (~43 k-mers) it is ~±1 % and only down to ~93 % ANI; below ~90 %
 ANI a short contig has too few shared k-mers to resolve anything below family. Two-stage `.syl2db`
 databases additionally drop some short contigs in their first-stage screen before any threshold

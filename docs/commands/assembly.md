@@ -24,7 +24,7 @@ for MAG contamination checks; see [Per-contig mode](#per-contig-mode).
 | `--min-ani ANI` | `80` | minimum ANI in percent, 70-100 |
 | `--name NAME` | file base name | query name (single-assembly mode) |
 | `--per-contig` | off | sketch every record as its own sample |
-| `--min-contig-length BP` | `20000` | with `--per-contig`: shorter contigs are not sketched or sent, only reported |
+| `--min-contig-length BP` | `20000` | with `--per-contig`: shorter contigs are not sketched or sent, only counted |
 | `--fields COLS` | `all` | with `--per-contig`: metadata columns per hit (`all`, `none` or a comma-separated list) |
 | `--consensus-ratio R` | `1.5` | with `--per-contig`: a species joins the consensus when its divergence is at most R times the best hit's, R >= 1 |
 | `--consensus-z Z` | `2` | with `--per-contig`: ... plus Z standard deviations of the ANI sampling noise, Z >= 0 |
@@ -148,9 +148,12 @@ columns followed by the metadata columns selected by `--fields`:
 ```text
 contig  contig_length  gc     status  rank  ani    shared_kmers  contig_kmers  explained_fraction  reference_ani  relation      shared_rank  ani_species_level  accession        genome_id        gtdb_species      taxon             n_close  consensus_rank  consensus_taxon
 contig1 1954431        50.76  ok      1     99.12  6398          8413          0.7605              96.16          same species  species      true               GCA_000005845.2  GCA_000005845.2  Escherichia coli  Escherichia coli  2        family          Enterobacteriaceae
-contig7 2500           44.10  too_short
 contig8 18000          61.20  no_hit
 ```
+
+A record shorter than `--min-contig-length`, or one that is not sent for too few k-mers, has no
+row at all: it is only counted in the summary (`summary.skipped_short` /
+`summary.skipped_few_kmers` in JSON, and the stderr line).
 
 - `ani` is the contig-relative ANI in percent, `shared_kmers` the reference k-mers found in the
   contig, `contig_kmers` the contig's own genome-style k-mer count, and `explained_fraction` the
@@ -165,10 +168,11 @@ contig8 18000          61.20  no_hit
   vOTU, a fungal species).
 - `n_close`, `consensus_rank` and `consensus_taxon` describe the whole contig (see
   [Taxonomic consensus](#per-contig-consensus)); they are the same on every row of a contig.
-- `status` is `ok`, `too_short` or `no_hit`. Use `--fields none` for this compact table, `--fields
-  all` (the default) for every metadata column, or name the columns you want. (`POST /contigs`
-  also knows `too_few_kmers`; the command reports such a contig as `no_hit` with a `reason`, as it
-  always has, because it skips it before sending.)
+- `status` is `ok` or `no_hit`. Use `--fields none` for this compact table, `--fields all` (the
+  default) for every metadata column, or name the columns you want. A record that was never sent
+  (too short, or too few sketched/genome-style k-mers) is not a row at all; it is counted in the
+  summary. (`POST /contigs` still answers `too_short`/`too_few_kmers` for a client that sends such
+  a sketch, but the command no longer sends them.)
 
 ### Taxonomic consensus { #per-contig-consensus }
 
@@ -235,12 +239,15 @@ not detected: k-mer counts cannot tell them from a uniformly divergent contig.
 
 - `--min-contig-length` defaults to **20000 bp**. At `c=200` that is about 85 genome-style k-mers;
   the ANI error is then roughly ±0.5 % (and ±1 % at 10 kb, growing quickly below that). Short
-  contigs are not sketched or sent; they are listed with `status` `too_short`.
+  contigs are not sketched or sent and produce no rows; they are counted in
+  `summary.skipped_short` (`{contigs, bp}`) and in the stderr summary. This keeps memory and the
+  table flat on FASTQ input with millions of short reads.
 - A contig whose sample sketch holds fewer k-mers than sylph's `min_number_kmers` (10) is not sent
-  either, because an ANI from a handful of k-mers is noise; it is `no_hit` with a `reason` in JSON.
-  So is a contig whose *genome* sketch is empty, which happens for a tandem repeat: every k-mer
-  occurs more than once, a genome sketch drops those, and the contig-relative ANI would divide by
-  zero. A contig that was sent but has no hit above `--min-ani` is `no_hit` too.
+  either, because an ANI from a handful of k-mers is noise. So is a contig whose *genome* sketch is
+  empty, which happens for a tandem repeat: every k-mer occurs more than once, a genome sketch
+  drops those, and the contig-relative ANI would divide by zero. Both are counted in
+  `summary.skipped_few_kmers` (`{contigs, bp}`) and have no row. A contig that was sent but has no
+  hit above `--min-ani` is `no_hit`.
 - **`no_hit` is not proof that the database has no relative.** There are three ways to get one and
   the output cannot tell them apart: nothing passes `--min-ani`, the contig is too small for
   `min_number_kmers`, or — on a two-stage `.syl2db` database — the **first-stage screen never looked
@@ -325,8 +332,10 @@ query settings sent to the server. JSON mode never writes to stderr, as in singl
 the summary is in the document, so `--quiet` is only useful in table mode.
 
 In table mode a summary goes to stderr: how many contigs and bases were queried, how many were
-skipped for length or k-mer count, how many had no hit, and the fraction of the queried bases per
-**consensus** taxon with its rank (the top five). When a contig's best hit is not from GTDB, the
+skipped for length (`N contigs (X kb) below 20000 bp not classified`) or for too few k-mers, how
+many had no hit, and the fraction of the queried bases per **consensus** taxon with its rank (the
+top five). The JSON `summary` carries the same counters as `skipped_short` and
+`skipped_few_kmers`, each `{contigs, bp}`, so skipped records never appear in `contigs`. When a contig's best hit is not from GTDB, the
 caveat of that source (viruses, fungi, generic — see
 [Outside prokaryotes](../guides/assembly.md#outside-prokaryotes)) follows **once per output**,
 however many contigs it applies to. Aggregating by consensus rather than by top hit
@@ -335,7 +344,7 @@ is what makes the line readable: one organism spread over several near-identical
 is the contamination signal.
 
 ```text
-per-contig: 27 of 38 contig(s), 1,790,000 bp queried; 11 shorter than 20000 bp (80,000 bp); 1 without a hit
+per-contig: 27 of 38 contig(s), 1,790,000 bp queried; 11 contigs (80.0 kb) below 20000 bp not classified; 1 without a hit
 bp by consensus: Enterobacteriaceae (family) 880,000 bp (49.2 %), G047199115 sp047199115 (species) 450,000 bp (25.1 %), Cutibacterium acnes (species) 165,000 bp (9.2 %), Bacteria (domain) 140,000 bp (7.8 %), Bacillus subtilis (species) 85,000 bp (4.8 %)
 ```
 

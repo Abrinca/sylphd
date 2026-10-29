@@ -7,9 +7,8 @@
 (() => {
   'use strict';
   const S = window.Sylphd;
-  const T = window.SylphdTax;
   const root = document.getElementById('mode-reads');
-  if (!S || !T || !root) return;
+  if (!S || !root) return;
   const { el, fmtInt, isNum, has, notice, download } = S;
 
   const GIB = 1024 ** 3;
@@ -18,6 +17,17 @@
   const DEFAULT_MIN_KMERS = 10;
   const MAX_ROWS_SHOWN = 100;
   const NAME_MAX = 100;
+
+  // Rank prefixes of GTDB/NCBI lineages and their display names. The server
+  // aggregates the clades; the page only groups them by rank for the chart.
+  const RANKS = ['d', 'p', 'c', 'o', 'f', 'g', 's'];
+  const RANK_NAMES = { d: 'domain', p: 'phylum', c: 'class', o: 'order', f: 'family', g: 'genus', s: 'species' };
+  const TAXONOMY_LABELS = { gtdb: 'GTDB', ncbi: 'NCBI', tax: 'All sources' };
+  const TAXONOMY_TITLES = {
+    gtdb: 'GTDB lineage of the matched genome',
+    ncbi: 'NCBI lineage of the matched genome',
+    tax: 'The server’s sylph-tax profile over all its taxonomy sources (viruses, fungi, …)',
+  };
 
   /* ---------------------------------------------------------- formatting */
   const fmtPct = (v) => {
@@ -370,6 +380,27 @@
     return !Array.isArray(keys) || keys.includes('estimate_read_counts');
   }
 
+  // The taxonomies this server can aggregate: the columns its metadata file
+  // has, plus its sylph-tax sources. An older server without the taxprof
+  // param gets no request and the page shows the plain genome table.
+  function taxprofSupported(info) {
+    const keys = info && info.params && info.params['/profile'];
+    return !Array.isArray(keys) || keys.includes('taxprof');
+  }
+
+  function requestedTaxonomies() {
+    const info = S.info();
+    if (!info || !taxprofSupported(info)) return [];
+    const meta = info.metadata;
+    if (!meta) return [];
+    const columns = Array.isArray(meta.columns) ? meta.columns : [];
+    const out = [];
+    if (columns.includes('gtdb_taxonomy')) out.push('gtdb');
+    if (columns.includes('ncbi_taxonomy')) out.push('ncbi');
+    if (Array.isArray(meta.taxonomy_sources) && meta.taxonomy_sources.length) out.push('tax');
+    return out;
+  }
+
   function refresh() {
     let hint = '';
     const o = options();
@@ -515,6 +546,8 @@
     if (o.readCounts) params.estimate_read_counts = true;
     if (o.ani !== null) params.minimum_ani = o.ani;
     if (o.kmers !== null) params.min_number_kmers = o.kmers;
+    const taxprof = requestedTaxonomies();
+    if (taxprof.length) params.taxprof = taxprof;
     const form = new FormData();
     form.append('sketch', run.sketch, `${safeName(run.name)}.sylsp`);
     form.append('params', JSON.stringify(params));
@@ -752,16 +785,20 @@
     ui.progress.hidden = true;
     const sample = data[0];
     const rows = sample.rows.slice().sort((x, y) => (y.Taxonomic_abundance || 0) - (x.Taxonomic_abundance || 0));
-    run.result = { data, sample, rows, params };
-    const noTax = !rows.length ? false : rows.every((r) => !has(r.gtdb_taxonomy) && !has(r.ncbi_taxonomy));
-    const anySourceTax = rows.some((r) => has(r.tax_lineage));
+    run.result = { data, sample, rows, params, taxprof: sample.taxprof || {} };
+    // Pick a taxonomy with real clades: a GTDB profile of a UHGV-only sample
+    // is one "unclassified" tree, so fall through to NCBI and then "tax".
+    const data_taxonomies = taxonomiesWithData(sample);
+    if (data_taxonomies.length && !data_taxonomies.includes(view.taxonomy)) view.taxonomy = data_taxonomies[0];
+    view.rank = defaultRank(sample, view.taxonomy);
+    view.showAll = false;
     const out = [summaryCard(run, run.result)];
     if (!rows.length) out.push(emptyCard(run));
     else {
-      if (noTax) {
-        out.push(anySourceTax
-          ? notice('warn', 'No GTDB or NCBI taxonomy', 'The hits carry the taxonomy of the server’s own sources (UHGV, ICTV, fungi, …), which this page cannot group into a taxonomic profile. The table below lists the genomes with their own taxonomy.')
-          : notice('warn', 'No taxonomy available', 'This server has no taxonomy metadata, so genomes cannot be grouped by taxon. The table below lists the genomes only.'));
+      if (!data_taxonomies.length) {
+        out.push(notice('warn', 'No taxonomic profile', Object.keys(run.result.taxprof).length
+          ? 'The server’s taxonomic profile has no classified clade for these hits. The table below lists the genomes with their own taxonomy.'
+          : 'This server did not return a taxonomic profile (it has no taxonomy metadata, or it is older than the taxprof option). The table below lists the genomes only.'));
       } else {
         out.push(abundanceCard(run));
       }
@@ -828,8 +865,90 @@
   }
 
   /* ---------------------------------------------------- abundance chart */
+  // The server does all taxonomic aggregation: `sample.taxprof[taxonomy]`
+  // holds the clade table (clade_name, relative/sequence abundance, and the
+  // ANI/coverage of strain rows) and the rendered .sylphmpa text. This section
+  // only groups those clades by rank/level for the chart.
   const TOP_GROUPS = 10;
   const view = { taxonomy: 'gtdb', rank: 's', metric: 'relative', showAll: false };
+
+  const payloadFor = (sample, taxonomy) => (sample.taxprof || {})[taxonomy] || null;
+  const cladeDepth = (clade) => String(clade).split('|').length;
+  const lastToken = (clade) => String(clade).slice(String(clade).lastIndexOf('|') + 1);
+  const tokenName = (token) => {
+    const at = token.indexOf('__');
+    return at >= 0 ? token.slice(at + 2) : token;
+  };
+
+  function hasClassifiedClades(payload) {
+    if (!payload || !Array.isArray(payload.clades) || !payload.clades.length) return false;
+    return payload.clades.some((c) => !['unclassified', 'NO_TAXONOMY'].includes(String(c.clade_name).split('|')[0]));
+  }
+
+  function taxonomiesWithData(sample) {
+    return Object.keys(sample.taxprof || {}).filter((taxonomy) => hasClassifiedClades(payloadFor(sample, taxonomy)));
+  }
+
+  function defaultRank(sample, taxonomy) {
+    if (taxonomy !== 'tax') return 's';
+    // The deepest level whose clades are not strain rows (t__), i.e. the
+    // species-equivalent level of the source's own scheme.
+    let best = 1;
+    for (const clade of (payloadFor(sample, taxonomy) || {}).clades || []) {
+      const depth = cladeDepth(clade.clade_name);
+      if (!lastToken(clade.clade_name).startsWith('t__')) best = Math.max(best, depth);
+    }
+    return String(best);
+  }
+
+  function rankOptions(sample, taxonomy) {
+    if (taxonomy === 'tax') {
+      const depths = ((payloadFor(sample, taxonomy) || {}).clades || []).map((c) => cladeDepth(c.clade_name));
+      const max = Math.max(1, ...depths);
+      return Array.from({ length: max }, (_, i) => [String(i + 1), `Level ${i + 1}`]);
+    }
+    return RANKS.slice().reverse().map((r) => [r, RANK_NAMES[r][0].toUpperCase() + RANK_NAMES[r].slice(1)]);
+  }
+
+  function rankDepth(taxonomy, rank) {
+    return taxonomy === 'tax' ? Number(rank) : RANKS.indexOf(rank) + 1;
+  }
+
+  function rankLabel(taxonomy, rank) {
+    return taxonomy === 'tax' ? `level ${rank}` : RANK_NAMES[rank];
+  }
+
+  const PLURAL = { d: ['domain', 'domains'], p: ['phylum', 'phyla'], c: ['class', 'classes'], o: ['order', 'orders'], f: ['family', 'families'], g: ['genus', 'genera'], s: ['species', 'species'] };
+
+  function rankNoun(taxonomy, rank, count) {
+    if (taxonomy === 'tax') return count === 1 ? 'level' : 'levels';
+    return count === 1 ? PLURAL[rank][0] : PLURAL[rank][1];
+  }
+
+  // Clades of exactly this depth, summed per full path (each clade name is
+  // one path). `none` is every row that does not reach the level (including
+  // the server's "unclassified"/"NO_TAXONOMY" trees), derived from the rows
+  // because that share has no clade of its own.
+  function cladeGroups(sample, taxonomy, rank, metric) {
+    const payload = payloadFor(sample, taxonomy) || {};
+    const depth = rankDepth(taxonomy, rank);
+    const valueOf = metric === 'sequence' ? 'sequence_abundance' : 'relative_abundance';
+    let total = 0;
+    for (const row of sample.rows || []) {
+      total += Number((metric === 'sequence' ? row.Sequence_abundance : row.Taxonomic_abundance) || 0);
+    }
+    const groups = [];
+    let classified = 0;
+    for (const clade of payload.clades || []) {
+      if (cladeDepth(clade.clade_name) !== depth) continue;
+      if (['unclassified', 'NO_TAXONOMY'].includes(String(clade.clade_name).split('|')[0])) continue;
+      const value = Number(clade[valueOf] || 0);
+      groups.push({ key: clade.clade_name, name: tokenName(lastToken(clade.clade_name)), value });
+      classified += value;
+    }
+    groups.sort((a, b) => b.value - a.value);
+    return { groups, none: Math.max(0, total - classified), total };
+  }
 
   function seg(label, name, opts, value, onChange) {
     const wrap = el('div', { class: 'seg', role: 'radiogroup', 'aria-label': label });
@@ -842,25 +961,31 @@
     return wrap;
   }
 
-  const PLURAL = { d: ['domain', 'domains'], p: ['phylum', 'phyla'], c: ['class', 'classes'], o: ['order', 'orders'], f: ['family', 'families'], g: ['genus', 'genera'], s: ['species', 'species'] };
   const italicRank = (rank, name) => (rank === 'g' || rank === 's') && !/^unclassified/i.test(name);
 
   function abundanceCard(run) {
-    const { rows, params } = run.result;
+    const { rows, params, sample } = run.result;
     const readCounts = !!params.estimate_read_counts;
     const card = el('section', { class: 'card', 'aria-label': 'Abundance' });
     const body = el('div', { class: 'abund' });
     const dlBtn = el('button', { type: 'button', class: 'btn' });
     const draw = () => {
       body.replaceChildren(...abundanceBody(run).filter(Boolean));
-      dlBtn.textContent = `Download sylphmpa (${view.taxonomy === 'gtdb' ? 'GTDB' : 'NCBI'})`;
+      dlBtn.textContent = `Download sylphmpa (${TAXONOMY_LABELS[view.taxonomy] || view.taxonomy})`;
     };
     dlBtn.addEventListener('click', () => downloadSylphmpa(run));
+    const taxonomies = taxonomiesWithData(sample);
+    const taxonomyOptions = (taxonomies.length ? taxonomies : [view.taxonomy]).map((t) => [t, TAXONOMY_LABELS[t] || t, TAXONOMY_TITLES[t] || '']);
     const controls = el('div', { class: 'abund-controls' },
       el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Taxonomy' }),
-        seg('Taxonomy', 'r-tax', [['gtdb', 'GTDB', 'GTDB lineage of the matched genome'], ['ncbi', 'NCBI', 'NCBI lineage of the matched genome']], view.taxonomy, (v) => { view.taxonomy = v; view.showAll = false; draw(); })),
-      el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Rank' }),
-        seg('Rank', 'r-rank', T.RANKS.slice().reverse().map((r) => [r, T.RANK_NAMES[r][0].toUpperCase() + T.RANK_NAMES[r].slice(1)]), view.rank, (v) => { view.rank = v; view.showAll = false; draw(); })),
+        seg('Taxonomy', 'r-tax', taxonomyOptions, view.taxonomy, (v) => {
+          view.taxonomy = v;
+          view.rank = defaultRank(sample, v);
+          view.showAll = false;
+          draw();
+        })),
+      el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: view.taxonomy === 'tax' ? 'Level' : 'Rank' }),
+        seg(view.taxonomy === 'tax' ? 'Level' : 'Rank', 'r-rank', rankOptions(sample, view.taxonomy), view.rank, (v) => { view.rank = v; view.showAll = false; draw(); })),
       el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Abundance' }),
         seg('Abundance measure', 'r-metric', [
           ['relative', 'Taxonomic', 'Share of the organisms, corrected for genome size'],
@@ -878,34 +1003,34 @@
   }
 
   function abundanceBody(run) {
-    const { rows, params } = run.result;
+    const { rows, params, sample } = run.result;
     // With estimated read counts the "sequence" measures are reads, not percentages, so
     // they are shown as integers and the unknown fraction (a share of the sample) is off.
     const readCounts = !!params.estimate_read_counts;
     const reads = readCounts && view.metric === 'sequence';
     const fmtVal = reads ? (v) => fmtInt(v) : fmtPct;
-    const { groups, none, total } = T.rankGroups(rows, view.taxonomy, view.rank, view.metric);
-    const rankName = T.RANK_NAMES[view.rank];
+    const { groups, none } = cladeGroups(sample, view.taxonomy, view.rank, view.metric);
+    const level = rankLabel(view.taxonomy, view.rank);
     const unknown = params.estimate_unknown && !readCounts && view.metric === 'sequence' ? unknownFraction(rows) : 0;
     const shown = groups.slice(0, TOP_GROUPS);
     const rest = groups.slice(TOP_GROUPS);
     const restValue = rest.reduce((n, g) => n + g.value, 0);
-    const segs = shown.map((g, i) => ({ label: g.name, value: g.value, cls: `cat-${(i % 10) + 1}`, rank: view.rank, genomes: g.genomes }));
+    const segs = shown.map((g, i) => ({ label: g.name, value: g.value, cls: `cat-${(i % 10) + 1}`, rank: view.rank }));
     if (restValue > 0) segs.push({ label: `Other (${rest.length} ${rest.length === 1 ? 'taxon' : 'taxa'})`, value: restValue, cls: 'cat-other' });
-    if (none > 0.0005) segs.push({ label: `Not classified at ${rankName} level`, value: none, cls: 'cat-none', plain: true });
+    if (none > 0.0005) segs.push({ label: `Not classified at ${level} level`, value: none, cls: 'cat-none', plain: true });
     if (unknown > 0.0005) segs.push({ label: 'Unknown (not in the database)', value: unknown, cls: 'cat-unknown', plain: true });
     const sum = segs.reduce((n, s) => n + s.value, 0) || 1;
     const scale = Math.max(100, sum);
 
-    const bar = el('div', { class: 'stack', role: 'img', 'aria-label': `Abundance by ${rankName}: ${segs.slice(0, 3).map((s) => `${s.label} ${fmtVal(s.value)}`).join(', ')}` },
+    const bar = el('div', { class: 'stack', role: 'img', 'aria-label': `Abundance by ${level}: ${segs.slice(0, 3).map((s) => `${s.label} ${fmtVal(s.value)}`).join(', ')}` },
       segs.map((s) => el('span', { class: `seg-${s.cls}`, style: `width:${((s.value / scale) * 100).toFixed(3)}%`, title: `${s.label}: ${fmtVal(s.value)}` })));
 
     const maxV = Math.max(...segs.map((s) => s.value), 1e-9);
     const rowsEl = [];
-    let listed = [...shown.map((g, i) => ({ g, cls: `cat-${(i % 10) + 1}` })), ...rest.map((g) => ({ g, cls: 'cat-other' }))];
+    const listed = [...shown.map((g, i) => ({ g, cls: `cat-${(i % 10) + 1}` })), ...rest.map((g) => ({ g, cls: 'cat-other' }))];
     const limit = view.showAll ? listed.length : 15;
-    for (const { g, cls } of listed.slice(0, limit)) rowsEl.push(listRow(g.name, g.value, maxV, cls, italicRank(view.rank, g.name), `${g.genomes} ${g.genomes === 1 ? 'genome' : 'genomes'}`, fmtVal));
-    if (none > 0.0005) rowsEl.push(listRow(`Not classified at ${rankName} level`, none, maxV, 'cat-none', false, '', fmtVal));
+    for (const { g, cls } of listed.slice(0, limit)) rowsEl.push(listRow(g.name, g.value, maxV, cls, italicRank(view.rank, g.name), '', fmtVal));
+    if (none > 0.0005) rowsEl.push(listRow(`Not classified at ${level} level`, none, maxV, 'cat-none', false, '', fmtVal));
     if (unknown > 0.0005) rowsEl.push(listRow('Unknown (not in the database)', unknown, maxV, 'cat-unknown', false, '', fmtVal));
     const more = listed.length > 15
       ? el('button', { type: 'button', class: 'link-btn', text: view.showAll ? 'show fewer' : `show all ${listed.length}`, onclick: () => {
@@ -914,8 +1039,8 @@
         host.replaceChildren(...abundanceBody(run).filter(Boolean));
       } }) : null;
     const head = el('p', { class: 'abund-head muted' },
-      `${groups.length} ${(groups.length === 1 ? PLURAL[view.rank][0] : PLURAL[view.rank][1])}`,
-      ` · ${view.metric === 'relative' ? 'taxonomic abundance' : reads ? 'estimated reads' : 'sequence abundance'}, ${view.taxonomy === 'gtdb' ? 'GTDB' : 'NCBI'}`);
+      `${groups.length} ${rankNoun(view.taxonomy, view.rank, groups.length)}`,
+      ` · ${view.metric === 'relative' ? 'taxonomic abundance' : reads ? 'estimated reads' : 'sequence abundance'}, ${TAXONOMY_LABELS[view.taxonomy] || view.taxonomy}`);
     return [head, bar, el('ul', { class: 'alist' }, rowsEl), more ? el('p', null, more) : null];
   }
 
@@ -928,10 +1053,9 @@
   }
 
   function downloadSylphmpa(run) {
-    const { rows } = run.result;
-    const clades = T.aggregateRows(rows, view.taxonomy);
-    const text = `${T.taxprofLines(run.name, view.taxonomy, clades).join('\n')}\n`;
-    download(`${safeName(run.name)}.${view.taxonomy}.sylphmpa`, text, 'text/tab-separated-values');
+    const payload = payloadFor(run.result.sample, view.taxonomy);
+    if (!payload || typeof payload.sylphmpa !== 'string') return;
+    download(`${safeName(run.name)}.${view.taxonomy}.sylphmpa`, payload.sylphmpa, 'text/tab-separated-values');
   }
 
   /* ------------------------------------------------------- genome table */

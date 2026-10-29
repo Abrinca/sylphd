@@ -573,24 +573,38 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     updateSubmit();
   }
 
+  const perContig = () => window.SylphdContigs || null;
+
   function updateSubmit() {
     const now = Date.now();
     const cooling = cooldownUntil > now;
-    const ready = input.size > 0 && (input.sylsp || input.size <= LOCAL_INPUT_CAP) && !sketchProblem() && validateOptions().ok;
+    const pc = perContig();
+    const pcOn = !!(pc && pc.active());
+    const pcOpts = pcOn ? pc.validate() : null;
+    const ready = input.size > 0
+      && (input.sylsp ? !pcOn : input.size <= LOCAL_INPUT_CAP)
+      && (pcOn || !sketchProblem())
+      && (pcOn ? pcOpts.ok : validateOptions().ok);
     const problem = API ? shownProblem() : 'none';
     const noSketcher = !!sketcherProblem();
     ui.submit.disabled = busy || cooling || !ready || !!problem || noSketcher;
-    ui.submitHint.textContent = problem ? PROBLEM_HINT[problem] : noSketcher ? 'This browser cannot sketch' : '';
-    ui.submitHint.hidden = !problem && !noSketcher;
+    const pcSketch = pcOn && input.sylsp;
+    ui.submitHint.textContent = problem ? PROBLEM_HINT[problem]
+      : noSketcher ? 'This browser cannot sketch'
+        : pcSketch ? 'Per contig needs FASTA or FASTQ, not a .sylsp sketch' : '';
+    ui.submitHint.hidden = !problem && !noSketcher && !pcSketch;
     ui.clear.disabled = busy;
     ui.pick.disabled = busy;
     ui.example.disabled = busy;
     ui.top.disabled = busy;
     ui.minAni.disabled = busy;
+    const toggle = $('per-contig');
+    if (toggle) toggle.disabled = busy || !(pc && pc.enabled());
+    for (const node of document.querySelectorAll('#per-contig-options input')) node.disabled = busy;
     if (cooling && !busy) {
       ui.submit.textContent = `Retry in ${Math.ceil((cooldownUntil - now) / 1000)} s`;
     } else {
-      ui.submit.textContent = 'Find closest genomes';
+      ui.submit.textContent = pcOn ? 'Classify contigs' : 'Find closest genomes';
     }
   }
 
@@ -710,9 +724,41 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     }
   }
 
+  // Per-contig mode owns the sketching, batching and result rendering (contigs.js); the page
+  // keeps the shared progress line, Cancel button and busy state.
+  async function runPerContig() {
+    ui.results.replaceChildren();
+    const phase = { text: 'Preparing…' };
+    controller = new AbortController();
+    setBusy(true, () => phase.text);
+    let wholeAssembly = false;
+    try {
+      const outcome = await window.SylphdContigs.run({ phase, signal: controller.signal });
+      wholeAssembly = !!(outcome && outcome.whole);
+    } catch (e) {
+      ui.results.replaceChildren(notice('error', 'Could not classify the contigs', e.message || String(e)));
+    } finally {
+      setBusy(false);
+      controller = null;
+      if (ui.results.firstChild) {
+        ui.results.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+      }
+    }
+    // "Whole assembly instead" in the many-contigs modal: leave per-contig mode and
+    // start the ordinary assembly search with the same input.
+    if (wholeAssembly && window.SylphdContigs) {
+      window.SylphdContigs.deactivate();
+      ui.form.requestSubmit();
+    }
+  }
+
   ui.form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     if (ui.submit.disabled) return;
+    if (window.SylphdContigs && window.SylphdContigs.active()) {
+      await runPerContig();
+      return;
+    }
     const opts = validateOptions();
     if (!opts.ok) return;
     ui.results.replaceChildren();
@@ -781,6 +827,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     }
   });
   ui.cancel.addEventListener('click', () => {
+    if (window.SylphdContigs) window.SylphdContigs.cancel();
     if (sketchHandle) sketchHandle.cancel();
     if (controller) controller.abort();
   });
@@ -829,7 +876,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   /* ----------------------------------------------------------- results */
   const RANKS = { d: 'Domain', p: 'Phylum', c: 'Class', o: 'Order', f: 'Family', g: 'Genus', s: 'Species' };
 
-  // 'd__A;p__B;...' -> [{ rank: 'd', name: 'A' }, ...] for display (taxonomy.js has the aggregation rules)
+  // 'd__A;p__B;...' -> [{ rank: 'd', name: 'A' }, ...] for display (aggregation happens on the server)
   function parseLineage(str) {
     if (!has(str)) return [];
     return String(str).split(';').map((p) => {
@@ -1374,7 +1421,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   /* ----------------------------------------------- shared with the other scripts */
   window.Sylphd = {
     parseLineage, el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtSecs, fmtDur, isNum, has, notice, download,
-    accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal,
+    accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal, updateSubmit,
+    assemblyInput: () => input,
     api: API, apiOverride,
     info: () => serverInfo,
     problem: () => (API ? serverProblem : 'none'),

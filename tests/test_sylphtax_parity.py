@@ -35,6 +35,7 @@ from sylphd.metadata import MetadataDB, TaxonomySource, build_metadata_db
 from sylphd.taxonomy import (
     aggregate_samples,
     aggregate_sylphtax_rows,
+    build_taxprof,
     clade_matrix_lines,
     hit_taxonomy_string,
     taxprof_lines,
@@ -172,6 +173,16 @@ def test_golden(rows: list[dict], sample: str) -> None:
     """Byte-for-byte against what the real ``sylph-tax taxprof`` wrote."""
     produced = taxprof(rows)
     assert produced[sample] == (DATA / f"{sample}.sylphmpa").read_text()
+
+
+@pytest.mark.parametrize("sample", [sample["name"] for sample in CASES["samples"]])
+def test_server_taxprof_payload_matches_golden(rows: list[dict], sample: str) -> None:
+    """The `/profile` `taxprof` helper (used by the server) is byte-identical too."""
+    row_set = next(s for s in rows if s["name"] == sample)
+    payload = build_taxprof(
+        sample, ("tax",), row_set["rows"], tax_sources=SOURCE_NAMES
+    )
+    assert payload["tax"]["sylphmpa"] == (DATA / f"{sample}.sylphmpa").read_text()
 
 
 def test_golden_annotated_hosts(rows: list[dict]) -> None:

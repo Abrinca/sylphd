@@ -431,9 +431,16 @@ def sketch_contigs(
     """Yield one :class:`Contig` per record, each sketched as its own sample.
 
     The sample name is the first word of the record header (``dnaio``'s
-    ``id``), validated by :func:`check_sample_name`; repeated ids are
-    suffixed by :func:`unique_contig_name`.  Records shorter than
-    ``min_length`` are yielded without a sketch.
+    ``id``), validated by :func:`check_sample_name`; repeated ids of *sketched*
+    records are suffixed by :func:`unique_contig_name`.  Records shorter than
+    ``min_length`` are yielded with no name bookkeeping at all (their ``name``
+    is the raw record id or ``contig-<index>``): they are never sent, so they
+    need neither uniqueness nor an entry in the growing ``counts``/``used``
+    sets.  That keeps memory flat for FASTQ input with millions of short reads,
+    where only a handful of records may ever be sketched.  The same applies to
+    per-record objects: this generator yields one :class:`Contig` per record
+    (the caller decides what to keep), but the name-tracking state is bounded
+    by the number of *sent* records.
 
     The file is streamed and only one record is sketched at a time, so memory
     is bounded by the largest record plus the bookkeeping the caller keeps
@@ -454,13 +461,20 @@ def sketch_contigs(
                     if length
                     else 0.0
                 )
-                name = unique_contig_name(record.id, counts, used, index)
+                # Validate the raw id for every record (a broken header is an
+                # input error whatever its length), but allocate a unique name
+                # only for the records that are actually sketched and sent.
+                if not record.id or not record.id.strip():
+                    name = f"contig-{index}"
+                else:
+                    name = record.id
                 try:
                     check_sample_name(name)
                 except InputError as error:
                     raise InputError(f"record #{index}: {error}") from error
                 sketch = contig_kmers = None
                 if length and length >= min_length:
+                    name = unique_contig_name(record.id, counts, used, index)
                     sketch = sketcher.sketch_single(name, [sequence])
                     # The genome-style count is the exact denominator of the
                     # contig-relative ANI: the sample sketch keeps every

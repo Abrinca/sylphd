@@ -72,9 +72,13 @@ class TestBasics:
         assert info["pysylph_version"]
         assert info["python_version"].startswith("3.")
         # The accepted params of every POST endpoint, derived from the validators.
-        assert info["params"]["/profile"] == info["params"]["/query"]
+        assert info["params"]["/profile"] == [
+            *info["params"]["/query"],
+            "taxprof",
+        ]
         assert "estimate_read_counts" in info["params"]["/profile"]
         assert "tax_sources" in info["params"]["/profile"]
+        assert "taxprof" not in info["params"]["/query"]
         assert set(info["params"]["/contigs"]) == {
             "contigs",
             "top",
@@ -127,6 +131,91 @@ class TestProfileQuery:
         assert rows[0]["Taxonomic_abundance"] == pytest.approx(100.0)
         assert rows[0]["Sequence_abundance"] == pytest.approx(100.0)
         assert rows[0]["kmers_reassigned"] == 0
+
+    def test_taxprof_returns_clades_and_sylphmpa(self, tiny_database, tiny_metadata) -> None:
+        """`taxprof` aggregates on the server: structured clades + exact text."""
+        from sylphd.taxonomy import aggregate_rows, taxprof_lines
+
+        app = create_app(
+            ServerConfig(db_path=tiny_database, meta_path=tiny_metadata)
+        )
+        sketch = pysylph.Sketcher(c=200, k=31).sketch_single(
+            "clodf13", _reads(CLODF13_FASTA)
+        ).to_bytes()
+        with TestClient(app) as test_client:
+            response = _post(
+                test_client,
+                "profile",
+                [("clodf13", sketch)],
+                names=["clodf13"],
+                taxprof=["gtdb"],
+            )
+        assert response.status_code == 200
+        sample = response.json()[0]
+        payload = sample["taxprof"]["gtdb"]
+        assert payload["taxonomies_used"] == ["gtdb"]
+        assert payload["columns"][0] == "clade_name"
+        assert next(clade["clade_name"] for clade in payload["clades"]) == "d__Bacteria"
+        assert set(payload["clades"][0]) == {
+            "clade_name",
+            "relative_abundance",
+            "sequence_abundance",
+            "ani",
+            "coverage",
+        }
+        expected = "\n".join(
+            taxprof_lines(
+                "clodf13", "gtdb", aggregate_rows(sample["rows"], "gtdb")
+            )
+        ) + "\n"
+        assert payload["sylphmpa"] == expected
+        assert payload["sylphmpa"].startswith(
+            "#SampleID\tclodf13\tTaxonomies_used:['gtdb']\n"
+        )
+
+    def test_taxprof_needs_metadata(self, client: TestClient) -> None:
+        response = _post(
+            client,
+            "profile",
+            [("o157", O157_SKETCH.read_bytes())],
+            taxprof=["gtdb"],
+        )
+        assert response.status_code == 400
+        assert "no metadata database" in response.json()["error"]
+
+    @pytest.mark.parametrize(
+        ("value", "needle"),
+        [
+            ("gtdb", "list of taxonomy names"),
+            (["kraken"], "unknown taxonomy"),
+            (["gtdb", 1], "list of taxonomy names"),
+        ],
+    )
+    def test_taxprof_rejects_unsupported(
+        self, tiny_database, tiny_metadata, value, needle
+    ) -> None:
+        app = create_app(
+            ServerConfig(db_path=tiny_database, meta_path=tiny_metadata)
+        )
+        with TestClient(app) as test_client:
+            response = _post(
+                test_client,
+                "profile",
+                [("o157", O157_SKETCH.read_bytes())],
+                taxprof=value,
+            )
+        assert response.status_code == 400
+        assert needle in response.json()["error"]
+
+    def test_taxprof_is_profile_only(self, client: TestClient) -> None:
+        response = _post(
+            client,
+            "query",
+            [("o157", O157_SKETCH.read_bytes())],
+            taxprof=["gtdb"],
+        )
+        assert response.status_code == 400
+        assert "only available on /profile" in response.json()["error"]
 
     def test_profile_echoes_the_effective_params(self, client: TestClient) -> None:
         response = _post(
