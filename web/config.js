@@ -6,6 +6,6 @@
 //   ask for "local network access" permission when a public site does that).
 // Override per visit with ?api=https://host (e.g. http://127.0.0.1:8765).
 window.SYLPHD_CONFIG = {
-  apiBase: "https://140-238-213-53.sslip.io",
+  apiBase: "https://sylphd.abrinca.com",
   devApiBase: "http://127.0.0.1:8765",
 };

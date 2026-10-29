@@ -38,6 +38,7 @@ die() { log "error: $*"; exit 1; }
 # Recognised keys, all optional except DOMAIN:
 #
 #   DOMAIN=            public name Caddy serves and gets a certificate for
+#                      (several names: comma-separated, quote the value)
 #   SYLPH_DB=          database file name in /srv/sylphd/db
 #   SYLPH_META=        metadata SQLite file name in /srv/sylphd/db
 #   SYLPH_SERVE_ARGS=  site policy flags appended to `sylphd serve`, one
@@ -52,8 +53,10 @@ fi
 DOMAIN=${DOMAIN:-${1:-}}
 [[ -n ${DOMAIN:-} ]] ||
     die "no DOMAIN — pass it as an argument, set DOMAIN=..., or create $HERE/site.env"
-[[ $DOMAIN =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] ||
-    die "DOMAIN does not look like a host name: $DOMAIN"
+# One name, or several separated by commas (e.g. while moving to a new name).
+name_re='[A-Za-z0-9.-]+(:[0-9]+)?'
+[[ $DOMAIN =~ ^$name_re(,\ *$name_re)*$ ]] ||
+    die "DOMAIN does not look like a host name (or a comma-separated list): $DOMAIN"
 
 # ---------------------------------------------------------------------------
 # 1. service account and directory layout

@@ -146,7 +146,9 @@ restart (see above); all releases that were not pruned are still installed.
 
 1. Edit `DOMAIN` in `site.env` on the host (or pass it as an argument), then
    re-run `sudo ./setup-server.sh`. Caddy is restarted, not reloaded: the
-   running process holds the old environment.
+   running process holds the old environment. For a move without downtime list
+   both names, comma-separated and quoted (`DOMAIN="new.example.org,
+   old.example.org"`), republish the page (step 4), then drop the old name.
 2. Caddy obtains a certificate for the new name automatically and keeps the old
    one until it expires.
 3. Re-check `--cors-origin` in `SYLPH_SERVE_ARGS` if the web page moves, and

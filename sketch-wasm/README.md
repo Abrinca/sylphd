@@ -159,7 +159,7 @@ single path.
 ## Browser measurements
 
 Chromium 155 (Playwright), Linux, 16 cores, demo served locally, server =
-`https://140-238-213-53.sslip.io` (sylphd 0.1.1, GTDB r232). Input
+`https://sylphd.abrinca.com` (sylphd 0.1.1, GTDB r232). Input
 `FAM20866/reads.fastq.gz`: 1,550,645,339 bytes gzip, 4,295,587,662 bytes of FASTQ, 254,233
 reads, 2.14 Gbp, mean read length 8.4 kb. Wasm built with `simd128`.
 
