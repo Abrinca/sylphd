@@ -1,0 +1,15 @@
+# One-off check, not part of `cargo test`: compares this crate's seeding with the
+# sylph crate's own `fmh_seeds` / `extract_markers` on random reads.
+#   PATH=<dir with cmake>:$PATH cargo run --release --manifest-path tests/seedcheck/Cargo.toml
+# Needs ref/sylph (branch expose-library-api) checked out, and cmake (zlib-ng).
+[package]
+name = "seedcheck"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+sylph = { path = "../../../ref/sylph" }
+sylph-sketch-wasm = { path = "../.." }
+
+[workspace]

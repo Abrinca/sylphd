@@ -23,9 +23,15 @@ for a non-profit or a commercial organisation; we are happy to talk about it.
 
 ## Your sequences
 
-Uploaded sequences are processed in memory to compute results. They are not stored and their
-contents are not logged. Only sizes, timings and request outcomes may be recorded, to run and
-monitor the service.
+In the **Assembly** and **Reads** modes of the web page, your sequences stay on your computer: they
+are sketched in your browser and only the sketch (k-mer hashes and counts, no sequences) is sent to
+the server, processed in memory and not stored or logged.
+
+The public server runs sketch-only: it does not accept raw sequences at all. A browser that cannot
+make the sketch cannot use the page.
+
+Only sizes, timings and request outcomes may be recorded, to run and monitor the
+service.
 
 ## No warranty, availability
 

@@ -15,7 +15,7 @@
     <div class="wrap">
       <div class="brand">
         <h1><a href="./"><picture class="logo"><source media="(prefers-color-scheme: dark)" srcset="img/sylphd-icon-tile.svg"><img src="img/sylphd-icon.svg" alt="" width="44" height="44"></picture>sylphd</a></h1>
-        <p class="tagline">Find the closest <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a> genomes to a bacterial or archaeal assembly.</p>
+        <p class="tagline">Identify bacterial and archaeal genomes against <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a>: assemblies and sequencing reads.</p>
       </div>
     </div>
   </header>
@@ -40,9 +40,14 @@
         organisation; we are happy to talk about it.</p>
 
       <h3>Your sequences</h3>
-      <p>Uploaded sequences are processed in memory to compute results. They
-        are not stored and their contents are not logged. Only sizes, timings
-        and request outcomes may be recorded, to run and monitor the service.</p>
+      <p>In the <strong>Assembly</strong> and <strong>Reads</strong> modes,
+        your sequences stay on your computer: they are sketched in your browser
+        and only the sketch (k-mer hashes and counts, no sequences) is sent to
+        the server. It is processed in memory and is not stored or logged.</p>
+      <p>The public server runs sketch-only: it does not accept raw sequences
+        at all. A browser that cannot make the sketch cannot use the page.</p>
+      <p>Only sizes, timings and request outcomes may be
+        recorded, to run and monitor the service.</p>
 
       <h3>No warranty, availability</h3>
       <p>The service is provided as-is, without warranty of any kind. We do not

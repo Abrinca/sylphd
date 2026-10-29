@@ -58,16 +58,26 @@ from .limits import (
 from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
 from .paths import SOCKET_MODE, parse_tcp
 from .protocol import ProfileParams, ProtocolError, result_row
-from .sketchcheck import SketchFormatError, validate_sketch_bytes
+from .sketchcheck import SketchFormatError, parse_sketch_header
 from .sketching import sample_name_from_path
 
 #: Maximum number of sketches accepted in one request.
 MAX_SKETCHES = 4096
 
-#: Accepted ``Content-Type`` values of an ``/assembly`` upload.
+#: Accepted ``Content-Type`` values of a raw-sequence ``/assembly`` upload.
 SEQUENCE_CONTENT_TYPES = frozenset(
     {"text/plain", "application/octet-stream", "application/gzip"}
 )
+
+#: ``Content-Type`` of an ``/assembly`` upload that is a precomputed sketch
+#: (the bytes of a ``.sylsp`` file).  Always accepted, with or without
+#: ``--allow-sequences``.
+SKETCH_CONTENT_TYPE = "application/vnd.sylph.sketch"
+
+#: Upper bounds of the informational ``records`` / ``length`` query parameters
+#: that accompany a sketch upload to ``/assembly``.
+MAX_INFO_RECORDS = 10**9
+MAX_INFO_LENGTH = 10**13
 
 #: ``top`` range of ``POST /assembly``.
 MIN_TOP, MAX_TOP = 1, 50
@@ -89,7 +99,8 @@ class ServerConfig:
     max_jobs: int = 2
     max_upload_mb: int = 512
     compute_hash: bool = False
-    #: Serve ``POST /assembly`` (raw sequences instead of sketches).
+    #: Accept raw FASTA/FASTQ uploads on ``POST /assembly``.  Sketch uploads
+    #: to ``/assembly`` need no opt-in: the server never sees sequences then.
     allow_sequences: bool = False
     #: Upload size limit of ``/assembly`` (compressed bytes).
     max_sequence_mb: int = 20
@@ -260,10 +271,7 @@ async def _info(request: Request) -> JSONResponse:
 
 
 def _endpoints(state: Any) -> list[str]:
-    endpoints = ["/health", "/info", "/profile", "/query"]
-    if state.allow_sequences:
-        endpoints.append("/assembly")
-    return endpoints
+    return ["/health", "/info", "/profile", "/query", "/assembly"]
 
 
 def _rate_limit_dict(rate_limit: tuple[int, float] | None) -> dict[str, Any] | None:
@@ -292,23 +300,45 @@ async def _query(request: Request) -> JSONResponse:
 
 
 async def _assembly(request: Request) -> JSONResponse:
-    """Profile one uploaded assembly against the database (opt-in)."""
-    state = request.app.state
-    if not state.allow_sequences:  # route is not registered; safety net only
-        return _error("not found", 404)
+    """Find the closest genomes of one assembly.
 
+    The body is either a precomputed sketch (``Content-Type:
+    application/vnd.sylph.sketch``; always accepted) or raw FASTA/FASTQ, which
+    the server sketches itself (only with ``--allow-sequences``).
+    """
+    state = request.app.state
     content_type = request.headers.get("content-type", "")
     media_type = content_type.split(";", 1)[0].strip().lower()
-    if media_type and media_type not in SEQUENCE_CONTENT_TYPES:
-        return _error(
-            "expected raw FASTA or FASTQ with Content-Type text/plain, "
-            "application/octet-stream or application/gzip",
-            415,
-        )
+    is_sketch = media_type == SKETCH_CONTENT_TYPE
+
+    if not is_sketch:
+        if not state.allow_sequences:
+            return _error(
+                "this server does not accept raw sequences (it was started "
+                "without --allow-sequences); send a sketch with Content-Type "
+                f"{SKETCH_CONTENT_TYPE}",
+                404,
+            )
+        if media_type and media_type not in SEQUENCE_CONTENT_TYPES:
+            return _error(
+                "expected raw FASTA or FASTQ with Content-Type text/plain, "
+                "application/octet-stream or application/gzip, or a sketch "
+                f"with Content-Type {SKETCH_CONTENT_TYPE}",
+                415,
+            )
 
     try:
         top = _query_integer(request, "top", 10, MIN_TOP, MAX_TOP)
         min_ani = _query_float(request, "min_ani", 80.0, *MIN_ANI_RANGE)
+        stats = (
+            {
+                "records": _query_integer(request, "records", None, 0, MAX_INFO_RECORDS),
+                "length": _query_integer(request, "length", None, 0, MAX_INFO_LENGTH),
+                "gc": _query_float(request, "gc", None, 0.0, 100.0),
+            }
+            if is_sketch
+            else None
+        )
     except ValueError as error:
         return _error(str(error), 400)
 
@@ -316,12 +346,16 @@ async def _assembly(request: Request) -> JSONResponse:
     if len(name) > 1024:
         return _error("'name' is too long (max 1024 characters)", 400)
 
-    limit = state.max_sequence_mb * 1024 * 1024
+    # Raw sequences have their own (small) limit; a sketch is bounded by the
+    # general upload limit, which BodyLimitMiddleware already enforces.
+    limit = (
+        state.max_upload_mb if is_sketch else state.max_sequence_mb
+    ) * 1024 * 1024
     declared = request.headers.get("content-length")
     if declared is not None:
         try:
             if int(declared) > limit:
-                return _too_large_response(limit)
+                return _too_large_response(limit, is_sketch)
         except ValueError:
             pass
     chunks: list[bytes] = []
@@ -329,27 +363,41 @@ async def _assembly(request: Request) -> JSONResponse:
     async for chunk in request.stream():
         received += len(chunk)
         if received > limit:
-            return _too_large_response(limit)
+            return _too_large_response(limit, is_sketch)
         chunks.append(chunk)
     payload = b"".join(chunks)
     if not payload:
-        return _error("empty sequence upload", 400)
+        return _error("empty sketch upload" if is_sketch else "empty sequence upload", 400)
 
     start = time.perf_counter()
     try:
         async with state.jobs.slot():
-            result = await anyio.to_thread.run_sync(
-                _run_assembly,
-                state.database,
-                state.metadata,
-                name,
-                payload,
-                top,
-                min_ani,
-                limit,
-            )
+            if is_sketch:
+                result = await anyio.to_thread.run_sync(
+                    _run_assembly_sketch,
+                    state.database,
+                    state.metadata,
+                    name,
+                    payload,
+                    top,
+                    min_ani,
+                    stats,
+                )
+            else:
+                result = await anyio.to_thread.run_sync(
+                    _run_assembly,
+                    state.database,
+                    state.metadata,
+                    name,
+                    payload,
+                    top,
+                    min_ani,
+                    limit,
+                )
     except QueueFullError:
         return _busy()
+    except BadRequest as error:
+        return _error(str(error), 400)
     except SequenceTooLarge as error:
         return _error(str(error), 413)
     except SequenceError as error:
@@ -379,15 +427,16 @@ async def _assembly(request: Request) -> JSONResponse:
     )
 
 
-def _too_large_response(limit: int) -> JSONResponse:
+def _too_large_response(limit: int, is_sketch: bool = False) -> JSONResponse:
+    kind = "upload" if is_sketch else "sequence"
     return _error(
-        f"request body exceeds the {limit // (1024 * 1024)} MB sequence limit", 413
+        f"request body exceeds the {limit // (1024 * 1024)} MB {kind} limit", 413
     )
 
 
 def _query_integer(
-    request: Request, key: str, default: int, minimum: int, maximum: int
-) -> int:
+    request: Request, key: str, default: int | None, minimum: int, maximum: int
+) -> Any:
     raw = request.query_params.get(key)
     if raw is None or raw == "":
         return default
@@ -401,8 +450,8 @@ def _query_integer(
 
 
 def _query_float(
-    request: Request, key: str, default: float, minimum: float, maximum: float
-) -> float:
+    request: Request, key: str, default: float | None, minimum: float, maximum: float
+) -> Any:
     raw = request.query_params.get(key)
     if raw is None or raw == "":
         return default
@@ -434,6 +483,84 @@ def _run_assembly(
 
     sketcher = pysylph.Sketcher(c=database.c, k=database.k)
     sketch = sketcher.sketch_single(name, list(parsed.sequences))
+    result = _assembly_hits(database, metadata, sketch, top, min_ani)
+    result["query"] = {
+        "name": name,
+        "records": parsed.records,
+        "length": parsed.length,
+        "gc": parsed.gc,
+        "sketch_kmers": len(sketch.kmer_counts),
+        "input": "sequence",
+    }
+    return result
+
+
+def _run_assembly_sketch(
+    database: LoadedDatabase,
+    metadata: MetadataDB | None,
+    name: str,
+    payload: bytes,
+    top: int,
+    min_ani: float,
+    stats: dict[str, Any],
+) -> dict[str, Any]:
+    """Profile a precomputed assembly sketch.  Runs in a worker thread.
+
+    The sketch is validated exactly like ``/profile`` uploads; everything after
+    that is shared with the raw-sequence path.  The server cannot know the
+    number of records, the length or the GC content of an assembly it never
+    saw, so those come from the optional (informational) query parameters of
+    the client, else ``null``.
+    """
+    sketch, header = _decode_sketch(database, name, payload)
+    result = _assembly_hits(database, metadata, sketch, top, min_ani)
+    result["query"] = {
+        "name": name,
+        "records": stats["records"],
+        "length": stats["length"],
+        "gc": stats["gc"],
+        "sketch_kmers": header.kmer_count,
+        "input": "sketch",
+    }
+    return result
+
+
+def _decode_sketch(
+    database: LoadedDatabase, name: str, payload: bytes
+) -> tuple[Any, Any]:
+    """Validate sketch bytes against the database and decode them.
+
+    Checks the fixed header before decoding: sylph's deserializer allocates
+    from the k-mer count prefix, and a huge count aborts the whole process.
+    This also lets a c/k mismatch be rejected without deserializing anything.
+    """
+    try:
+        header = parse_sketch_header(payload)
+    except SketchFormatError as error:
+        raise BadRequest(f"sample {name!r}: not a valid sample sketch ({error})") from error
+    if header.k != database.k:
+        raise BadRequest(
+            f"sample {name!r}: sketch k={header.k} does not match the database k={database.k}"
+        )
+    if header.c > database.c:
+        raise BadRequest(
+            f"sample {name!r}: sketch c={header.c} is sparser than the database c={database.c}"
+        )
+    try:
+        sketch = pysylph.SampleSketch.from_bytes(payload)
+    except (ValueError, OSError) as error:
+        raise BadRequest(f"sample {name!r}: not a valid sample sketch ({error})") from error
+    return sketch, header
+
+
+def _assembly_hits(
+    database: LoadedDatabase,
+    metadata: MetadataDB | None,
+    sketch: Any,
+    top: int,
+    min_ani: float,
+) -> dict[str, Any]:
+    """Query ``sketch`` (naive ANI), join metadata and classify the hits."""
     profiler = pysylph.Profiler(
         database.db,
         no_adjust=True,
@@ -472,18 +599,7 @@ def _run_assembly(
         hits.append(row)
 
     assignment, closest = classify_hits(hits)
-    return {
-        "assignment": assignment,
-        "closest": closest,
-        "query": {
-            "name": name,
-            "records": parsed.records,
-            "length": parsed.length,
-            "gc": parsed.gc,
-            "sketch_kmers": len(sketch.kmer_counts),
-        },
-        "hits": hits,
-    }
+    return {"assignment": assignment, "closest": closest, "hits": hits}
 
 
 async def _handle(request: Request, mode: str) -> JSONResponse:
@@ -618,25 +734,7 @@ def _run_sample(
     hide_ani_ci: bool = False,
 ) -> dict[str, Any]:
     """Deserialize, validate and profile one sketch.  Runs in a worker thread."""
-    # Check the fixed header before decoding: sylph's deserializer allocates
-    # from the k-mer count prefix, and a huge count aborts the whole process.
-    # This also lets us reject a c/k mismatch without deserializing anything.
-    try:
-        c, k = validate_sketch_bytes(payload)
-    except SketchFormatError as error:
-        raise BadRequest(f"sample {name!r}: not a valid sample sketch ({error})") from error
-    if k != database.k:
-        raise BadRequest(
-            f"sample {name!r}: sketch k={k} does not match the database k={database.k}"
-        )
-    if c > database.c:
-        raise BadRequest(
-            f"sample {name!r}: sketch c={c} is sparser than the database c={database.c}"
-        )
-    try:
-        sketch = pysylph.SampleSketch.from_bytes(payload)
-    except (ValueError, OSError) as error:
-        raise BadRequest(f"sample {name!r}: not a valid sample sketch ({error})") from error
+    sketch, _ = _decode_sketch(database, name, payload)
 
     profiler = pysylph.Profiler(database.db, **params.profiler_kwargs())
     results = profiler.profile(sketch) if mode == "profile" else profiler.query(sketch)
@@ -742,9 +840,8 @@ def create_app(
         Route("/info", _info, methods=["GET"]),
         Route("/profile", _profile, methods=["POST"]),
         Route("/query", _query, methods=["POST"]),
+        Route("/assembly", _assembly, methods=["POST"]),
     ]
-    if config.allow_sequences:
-        routes.append(Route("/assembly", _assembly, methods=["POST"]))
     app = Starlette(
         routes=routes,
         exception_handlers={
@@ -774,9 +871,7 @@ def create_app(
         app.add_middleware(
             RateLimitMiddleware,
             limiter=RateLimiter(count, window),
-            paths=frozenset(("/profile", "/query")) | (
-                {"/assembly"} if config.allow_sequences else set()
-            ),
+            paths=frozenset(("/profile", "/query", "/assembly")),
             trusted=frozenset(config.trusted_proxies),
         )
     if config.cors_origins:

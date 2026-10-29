@@ -11,7 +11,7 @@ authentication; see the [security notes](security.md).
 | `/info` | GET | database, metadata, limits and endpoints |
 | `/query` | POST | ANI hits of uploaded sketches |
 | `/profile` | POST | taxonomic profile of uploaded sketches |
-| `/assembly` | POST | closest genomes of one raw assembly (only with `--allow-sequences`) |
+| `/assembly` | POST | closest genomes of one assembly, sent as a sketch (always) or as raw sequence (only with `--allow-sequences`) |
 
 `/health` and `/info` are always served. The abuse limits (`--rate-limit`, `--max-queue`) apply to
 the three POST endpoints only. With `curl` over a Unix socket:
@@ -89,29 +89,49 @@ and `ANI_5-95_percentile` is `null`: the interval still describes the disabled a
 
 ## `POST /assembly` { #post-assembly }
 
-Only available with `--allow-sequences`; otherwise it is a 404. The body is **one assembly**, raw
-FASTA or FASTQ, plain or gzip. The gzip magic bytes (`\x1f\x8b`) select decompression; the
-`Content-Type` header is otherwise informational, but must be one of:
+Finds the closest database genomes of **one assembly**. The body is either
 
-```text
-Content-Type: text/plain | application/octet-stream | application/gzip
-```
+* a **sketch** of the assembly: the raw bytes of a `pysylph.SampleSketch` (a `.sylsp` file), with
 
-(a missing `Content-Type` is accepted). All records of the body form one sample. Only the bases
-`A C G T N` are allowed.
+    ```text
+    Content-Type: application/vnd.sylph.sketch
+    ```
+
+    This is always available, with or without `--allow-sequences`: the server never sees a
+    sequence. The web app (in the browser) and `sylphd assembly` (on the command line) send this.
+    The sketch is made with the database's `c` and `k` (`/info` reports them), as one single-end
+    sample whose "reads" are the assembly's records. It is validated like the sketches of
+    `/profile` (header check before decoding, `k` must equal the database's, `c` must not be
+    sparser), and bounded by the general `--max-upload-mb`, not by `--max-sequence-mb`; or
+
+* **raw FASTA or FASTQ**, plain or gzip, which the server sketches itself. Only with
+  `--allow-sequences`, otherwise a `404` whose message says so. The gzip magic bytes (`\x1f\x8b`)
+  select decompression; the `Content-Type` header is otherwise informational, but must be one of:
+
+    ```text
+    Content-Type: text/plain | application/octet-stream | application/gzip
+    ```
+
+    (a missing `Content-Type` is accepted). All records of the body form one sample. Only the bases
+    `A C G T N` are allowed.
+
+Any other `Content-Type` is a `415`. `limits.allow_sequences` in `GET /info` says whether raw
+sequences are accepted.
 
 | Query parameter | Meaning |
 |---|---|
 | `top` | number of hits, 1-50 (default `10`) |
 | `min_ani` | minimum ANI in percent, 70-100 (default `80`) |
 | `name` | query name (default `assembly`, at most 1024 characters) |
+| `records`, `length`, `gc` | sketch uploads only, optional: number of records (integer), total length in bases (integer) and GC percent (0-100) of the assembly, as counted by the client. Purely informational: they are validated and echoed in `query`, never used for the search. Ignored for raw sequences, which the server counts itself |
 
-The server sketches the assembly with the database's `c` and `k`, profiles it with
-`no_adjust=True` and keeps the `top` hits sorted by ANI.
+Both bodies get exactly the same treatment from then on: the server profiles the sketch with
+`no_adjust=True` and keeps the `top` hits sorted by ANI. The same assembly gives the same hits,
+assignment and closest hit whichever way it is sent.
 
 ```json
 {"query": {"name": "assembly", "records": 1, "length": 6013491,
-           "gc": 50.76, "sketch_kmers": 200},
+           "gc": 50.76, "sketch_kmers": 200, "input": "sequence"},
  "database": {"name": "gtdb-r232-c200-dbv2.syl2db", "genomes": 199937,
               "c": 200, "k": 31},
  "params": {"top": 10, "min_ani": 80.0},
@@ -132,6 +152,10 @@ The server sketches the assembly with the database's `c` and `k`, profiles it wi
            "ncbi_organism_name": "Escherichia coli K-12", "...": null}]}
 ```
 
+- **`query.input`** is `"sequence"` or `"sketch"`, how the assembly arrived. For a sketch,
+  `query.records`, `length` and `gc` are the values of the optional query parameters, or `null`
+  when the client did not send them (the server cannot know them); `sketch_kmers` is read from the
+  sketch.
 - **`ani`** is the naive containment ANI (`no_adjust=True`). There is no confidence interval: the
   coverage-adjusted ANI is meaningless for assemblies, see
   [Identifying an assembly](../guides/assembly.md#why-the-ani-is-not-adjusted).
@@ -175,9 +199,9 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 
 | Status | When |
 |---|---|
-| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch; for `/assembly` an empty, malformed or non-`ACGTN` body |
-| `404` | `POST /assembly` without `--allow-sequences` |
-| `413` | the body exceeds `--max-upload-mb`, more than 4096 sketches, or for `/assembly` the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
+| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch; for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, or malformed or non-`ACGTN` raw sequence |
+| `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted) |
+| `413` | the body exceeds `--max-upload-mb`, more than 4096 sketches, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
 | `415` | `/query` and `/profile` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |
 | `429` | rate limited (`--rate-limit`); with `Retry-After` in seconds |
 | `503` | the job queue is full (`--max-queue`); with `Retry-After: 1` |

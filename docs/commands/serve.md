@@ -39,7 +39,7 @@ bytes are rejected. The socket file is removed on shutdown, including on `SIGTER
 |---|---|---|
 | `--max-jobs N` | `2` | profiling jobs running at once; further requests queue |
 | `--max-upload-mb N` | `512` | request body limit in MB |
-| `--max-sequence-mb N` | `20` | `/assembly` upload limit before decompression; gzip bodies are decompressed up to 5× this |
+| `--max-sequence-mb N` | `20` | limit of a *raw-sequence* `/assembly` upload, before decompression; gzip bodies are decompressed up to 5× this. Sketch uploads are limited by `--max-upload-mb` instead |
 | `--max-queue N` | unlimited | requests allowed to wait for a job slot; beyond that the server answers `503` with `Retry-After` |
 | `--rate-limit N/min` | off | per-client limit on `/assembly`, `/profile` and `/query`, for example `10/min`; `N/s` also works. Replies are `429` with `Retry-After` |
 
@@ -52,7 +52,7 @@ All off by default.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--allow-sequences` | off | enable `POST /assembly` (raw FASTA/FASTQ instead of a sketch). Without it the endpoint is a 404 |
+| `--allow-sequences` | off | also accept *raw* FASTA/FASTQ on `POST /assembly`. Without it that endpoint takes sketches only (the web app and `sylphd assembly` sketch locally) and answers raw sequences with a 404, so **the server can never receive a sequence** |
 | `--trusted-proxy IP` | none | peer whose `X-Forwarded-For` header is believed; repeatable. `unix` means a Unix-socket peer. Without it the header is ignored |
 | `--cors-origin ORIGIN` | none | allowed CORS origin; repeatable. `'*'`, a specific origin, or `local` |
 | `--terms-url URL` | none | terms-of-use page, reported as `terms_url` by `/info` |
@@ -68,5 +68,5 @@ only sizes, timings and request outcomes.
 
 ## Endpoints
 
-`GET /`, `GET /health`, `GET /info`, `POST /query`, `POST /profile`, and with `--allow-sequences`
-`POST /assembly`. See the [HTTP API](../reference/http-api.md).
+`GET /`, `GET /health`, `GET /info`, `POST /query`, `POST /profile` and `POST /assembly` (sketches
+always, raw sequences only with `--allow-sequences`). See the [HTTP API](../reference/http-api.md).

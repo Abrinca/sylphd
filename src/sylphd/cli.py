@@ -36,6 +36,7 @@ from .sketching import (
     build_sample_inputs,
     check_sketch,
     sample_name_from_path,
+    sketch_assembly,
     sketch_sample,
 )
 from .taxonomy import (
@@ -181,7 +182,7 @@ def _log_startup(
     kind = "two-stage" if database.two_stage else "plain"
     extras = [f"max-jobs={config.max_jobs}", f"max-upload={config.max_upload_mb} MB"]
     if config.allow_sequences:
-        extras.append(f"assembly={config.max_sequence_mb} MB")
+        extras.append(f"raw-sequence-assembly={config.max_sequence_mb} MB")
     if config.max_queue is not None:
         extras.append(f"max-queue={config.max_queue}")
     if config.rate_limit is not None:
@@ -250,18 +251,21 @@ def cmd_info(args: argparse.Namespace) -> int:
         f"max-sketches {limits.get('max_sketches')}"
     )
     rate_limit = limits.get("rate_limit")
-    if limits.get("allow_sequences") or rate_limit or limits.get("max_queue") is not None:
-        rate = (
-            "off"
-            if not rate_limit
-            else f"{rate_limit['count']}/{int(rate_limit['window_seconds'])}s"
-        )
-        print(
-            f"web: assembly {'on' if limits.get('allow_sequences') else 'off'}"
-            f" (max {limits.get('max_sequence_mb')} MB), "
-            f"rate-limit {rate}, "
-            f"max-queue {limits.get('max_queue') if limits.get('max_queue') is not None else 'unlimited'}"
-        )
+    rate = (
+        "off"
+        if not rate_limit
+        else f"{rate_limit['count']}/{int(rate_limit['window_seconds'])}s"
+    )
+    sequences = (
+        f"on (max {limits.get('max_sequence_mb')} MB)"
+        if limits.get("allow_sequences")
+        else "off"
+    )
+    print(
+        f"web: raw-sequence assembly {sequences}, "
+        f"rate-limit {rate}, "
+        f"max-queue {limits.get('max_queue') if limits.get('max_queue') is not None else 'unlimited'}"
+    )
     return 0
 
 
@@ -488,23 +492,49 @@ def _write_result(
 
 def cmd_assembly(args: argparse.Namespace) -> int:
     path = Path(args.file)
-    try:
-        payload = path.read_bytes()
-    except OSError as error:
-        _print_error(f"cannot read {path}: {error}")
-        return 1
     name = args.name or sample_name_from_path(path.name)
-    content_type = (
-        "application/gzip" if payload[:2] == b"\x1f\x8b" else "application/octet-stream"
-    )
     with _client_from_args(args) as client:
-        result = client.assembly(
-            payload,
-            top=args.top,
-            min_ani=args.min_ani,
-            name=name,
-            content_type=content_type,
-        )
+        if args.local_sketch:
+            # The assembly is sketched here and only the sketch is uploaded: the sequence
+            # never leaves this machine and has no size limit.
+            info = client.info()
+            database = info["database"]
+            sketch, stats = sketch_assembly(
+                path, name, c=int(database["c"]), k=int(database["k"])
+            )
+            payload = sketch.to_bytes()
+            limit = int((info.get("limits") or {}).get("max_upload_mb") or 0) * 1024 * 1024
+            if limit and len(payload) > limit:
+                raise ClientError(
+                    f"the sketch is {len(payload)} bytes, over the server's "
+                    f"{limit // (1024 * 1024)} MB upload limit"
+                )
+            result = client.assembly_sketch(
+                payload,
+                top=args.top,
+                min_ani=args.min_ani,
+                name=name,
+                records=stats.records,
+                length=stats.length,
+                gc=stats.gc,
+            )
+        else:
+            # --no-local-sketch: raw upload, which only servers with --allow-sequences take
+            try:
+                payload = path.read_bytes()
+            except OSError as error:
+                _print_error(f"cannot read {path}: {error}")
+                return 1
+            content_type = (
+                "application/gzip" if payload[:2] == b"\x1f\x8b" else "application/octet-stream"
+            )
+            result = client.assembly(
+                payload,
+                top=args.top,
+                min_ani=args.min_ani,
+                name=name,
+                content_type=content_type,
+            )
     if args.json:
         json.dump(result, sys.stdout, indent=None)
         sys.stdout.write("\n")
@@ -732,14 +762,20 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument(
         "--allow-sequences",
         action="store_true",
-        help="enable POST /assembly (upload raw FASTA/FASTQ instead of sketches)",
+        help=(
+            "also accept raw FASTA/FASTQ on POST /assembly (sketches are always "
+            "accepted there; without this flag the server never sees a sequence)"
+        ),
     )
     serve_parser.add_argument(
         "--max-sequence-mb",
         type=_positive,
         default=20,
         metavar="N",
-        help="maximum /assembly upload in MB, before decompression [default: 20]",
+        help=(
+            "maximum raw-sequence /assembly upload in MB, before decompression "
+            "[default: 20]; sketch uploads use --max-upload-mb"
+        ),
     )
     serve_parser.add_argument(
         "--rate-limit",
@@ -830,6 +866,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     assembly_parser.add_argument(
         "--name", metavar="NAME", help="query name [default: from the file name]"
+    )
+    assembly_parser.add_argument(
+        "--local-sketch",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "sketch the assembly on this machine and upload only the sketch, so the "
+            "sequence never leaves it and has no size limit [default]. "
+            "--no-local-sketch uploads the raw sequence instead, which only servers "
+            "started with --allow-sequences accept"
+        ),
     )
     assembly_parser.add_argument(
         "--json", action="store_true", help="print the raw JSON response"

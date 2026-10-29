@@ -61,18 +61,22 @@ def _post_assembly(client: TestClient, body: bytes, **params):
 
 
 class TestAssemblyDisabled:
-    def test_route_is_absent_by_default(self) -> None:
+    def test_raw_sequences_are_refused_by_default(self) -> None:
         app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE))
         with TestClient(app) as test_client:
             response = test_client.post(
                 "/assembly", content=_raw_fasta(), headers={"content-type": "text/plain"}
             )
             assert response.status_code == 404
-            assert "error" in response.json()
+            assert "--allow-sequences" in response.json()["error"]
+            # no content type at all is a sequence upload too
+            assert test_client.post("/assembly", content=_raw_fasta()).status_code == 404
             info = test_client.get("/info").json()
             assert info["limits"]["allow_sequences"] is False
-            assert "/assembly" not in info["endpoints"]
-            assert "/assembly" not in test_client.get("/").json()["endpoints"]
+            assert info["limits"]["max_sequence_mb"] is None
+            # the endpoint exists for sketches (see tests/test_assembly_sketch.py)
+            assert "/assembly" in info["endpoints"]
+            assert "/assembly" in test_client.get("/").json()["endpoints"]
 
 
 class TestAssemblyUpload:

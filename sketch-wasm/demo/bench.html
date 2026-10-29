@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>gunzip benchmark</title>
+<p>Decompression-only throughput in a worker: file read alone, <code>DecompressionStream</code>, <code>WasmGunzip</code> (zlib-rs).
+Pick a .gz file.</p>
+<input id="f" type="file"> <pre id="out"></pre>
+<script type="module">
+const worker = new Worker('./bench-worker.js', { type: 'module' });
+const module = await WebAssembly.compileStreaming(fetch('./pkg/sylph_sketch_bg.wasm'));
+window.__bench = null;
+worker.onmessage = ({ data }) => {
+  document.getElementById('out').textContent += data.line + '\n';
+  if (data.done) window.__bench = data.results;
+};
+document.getElementById('f').addEventListener('change', (e) => {
+  document.getElementById('out').textContent = '';
+  worker.postMessage({ module, file: e.target.files[0] });
+});
+</script>

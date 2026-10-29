@@ -4,6 +4,37 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Web page: Reads mode.** The page now has two equal modes, *Assembly* and *Reads* (hash routes
+  `#assembly` and `#reads`, a landing page and a tab bar). In Reads mode FASTQ/FASTA reads (plain
+  or gzip; single-end, paired or interleaved) are sketched in the browser with a WebAssembly build
+  of the sylph sketcher (`sketch-wasm/`) and only the sketch is uploaded to `POST /profile`. The
+  results show an abundance chart per rank (GTDB or NCBI taxonomy), a sortable genome table and
+  downloads (TSV, JSON, `.sylphmpa`, `.sylsp`). See *Profiling reads in the browser* in the docs.
+- The Pages workflow and `scripts/preview-pages.sh` build the WebAssembly sketcher into
+  `web/wasm/` (not committed).
+- **Assemblies are sketched locally too.** `POST /assembly` accepts a precomputed sketch
+  (`Content-Type: application/vnd.sylph.sketch`, the bytes of a `.sylsp`), validated like
+  `/profile` sketches and bounded by `--max-upload-mb`, with optional informational `records`,
+  `length` and `gc` query parameters. It always works, so a server started without
+  `--allow-sequences` can never receive a sequence (the public instance runs that way). The
+  response gains `query.input` (`sketch` or `sequence`).
+- **Web page, Assembly mode**: sketches in the browser (any size, no 20 MB limit) and sends only the
+  sketch, with a *sketched locally* badge on the result. There is no raw-upload path in the page:
+  a browser that cannot run the sketcher gets a notice (the public instance is sketch-only).
+- **`sylphd assembly`** sketches locally by default; `--no-local-sketch` uploads the raw sequence
+  to servers started with `--allow-sequences`.
+
+### Changed
+
+- `--allow-sequences` now only gates *raw sequence* uploads to `/assembly`; the endpoint itself is
+  always served (`/info` lists `/assembly` in `endpoints`). Without the flag a raw upload is still a
+  404, now with an explanatory message. `--max-sequence-mb` applies to raw sequences only.
+- The rate limit covers `/assembly` on every server.
+
 ## [0.1.1] - 2026-10-28
 
 ### Added

@@ -2,8 +2,9 @@
 
 The client speaks HTTP over a Unix socket (default), TCP, or an ``http://`` /
 ``https://`` base URL.  Sketches are made locally with the database's
-``c``/``k``; ``/assembly`` is the exception and sends raw sequences, because the
-server does the sketching there.
+``c``/``k``.  ``/assembly`` takes either such a sketch (``assembly_sketch``,
+the default of ``sylphd assembly``: the sequence never leaves the machine) or
+raw sequences (``assembly``, only if the server runs with ``--allow-sequences``).
 """
 
 from __future__ import annotations
@@ -17,6 +18,9 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from .protocol import ProfileParams
+
+#: ``Content-Type`` of an ``/assembly`` body that is a sketch (see the server).
+SKETCH_CONTENT_TYPE = "application/vnd.sylph.sketch"
 
 
 def normalize_base_url(url: str) -> str:
@@ -142,11 +146,58 @@ class SylphClient:
         min_ani: float = 80.0,
         name: str | None = None,
         content_type: str = "application/octet-stream",
+        extra_params: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Send one raw FASTA/FASTQ assembly to ``POST /assembly``."""
+        """Send one raw FASTA/FASTQ assembly to ``POST /assembly``.
+
+        The server must run with ``--allow-sequences``.
+        """
+        return self._assembly(
+            payload, top=top, min_ani=min_ani, name=name, content_type=content_type,
+            extra_params=extra_params,
+        )
+
+    def assembly_sketch(
+        self,
+        sketch: bytes,
+        *,
+        top: int = 10,
+        min_ani: float = 80.0,
+        name: str | None = None,
+        records: int | None = None,
+        length: int | None = None,
+        gc: float | None = None,
+    ) -> dict[str, Any]:
+        """Send the sketch (``.sylsp`` bytes) of one assembly to ``POST /assembly``.
+
+        Works on every server.  ``records``, ``length`` and ``gc`` are
+        informational: the server echoes them in ``query`` since it never sees
+        the sequence.
+        """
+        extra = {
+            key: value
+            for key, value in (("records", records), ("length", length), ("gc", gc))
+            if value is not None
+        }
+        return self._assembly(
+            sketch, top=top, min_ani=min_ani, name=name,
+            content_type=SKETCH_CONTENT_TYPE, extra_params=extra,
+        )
+
+    def _assembly(
+        self,
+        payload: bytes,
+        *,
+        top: int,
+        min_ani: float,
+        name: str | None,
+        content_type: str,
+        extra_params: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {"top": top, "min_ani": min_ani}
         if name:
             params["name"] = name
+        params.update(extra_params or {})
         response = self._request(
             "POST",
             "assembly",

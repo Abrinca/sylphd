@@ -5,8 +5,9 @@
 resident. Clients sketch their samples locally and send only the sketches, then get ANI hits or
 taxonomic profiles back as TSV or JSON, joined with GTDB metadata.
 
-A [web app](https://abrinca.github.io/sylphd/) built on the same server finds the closest GTDB
-genomes of a pasted assembly, with no install.
+A [web app](https://abrinca.github.io/sylphd/) built on the same server needs no install and has two
+modes: it finds the closest GTDB genomes of an assembly, and it profiles sequencing reads. Both are
+sketched [in your browser](guides/profiling-in-browser.md), so the sequences never leave your computer.
 
 ## Why a server
 
@@ -26,17 +27,22 @@ flowchart LR
     S -->|"JSON rows"| T["TSV, JSON, .sylphmpa<br/>(written by the client)"]
     DB[("sylph database<br/>.syl2db")] --> S
     MD[("metadata<br/>SQLite")] --> S
-    W["web app,<br/>sylphd assembly"] -.->|"raw FASTA"| S
+    B["web app<br/>(sketched in the browser)"] -->|"sketch"| S
+    W["curl, scripts"] -.->|"raw FASTA<br/>(--allow-sequences)"| S
 ```
 
-The `assembly` path is the exception: it sends raw sequences because the server does the sketching.
-It is opt-in (`--allow-sequences`) and exists for the web app.
+Assemblies are sketched locally too (`sylphd assembly`, and the web app in the browser), so a server
+started without `--allow-sequences` (like the public instance) never receives a sequence. The flag
+only adds raw FASTA uploads for scripts.
 
 ## What it does
 
 - **[Profile and query reads](guides/profiling-reads.md).** Single-end, paired, interleaved, several
   files per sample, or ready-made `.sylsp` sketches. Output mirrors sylph's TSV columns plus
   accession and metadata columns.
+- **[Profile reads in the browser](guides/profiling-in-browser.md).** Drop FASTQ files on the web
+  page: they are sketched locally (WebAssembly) and only the sketch is uploaded. Abundance by rank,
+  GTDB or NCBI taxonomy, downloads.
 - **[Identify an assembly](guides/assembly.md).** The closest GTDB genomes, a species assignment at
   95 % ANI and the lineage relation of every hit.
 - **[Taxonomic profiles](guides/taxonomic-profiles.md).** `.sylphmpa` files and clade × sample

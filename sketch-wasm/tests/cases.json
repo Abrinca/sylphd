@@ -1,0 +1,149 @@
+[
+ {
+  "name": "k12_single",
+  "kind": "single",
+  "files": [
+   "tests/data/k12.R1.fq.gz"
+  ]
+ },
+ {
+  "name": "k12_single_nodedup",
+  "kind": "single",
+  "files": [
+   "tests/data/k12.R1.fq.gz"
+  ],
+  "deduplicate": false
+ },
+ {
+  "name": "k12_single_c100_k21",
+  "kind": "single",
+  "files": [
+   "tests/data/k12.R1.fq.gz"
+  ],
+  "c": 100,
+  "k": 21
+ },
+ {
+  "name": "k12_paired",
+  "kind": "paired",
+  "files": [
+   "tests/data/k12.R1.fq.gz",
+   "tests/data/k12.R2.fq.gz"
+  ]
+ },
+ {
+  "name": "k12_paired_nodedup",
+  "kind": "paired",
+  "files": [
+   "tests/data/k12.R1.fq.gz",
+   "tests/data/k12.R2.fq.gz"
+  ],
+  "deduplicate": false
+ },
+ {
+  "name": "clodf13_fasta",
+  "kind": "single",
+  "files": [
+   "tests/data/clodf13.fna.gz"
+  ]
+ },
+ {
+  "name": "sim_single",
+  "kind": "single",
+  "synth": true,
+  "files": [
+   "sketch-wasm/target/synth/sim_R1.fq"
+  ]
+ },
+ {
+  "name": "sim_single_nodedup",
+  "kind": "single",
+  "synth": true,
+  "deduplicate": false,
+  "files": [
+   "sketch-wasm/target/synth/sim_R1.fq"
+  ]
+ },
+ {
+  "name": "sim_paired",
+  "kind": "paired",
+  "synth": true,
+  "files": [
+   "sketch-wasm/target/synth/sim_R1.fq",
+   "sketch-wasm/target/synth/sim_R2.fq"
+  ]
+ },
+ {
+  "name": "sim_paired_k21_c50",
+  "kind": "paired",
+  "synth": true,
+  "c": 50,
+  "k": 21,
+  "files": [
+   "sketch-wasm/target/synth/sim_R1.fq",
+   "sketch-wasm/target/synth/sim_R2.fq"
+  ]
+ },
+ {
+  "name": "k12_single_rawgz",
+  "kind": "single",
+  "raw_gz": true,
+  "files": [
+   "tests/data/k12.R1.fq.gz"
+  ]
+ },
+ {
+  "name": "k12_paired_rawgz",
+  "kind": "paired",
+  "raw_gz": true,
+  "files": [
+   "tests/data/k12.R1.fq.gz",
+   "tests/data/k12.R2.fq.gz"
+  ]
+ },
+ {
+  "name": "k12_twice_multimember_rawgz",
+  "kind": "single",
+  "raw_gz": true,
+  "synth": true,
+  "files": [
+   "sketch-wasm/target/synth/k12_twice.fq.gz"
+  ]
+ },
+ {
+  "name": "k12_bgzf_like_rawgz",
+  "kind": "single",
+  "raw_gz": true,
+  "synth": true,
+  "files": [
+   "sketch-wasm/target/synth/k12_bgzf_like.fq.gz"
+  ]
+ },
+ {
+  "name": "sim_paired_rawgz",
+  "kind": "paired",
+  "raw_gz": true,
+  "synth": true,
+  "files": [
+   "sketch-wasm/target/synth/sim_R1.fq.gz",
+   "sketch-wasm/target/synth/sim_R2.fq.gz"
+  ]
+ },
+ {
+  "name": "fam20866_ont_rawgz",
+  "kind": "single",
+  "big": true,
+  "raw_gz": true,
+  "files": [
+   "/home/thomas/Projects/mindtherest/data/ont/FAM20866/reads.fastq.gz"
+  ]
+ },
+ {
+  "name": "fam20866_ont",
+  "kind": "single",
+  "big": true,
+  "files": [
+   "/home/thomas/Projects/mindtherest/data/ont/FAM20866/reads.fastq.gz"
+  ]
+ }
+]
