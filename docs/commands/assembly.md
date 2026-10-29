@@ -33,17 +33,22 @@ for MAG contamination checks; see [Per-contig mode](#per-contig-mode).
 | `-o, --output FILE` | stdout | write the output here |
 | `-q, --quiet` | off | do not print the summary or caveat on stderr |
 
-The table has the columns `rank`, `ani`, `relation`, `shared_rank`, `accession`, `taxon`,
-`gtdb_species`, `taxonomy_source`, `ncbi_organism_name` and `ncbi_taxid`. `taxon` is the finest
-taxon the hit's lineage names (GTDB's species for a GTDB hit, a vOTU for UHGV, a species for fungal
-RefSeq), `taxonomy_source` the source that named it, and `gtdb_species` stays GTDB-only. A summary
+The table has the columns `rank`, `ani`, `relation`, `shared_rank`, `accession`, `genome_id`,
+`taxon`, `gtdb_species`, `taxonomy_source`, `ncbi_organism_name` and `ncbi_taxid`. `taxon` is the
+finest taxon the hit's lineage names (GTDB's species for a GTDB hit, a vOTU for UHGV, a species for
+fungal RefSeq), `taxonomy_source` the source that named it, and `gtdb_species` stays GTDB-only.
+`genome_id` is what identifies the genome when `accession` is empty: the taxonomy key a sylph-tax
+source resolved, else the first contig id, else the genome file (UHGV stores every genome in
+`votus_full.fna.gz`, so the file name identifies nothing). A summary
 line on stderr says whether the query was assigned to a species (`assigned to species ...
 (99.53 % ANI)`) or only has a closest relative (`no species-level match (< 95 % ANI); closest
 relative ...`). `--quiet` suppresses that line; `--json` never prints it.
 
 When the best hit is **not from GTDB** — a UHGV, fungal RefSeq or MAG database — a second line
-follows the summary, once per run: `sylphd: warning: viruses (UHGV): 95 % ANI matches the vOTU
-convention ...` or the fungal/generic wording. The same text is the `note` of the JSON `assignment`
+follows the summary, once per run: `sylphd: warning: UHGV_default (viruses): 95 % ANI matches the
+vOTU convention ...` or the fungal/generic wording, naming the actual taxonomy source (so
+`UHGV_ictv` and `FungiRefSeq-latest` appear as themselves). The same text is the `note` of the JSON
+`assignment`
 (or `closest`), and the summary then reads `assigned to <taxon> at the 95 % species threshold`
 instead of `assigned to species <taxon>`, because the taxon is the source's last named rank (an
 ICTV genus, a vOTU, a fungal species). The 95 % threshold itself does not change per source; see
@@ -141,8 +146,8 @@ The TSV has one row per contig and hit (and one row for a contig that has none),
 columns followed by the metadata columns selected by `--fields`:
 
 ```text
-contig  contig_length  gc     status  rank  ani    shared_kmers  contig_kmers  explained_fraction  reference_ani  relation      shared_rank  ani_species_level  accession        gtdb_species      taxon             n_close  consensus_rank  consensus_taxon
-contig1 1954431        50.76  ok      1     99.12  6398          8413          0.7605              96.16          same species  species      true               GCA_000005845.2  Escherichia coli  Escherichia coli  2        family          Enterobacteriaceae
+contig  contig_length  gc     status  rank  ani    shared_kmers  contig_kmers  explained_fraction  reference_ani  relation      shared_rank  ani_species_level  accession        genome_id        gtdb_species      taxon             n_close  consensus_rank  consensus_taxon
+contig1 1954431        50.76  ok      1     99.12  6398          8413          0.7605              96.16          same species  species      true               GCA_000005845.2  GCA_000005845.2  Escherichia coli  Escherichia coli  2        family          Enterobacteriaceae
 contig7 2500           44.10  too_short
 contig8 18000          61.20  no_hit
 ```
@@ -313,8 +318,8 @@ for a contig without hits, otherwise `{"rank", "taxon", "n_close", "species"}` (
 
 Every hit carries `rank`, `ani`, `shared_kmers`, `contig_kmers`, `explained_fraction`,
 `reference_ani`, `reference_containment`, `relation`, `shared_rank`, `ani_species_level`,
-`genome_file`, `accession`, `gtdb_species`, `taxon` and, when it has a lineage, `taxonomy` and
-`taxonomy_source`, and the metadata columns of `--fields` flat in the hit.
+`genome_file`, `genome_id`, `accession`, `gtdb_species`, `taxon` and, when it has a lineage,
+`taxonomy` and `taxonomy_source`, and the metadata columns of `--fields` flat in the hit.
 `params` repeats `top`, `min_ani`, `min_contig_length`, `consensus_ratio`, `consensus_z` and the
 query settings sent to the server. JSON mode never writes to stderr, as in single-assembly mode:
 the summary is in the document, so `--quiet` is only useful in table mode.

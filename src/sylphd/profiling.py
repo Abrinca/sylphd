@@ -33,6 +33,7 @@ import pysylph
 from .assembly import (
     DECOMPRESSION_FACTOR,
     classify_hits,
+    genome_id,
     gunzip_limited,
     is_gzip,
     parse_assembly,
@@ -53,6 +54,11 @@ DEFAULT_PROFILER_CACHE_SIZE = 8
 
 #: Databases loaded at once; both pysylph loaders release the GIL.
 LOAD_WORKERS = 8
+
+#: How many genome names per database are checked against the GTDB metadata to
+#: decide whether the database is a GTDB one (see
+#: :meth:`DatabaseSet.annotate_gtdb`).
+GTDB_SAMPLE_GENOMES = 100
 
 
 class BadRequest(ValueError):
@@ -117,6 +123,11 @@ class LoadedDatabase:
         self.sha256: str | None = None
         if compute_hash:
             self.sha256 = _sha256(self.path)
+        #: Whether a sample of this database's genome names are GTDB
+        #: accessions of the server's metadata file.  Set at startup by
+        #: :meth:`DatabaseSet.annotate_gtdb`; the web panel only says "GTDB
+        #: r<release>" when a loaded database really is GTDB's.
+        self.gtdb = False
 
     def _plain_parameters(self) -> tuple[int, int]:
         """``k`` and the smallest ``c`` over the genomes of a plain database.
@@ -161,6 +172,7 @@ class LoadedDatabase:
         return {
             "name": self.name,
             "file": self.path.name,
+            "kind": "two-stage" if self.two_stage else "plain",
             "path": str(self.path),
             "size": self.size,
             "sha256": self.sha256,
@@ -169,7 +181,31 @@ class LoadedDatabase:
             "k": self.k,
             "screen_c": self.screen_c,
             "two_stage": self.two_stage,
+            "gtdb": self.gtdb,
         }
+
+    def genome_names(self, limit: int) -> list[str]:
+        """Up to ``limit`` genome names, spread evenly over the database.
+
+        Reading a ``.syl2db`` genome decodes a dense sketch, so the check uses
+        a bounded sample rather than every genome; spreading the indices over
+        the file keeps it from seeing only one region of a mixed database.
+        """
+        count = min(limit, self.genomes)
+        if count <= 0:
+            return []
+        indices = sorted({index * self.genomes // count for index in range(count)})
+        return [str(self.db[index].name) for index in indices]
+
+    def serves_gtdb(self, metadata: MetadataDB | None, sample: int) -> bool:
+        """Whether a genome-name sample of this database is GTDB's."""
+        if metadata is None:
+            return False
+        return metadata.contains_accessions(
+            accession
+            for name in self.genome_names(sample)
+            if (accession := accession_from_genome_name(name)) is not None
+        )
 
 
 def _sha256(path: Path) -> str:
@@ -311,6 +347,25 @@ class DatabaseSet:
     def entries(self) -> list[dict[str, Any]]:
         """One entry per database, for ``/info``'s ``databases`` list."""
         return [database.entry() for database in self.databases]
+
+    def annotate_gtdb(
+        self, metadata: MetadataDB | None, sample: int = GTDB_SAMPLE_GENOMES
+    ) -> None:
+        """Mark the databases whose genome names are GTDB accessions.
+
+        ``/info`` uses this so the web page shows ``GTDB r<release>`` only when
+        a loaded database really is a GTDB one: a fungi-only or UHGV-only
+        server may have a GTDB metadata file (for taxonomy lookups) without
+        serving a single GTDB genome.  The check samples genome names, so it is
+        bounded even for a two-stage database that would otherwise decode
+        hundreds of thousands of dense sketches.
+        """
+        if metadata is None:
+            for database in self.databases:
+                database.gtdb = False
+            return
+        for database in self.databases:
+            database.gtdb = database.serves_gtdb(metadata, sample)
 
     # -- requests --------------------------------------------------------
 
@@ -604,6 +659,7 @@ def _assembly_hits(
             record.update(resolved[rank - 1].columns())
         for column in columns:
             row[column] = record.get(column)
+        row["genome_id"] = genome_id(row, contig_name=genome.description)
         hits.append(row)
 
     assignment, closest = classify_hits(hits)
@@ -639,7 +695,7 @@ def run_sample(
         hide_ani_ci=hide_ani_ci,
         tax_sources=tax_sources,
     )
-    return {"name": name, "kind": mode, "rows": rows}
+    return {"name": name, "kind": mode, "rows": rows, "params": params.to_dict()}
 
 
 def run_contig_query(

@@ -12,6 +12,7 @@ from sylphd.assembly import (
     VIRUS_CAVEAT,
     Lineage,
     classify_hits,
+    genome_id,
     parse_gtdb_taxonomy,
     parse_lineage,
     shared_lineage_rank,
@@ -294,7 +295,7 @@ def test_non_gtdb_best_hit_is_assigned_to_the_last_named_rank() -> None:
             "level 5": "vOTU-052719",
         },
         "taxonomy_source": "UHGV_default",
-        "note": VIRUS_CAVEAT,
+        "note": VIRUS_CAVEAT.format(source="UHGV_default"),
     }
     assert closest == assignment
     assert hits[0]["taxonomy"]["level 5"] == "vOTU-052719"
@@ -305,7 +306,7 @@ def test_non_gtdb_best_hit_is_assigned_to_the_last_named_rank() -> None:
 def test_icv_and_imgvr_sources_are_viruses_too() -> None:
     for lineage, source in ((ICTV, "UHGV_ictv"), (UHGV_FAMILY, "IMGVR_4.1")):
         assignment, _ = classify_hits([source_hit(99.0, lineage, source)])
-        assert assignment is not None and assignment["note"] == VIRUS_CAVEAT
+        assert assignment is not None and assignment["note"] == VIRUS_CAVEAT.format(source=source)
 
 
 def test_fungi_get_the_fungal_caveat() -> None:
@@ -314,10 +315,10 @@ def test_fungi_get_the_fungal_caveat() -> None:
     assert assignment is not None
     assert assignment["taxon"] == "Pyricularia oryzae"
     assert assignment["taxonomy"]["kingdom"] == "Eukaryota"
-    assert assignment["note"] == FUNGI_CAVEAT
-    assert closest is not None and closest["note"] == FUNGI_CAVEAT
+    assert assignment["note"] == FUNGI_CAVEAT.format(source="FungiRefSeq-latest")
+    assert closest is not None and closest["note"] == FUNGI_CAVEAT.format(source="FungiRefSeq-latest")
     # k__Fungi identifies a fungal lineage even under another source name
-    assert species_caveat(parse_lineage("k__Fungi;p__X", source="Local")) == FUNGI_CAVEAT
+    assert species_caveat(parse_lineage("k__Fungi;p__X", source="Local")) == FUNGI_CAVEAT.format(source="Local")
 
 
 def test_other_sources_get_the_generic_caveat() -> None:
@@ -332,8 +333,43 @@ def test_below_the_threshold_the_note_is_on_the_closest_hit() -> None:
     hits = [source_hit(90.0, UHGV_FAMILY, "UHGV_default")]
     assignment, closest = classify_hits(hits)
     assert assignment is None
-    assert closest is not None and closest["note"] == VIRUS_CAVEAT
+    assert closest is not None and closest["note"] == VIRUS_CAVEAT.format(source="UHGV_default")
     assert closest["taxon"] == "vOTU-052719"
+
+
+def test_genome_id_prefers_accession_tax_key_then_contig() -> None:
+    """What the web and CLI name a hit by: the UHGV genome file is shared."""
+    assert genome_id({"accession": "GCF_000005845.2", "tax_key": "x"}) == "GCF_000005845.2"
+    assert (
+        genome_id(
+            {
+                "accession": None,
+                "tax_source": "UHGV_default",
+                "tax_key": "UHGV-0320751",
+                "genome_file": "votus_full.fna.gz",
+            }
+        )
+        == "UHGV-0320751"
+    )
+    # a GTDB source never turns the accession into a foreign key
+    assert (
+        genome_id(
+            {
+                "accession": "GCF_000005845.2",
+                "tax_source": "GTDB_r232",
+                "tax_key": "GCF_000005845.2",
+            }
+        )
+        == "GCF_000005845.2"
+    )
+    assert (
+        genome_id(
+            {"accession": None, "Contig_name": "NODE_1 length=100", "genome_file": "g.fna"}
+        )
+        == "NODE_1"
+    )
+    assert genome_id({"accession": None, "genome_file": "g.fna"}) == "g.fna"
+    assert genome_id({"accession": None}) is None
 
 
 def test_hits_of_two_sources_have_no_shared_rank() -> None:

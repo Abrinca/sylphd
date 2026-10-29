@@ -71,6 +71,27 @@ class TestBasics:
         assert info["limits"]["max_jobs"] == 2
         assert info["pysylph_version"]
         assert info["python_version"].startswith("3.")
+        # The accepted params of every POST endpoint, derived from the validators.
+        assert info["params"]["/profile"] == info["params"]["/query"]
+        assert "estimate_read_counts" in info["params"]["/profile"]
+        assert "tax_sources" in info["params"]["/profile"]
+        assert set(info["params"]["/contigs"]) == {
+            "contigs",
+            "top",
+            "min_ani",
+            "consensus_ratio",
+            "consensus_z",
+            "fields",
+            "tax_sources",
+        }
+        assert info["params"]["/assembly"] == [
+            "top",
+            "min_ani",
+            "name",
+            "records",
+            "length",
+            "gc",
+        ]
 
     def test_unknown_route(self, client: TestClient) -> None:
         response = client.get("/nope")
@@ -106,6 +127,28 @@ class TestProfileQuery:
         assert rows[0]["Taxonomic_abundance"] == pytest.approx(100.0)
         assert rows[0]["Sequence_abundance"] == pytest.approx(100.0)
         assert rows[0]["kmers_reassigned"] == 0
+
+    def test_profile_echoes_the_effective_params(self, client: TestClient) -> None:
+        response = _post(
+            client,
+            "profile",
+            [("o157", O157_SKETCH.read_bytes())],
+            names=["o157"],
+            estimate_read_counts=True,
+            minimum_ani=90.0,
+        )
+        assert response.status_code == 200
+        params = response.json()[0]["params"]
+        assert params["estimate_read_counts"] is True
+        assert params["minimum_ani"] == 90.0
+        # defaults are echoed too, so a client need not know them
+        assert params["min_number_kmers"] == 10
+        assert params["min_contain"] == 7
+        assert params["screen_ani"] == 85.0
+        assert params["no_adjust"] is False
+        # /query accepts the same keys and echoes them as well
+        query = _post(client, "query", [("o157", O157_SKETCH.read_bytes())])
+        assert query.json()[0]["params"]["estimate_unknown"] is False
 
     def test_estimate_read_counts(self, client: TestClient) -> None:
         """``estimate_read_counts`` reports read counts and implies ``True_cov``.

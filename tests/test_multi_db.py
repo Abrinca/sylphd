@@ -205,6 +205,28 @@ class TestPooledMatchesPysylph:
         assert entries[0]["screen_c"] == 3000
         assert entries[0]["two_stage"] is True
         assert entries[1]["two_stage"] is False
+        assert [entry["kind"] for entry in entries] == ["two-stage", "plain"]
+        # no metadata file: no database can be shown as GTDB's
+        assert [entry["gtdb"] for entry in entries] == [False, False]
+
+    def test_gtdb_flag_follows_the_genome_names(
+        self, tiny_database: Path, tiny_metadata: Path, tmp_path: Path
+    ) -> None:
+        """A fungi/UHGV database with GTDB metadata is not labelled "GTDB r232"."""
+        with dnaio.open(CLODF13_FASTA) as reader:
+            sequences = [record.sequence for record in reader]
+        # UHGV stores every genome in the same file name, so no GTDB accession
+        genome = pysylph.Sketcher(c=200, k=31).sketch_genome(
+            "votus_full.fna.gz", sequences
+        )
+        other = tmp_path / "uhgv.syldb"
+        pysylph.Database([genome]).dump(str(other))
+        with _app([DatabaseSpec(tiny_database, "tiny"), DatabaseSpec(other, "uhgv")], meta_path=tiny_metadata) as client:
+            entries = client.get("/info").json()["databases"]
+        assert [(entry["name"], entry["gtdb"]) for entry in entries] == [
+            ("tiny", True),
+            ("uhgv", False),
+        ]
 
     def test_single_database_entries_match_database(self) -> None:
         with _app([DatabaseSpec(ECOLI_TWO_STAGE, "gtdb")]) as client:
@@ -213,7 +235,9 @@ class TestPooledMatchesPysylph:
         assert entry["name"] == "gtdb"
         assert entry["file"] == "ecoli.syl2db"
         assert entry["path"] == info["database"]["path"]
-        assert {key: value for key, value in entry.items() if key != "file"} == info["database"]
+        assert {key: value for key, value in entry.items() if key not in {"file", "kind", "gtdb"}} == info["database"]
+        assert entry["kind"] == "two-stage"
+        assert entry["gtdb"] is False  # this server has no metadata file
 
     def test_assembly_uses_the_pooled_view(self) -> None:
         with _app([DatabaseSpec(ECOLI_TWO_STAGE), DatabaseSpec(CLODF13_PLAIN)]) as client:

@@ -16,9 +16,9 @@ Prints what the server reports about itself:
 - the metadata database (path, GTDB release, row count, build date, number of columns) or
   `metadata: none`; when it has taxonomy sources (format 3), `taxonomy sources:` with one line per
   source (name, number of keys, whether it is the virtual GTDB source or an imported file, whether
-  it carries virus hosts, MD5, and `overlaps NAME (n keys)` when the source shares keys with
-  another one — the later-imported source wins for those, see
-  [`setup`](setup.md#import-one-taxonomy-per-database));
+  it carries virus hosts, MD5), then `taxonomy overlaps:` with one line per pair of sources that
+  share keys (`First and Second: 7 shared keys; examples: ...; the source imported later wins`) —
+  see [`setup`](setup.md#import-one-taxonomy-per-database);
 - versions of sylphd, pysylph and Python;
 - limits: jobs, upload size, sketch count, and a `web:` line with the raw-sequence assembly
   (`--allow-sequences`), rate-limit and queue settings.

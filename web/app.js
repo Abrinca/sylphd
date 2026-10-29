@@ -345,6 +345,11 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       const meta = info.metadata || {};
       const dbs = Array.isArray(info.databases) ? info.databases : [];
       const pooled = dbs.length > 1;
+      // Only call the database "GTDB r<release>" when a loaded database really is GTDB's:
+      // a fungi-only server can have GTDB metadata for taxonomy lookups without serving it.
+      // A server older than the `gtdb` field keeps the historical label.
+      const knowsGtdb = dbs.some((d) => d && typeof d.gtdb === 'boolean');
+      const gtdbServed = knowsGtdb ? dbs.some((d) => d.gtdb === true) : !!meta.release;
       setStatus('online', 'Server online');
       const lim = info.limits || {};
       const fact = (label, value, title) => el('span', { class: 'fact', title: title || null },
@@ -355,7 +360,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
         facts.push(fact('Databases', String(dbs.length), dbs.map((d) => d.name).join(', ')));
         if (isNum(db.genomes)) facts.push(fact('Genomes', fmtInt(db.genomes), `Number of reference genomes in all ${dbs.length} databases`));
       } else {
-        facts.push(fact('Database', meta.release ? `GTDB r${meta.release}` : (db.name || '?'), `Reference database: ${db.name || 'unknown'}`));
+        facts.push(fact('Database', gtdbServed && meta.release ? `GTDB r${meta.release}` : (db.name || '?'), `Reference database: ${db.name || 'unknown'}`));
         if (isNum(db.genomes)) facts.push(fact('Genomes', fmtInt(db.genomes), 'Number of reference genomes in the database'));
       }
       if (isNum(db.c) && isNum(db.k)) facts.push(fact('Sketch', `c=${db.c} · k=${db.k}`, 'sylph subsampling rate c and k-mer size k; sketches must match (same k, c no larger than this)'));
@@ -401,7 +406,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       parts.push(el('div', { class: 'sp-group' },
         el('span', { class: 'sp-group-label', text: 'Databases' }),
         el('ul', { class: 'sp-dbs' }, dbs.map((d) => {
-          const kind = /\.syl2db$/i.test(String(d.file || '')) || d.two_stage ? '.syl2db' : '.syldb';
+          const twoStage = d.kind ? d.kind === 'two-stage' : /\.syl2db$/i.test(String(d.file || '')) || d.two_stage;
+          const kind = twoStage ? '.syl2db' : '.syldb';
           return el('li', {
             class: 'sp-db',
             title: `${d.name}${d.file && d.file !== d.name ? ` (${d.file})` : ''}: ${kind === '.syl2db' ? 'two-stage database' : 'plain database'}` +
@@ -413,6 +419,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
           isNum(d.c) && isNum(d.k) ? el('span', { class: 'sp-db-num', text: `c=${d.c} · k=${d.k}` }) : null);
         }))));
     }
+    const meta = (info && info.metadata) || {};
     const sources = info && info.metadata && Array.isArray(info.metadata.taxonomy_sources)
       ? info.metadata.taxonomy_sources.filter((s) => s && typeof s.name === 'string') : [];
     if (sources.length) {
@@ -426,22 +433,20 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
         ].filter(Boolean).join('\n'),
       },
       el('span', { class: 'sp-chip-name', text: s.name }),
-      isNum(s.rows) ? el('span', { class: 'sp-chip-num', text: `${fmtInt(s.rows)} keys` }) : null));
-      const overlapping = sources.filter((s) => s.overlaps && typeof s.overlaps === 'object' && Object.keys(s.overlaps).length);
-      if (overlapping.length) {
-        // the server records both directions of a pair; list each pair once
-        const pairs = new Map();
+      isNum(s.keys) ? el('span', { class: 'sp-chip-num', text: `${fmtInt(s.keys)} keys` }) : null));
+      // The server lists each overlapping pair once, with its shared keys and examples.
+      const overlaps = Array.isArray(meta.taxonomy_overlaps)
+        ? meta.taxonomy_overlaps.filter((p) => p && Array.isArray(p.sources) && p.sources.length === 2) : [];
+      if (overlaps.length) {
         const involved = new Set();
-        for (const s of overlapping) {
-          for (const [other, n] of Object.entries(s.overlaps)) {
-            involved.add(s.name); involved.add(other);
-            const key = [s.name, other].sort().join('\u0000');
-            if (!pairs.has(key)) pairs.set(key, `${s.name} and ${other} share ${fmtInt(n)} keys`);
-          }
-        }
+        for (const p of overlaps) for (const name of p.sources) involved.add(name);
+        const detail = overlaps.map((p) => {
+          const examples = Array.isArray(p.examples) && p.examples.length ? ` (e.g. ${p.examples.slice(0, 5).join(', ')})` : '';
+          return `${p.sources[0]} and ${p.sources[1]} share ${fmtInt(p.keys)} keys${examples}`;
+        }).join('; ');
         chips.push(el('span', {
           class: 'sp-chip sp-chip-warn',
-          title: `${[...pairs.values()].join('; ')}. Where two sources have a key, the source the server imported later wins.`,
+          title: `${detail}. Where two sources have a key, the source the server imported later wins.`,
         }, `⚠ ${involved.size} sources overlap`));
       }
       parts.push(el('div', { class: 'sp-group' },
@@ -852,7 +857,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     if (h.relation === 'related' || h.relation === 'unknown lineage') return NONE_DEPTH + 1;
     return h.shared_rank in DEPTH ? DEPTH[h.shared_rank] : NONE_DEPTH;
   };
-  const hitKey = (h) => h.accession || h.genome_file || `#${h.rank}`;
+  const hitKey = (h) => h.accession || h.genome_id || h.genome_file || `#${h.rank}`;
 
   function decorate(h) {
     const lin = parseLineage(h.gtdb_taxonomy);
@@ -1043,6 +1048,26 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     ['class', 'class'], ['phylum', 'phylum'], ['domain', 'domain'], ['none', 'different domain'],
   ];
 
+  // A non-GTDB source has its own rank family (`level 1` … `level N` for UHGV,
+  // `kingdom` … `species` for fungi), so listing GTDB ranks would be wrong.  Show the
+  // ranks of the reference lineage, with one neutral colour (the server's relations name
+  // the rank itself: "same level 4", "same genus", "different lineage").
+  function genericLegend(reference, hits) {
+    const ranks = genericRanks(reference).map(([rank]) => rank);
+    const items = ranks.slice().reverse().map((rank) => ['none', `same ${rank}`]);
+    if (hits.some((x) => String(x.relation || '').startsWith('different source'))) {
+      items.push(['none', 'different source']);
+    }
+    if (!items.some(([, label]) => label === 'different lineage')) {
+      items.push(['none', 'different lineage']);
+    }
+    return items;
+  }
+
+  function legendItems(reference, otherSource, hits) {
+    return otherSource ? genericLegend(reference, hits) : LEGEND;
+  }
+
   function bestCard(data, hits, thr) {
     const h = hits[0];
     const asg = data.assignment || null;
@@ -1064,10 +1089,12 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     const [a, b] = Array.isArray(h.containment) ? h.containment : [null, null];
     const notes = [];
     if (sub) notes.push(sub);
-    // A hit without an NCBI accession (UHGV, ICTV, ...) is named by its genome file.
+    // A hit without an NCBI accession (UHGV, ICTV, ...) is named by its genome_id: the
+    // taxonomy key, or the first contig id, not the shared UHGV `votus_full.fna.gz`.
     const hitName = has(h.accession) ? accessionLinks(h.accession)
-      : has(h.genome_file) ? el('span', { class: 'mono', title: h.genome_file, text: String(h.genome_file).split('/').pop() })
-        : el('span', { class: 'dash', text: '–' });
+      : has(h.genome_id) ? el('span', { class: 'mono', title: h.genome_file || h.genome_id, text: String(h.genome_id) })
+        : has(h.genome_file) ? el('span', { class: 'mono', title: h.genome_file, text: String(h.genome_file).split('/').pop() })
+          : el('span', { class: 'dash', text: '–' });
     notes.push(el('p', null, species ? 'Assigned from ' : 'Best hit ', hitName,
       has(h.ncbi_organism_name) ? [' · ', h.ncbi_organism_name] : '',
       has(h.ncbi_strain_identifiers) ? ` (${h.ncbi_strain_identifiers})` : ''));
@@ -1118,7 +1145,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
           el('div', { class: 'best-meta' }, notes),
           el('ul', { class: 'legend', 'aria-label': legendHead },
             el('li', { class: 'legend-head', text: legendHead }),
-            LEGEND.map(([k, label]) => el('li', null, el('i', { class: `sw rel-${k}` }), label)),
+            legendItems(asg || h, nonGtdb(asg || h), hits).map(([k, label]) => el('li', null, el('i', { class: `sw rel-${k}` }), label)),
             el('li', null, el('i', { class: 'sw-dash' }), `k-mer ANI < ~${thr.imprecise_below} % is imprecise`)))));
     return card;
   }
@@ -1139,6 +1166,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
 
   /* table */
+  const accessionColumnLabel = () => (current && current.hits.some((h) => !has(h.accession) && has(h.genome_id)) ? 'Accession / ID' : 'Accession');
+
   const COLS = [
     { key: 'rank', label: '#', get: (h) => h.rank, dir: 'asc' },
     { key: 'ani', label: 'ANI %', get: (h) => h.ani, dir: 'desc' },
@@ -1147,7 +1176,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     { key: 'species', label: speciesColumnLabel, get: (h) => h._species, dir: 'asc' },
     { key: 'ncbi', label: 'NCBI organism', get: (h) => h.ncbi_organism_name, dir: 'asc' },
     { key: 'taxid', label: 'TaxID', get: (h) => h.ncbi_taxid, dir: 'asc' },
-    { key: 'acc', label: 'Accession', get: (h) => h.accession, dir: 'asc' },
+    { key: 'acc', label: accessionColumnLabel, get: (h) => h.accession || h.genome_id, dir: 'asc' },
     { key: 'quality', label: 'Quality', hint: 'CheckM2 completeness / contamination (%)', get: (h) => h.checkm2_completeness, dir: 'desc' },
   ];
 
@@ -1286,6 +1315,14 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     return el('td', { class: cls, 'data-label': label }, el('div', { class: 'cv' }, content));
   }
 
+  function accessionCell(h) {
+    if (has(h.accession)) return accessionLinks(h.accession);
+    // UHGV/ICTV/genome hits have no NCBI accession: show the server's genome_id
+    // (taxonomy key, or the first contig id) instead of an empty dash.
+    if (has(h.genome_id)) return el('span', { class: 'mono', title: h.genome_file || h.genome_id, text: String(h.genome_id) });
+    return dash();
+  }
+
   function hitRow(h) {
     const [a, b] = Array.isArray(h.containment) ? h.containment : [null, null];
     return el('tr', { class: h.rank === 1 ? 'top-row' : null },
@@ -1297,7 +1334,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       cellTd(speciesColumnLabel(), null, speciesCell(h)),
       cellTd('NCBI organism', null, ncbiCell(h)),
       cellTd('TaxID', 'num', taxidLink(h.ncbi_taxid)),
-      cellTd('Accession', null, accessionLinks(h.accession)),
+      cellTd('Accession', null, accessionCell(h)),
       cellTd('Quality', null, qualityCell(h)));
   }
 

@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 from .metadata import METADATA_COLUMNS, accession_from_genome_name
@@ -105,20 +105,7 @@ class ProfileParams:
             return cls()
         if not isinstance(data, Mapping):
             raise ProtocolError("'params' must be a JSON object")
-        known = {
-            "minimum_ani",
-            "seq_id",
-            "estimate_unknown",
-            "estimate_read_counts",
-            "min_number_kmers",
-            "min_contain",
-            "screen_ani",
-            "names",
-            "fields",
-            "mode",
-            "no_adjust",
-            "tax_sources",
-        }
+        known = set(PROFILE_PARAM_KEYS)
         unknown = sorted(set(data) - known)
         if unknown:
             raise ProtocolError(f"unknown parameter(s): {', '.join(unknown)}")
@@ -154,6 +141,19 @@ class ProfileParams:
         ``Sequence_abundance`` (and to enable ``estimate_unknown``).
         """
         return self.to_dict()
+
+
+#: ``params`` keys ``/query`` and ``/profile`` accept.  The profiling fields
+#: come from the dataclass itself, so a new parameter is listed in ``/info``
+#: without touching a second list; the rest are the request-shape keys the
+#: server or the profiler handles outside :class:`ProfileParams`.
+PROFILE_PARAM_KEYS: tuple[str, ...] = (
+    *(field.name for field in fields(ProfileParams)),
+    "names",
+    "fields",
+    "mode",
+    "tax_sources",
+)
 
 
 def params_payload(

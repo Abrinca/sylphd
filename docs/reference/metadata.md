@@ -105,8 +105,9 @@ Two kinds of source exist:
 | `metadata` | the **virtual GTDB source** over `metadata_data`: its keys are `metadata_data.accession` and its lineages `gtdb_taxonomy`, so no lineage is stored twice. It is created from `-m` and named `GTDB_r<release>` (`GTDB` without `--release`). Importing the sylph-tax catalogue file of the *same* release (`GTDB_r232` with `--release 232`) and `-m` would duplicate it, so that source is skipped with a message; a different release or a local file is imported. |
 | `sylphtax` | one imported file; `md5` is always computed from the file, `origin` is the path or the download URL |
 
-`GET /info` reports the sources under `metadata.taxonomy_sources` (name, kind, origin, md5, rows,
-has_host, `overlaps`) and `metadata.sylphtax_rules`; `sylphd info` prints one line per source. A
+`GET /info` reports the sources under `metadata.taxonomy_sources` (name, kind, origin, md5, keys,
+has_host), the shared keys once per pair under `metadata.taxonomy_overlaps`, and
+`metadata.sylphtax_rules`; `sylphd info` prints one line per source and one per overlapping pair. A
 format 2 file reports neither key, so its output is unchanged.
 
 ### Overlapping sources { #overlapping-sources }
@@ -127,9 +128,11 @@ these keys; import only one of them, or rebuild without one
 The warning goes to the log and to stderr (it is not progress, so `-q` does not hide it) and the
 import still succeeds. For a shared key the source imported later wins (larger `ord`); `profile
 --tax-source NAME` restricts a request to one source. The counts are stored in `taxonomy_overlap`
-and reported as `overlaps: {"<other source>": <keys>}` per source by `sylphd info` and `GET /info`
-(`{}` when the source is disjoint). A version 3 file written before the table existed still reads;
-the next `--update` adds the table and fills the counts once.
+and reported once per pair, in setup order, as
+`metadata.taxonomy_overlaps: [{"sources": [a, b], "keys": n, "examples": [...]}]` by `sylphd info`
+and `GET /info` (an empty list when the sources are disjoint), with `b` the later source that wins
+for those keys and up to five shared keys in `examples`. A version 3 file written before the table
+existed still reads; the next `--update` adds the table and fills the counts once.
 
 ### Resolving a hit { #resolving-a-hit }
 

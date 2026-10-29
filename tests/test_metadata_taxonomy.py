@@ -150,10 +150,10 @@ class TestBuild:
                 "sylphtax",
                 "sylphtax",
             ]
-            assert sources[0]["rows"] == 2  # every GTDB row has a lineage
+            assert sources[0]["keys"] == 2  # every GTDB row has a lineage
             assert sources[0]["md5"] is None  # virtual: nothing of its own
             # the header row is an entry and the repeated key collapses
-            assert sources[1]["rows"] == 3
+            assert sources[1]["keys"] == 3
             assert sources[1]["has_host"] is True
             assert sources[2]["has_host"] is False
             assert len(sources[1]["md5"]) == 32
@@ -229,7 +229,7 @@ class TestBuild:
                 "FungiRefSeq-latest",
             ]
             assert db.taxonomy_sources()[0]["kind"] == "metadata"
-            assert [source["rows"] for source in db.taxonomy_sources()][1:] == [2]
+            assert [source["keys"] for source in db.taxonomy_sources()][1:] == [2]
             # the skipped source does not leave a hole in the order
             assert _source_ords(output) == [("GTDB_r232", 0), ("FungiRefSeq-latest", 1)]
 
@@ -281,7 +281,7 @@ class TestBuild:
                 ("GTDB_r232", "metadata"),
                 ("GTDB_from_file", "sylphtax"),
             ]
-            assert sources[0]["rows"] == 2  # the virtual source is intact
+            assert sources[0]["keys"] == 2  # the virtual source is intact
 
     def test_a_local_file_may_not_use_the_virtual_name(
         self, tmp_path: Path, gtdb_source: Path, fungi_file: Path
@@ -680,7 +680,7 @@ class TestReaderVersions:
         with TestClient(app) as client:
             metadata = client.get("/info").json()["metadata"]
         assert metadata["format_version"] == "3"
-        assert [(source["name"], source["rows"]) for source in metadata["taxonomy_sources"]] == [
+        assert [(source["name"], source["keys"]) for source in metadata["taxonomy_sources"]] == [
             ("GTDB_r232", 2),
             ("UHGV_default", 3),
         ]
@@ -731,7 +731,7 @@ class TestUpdate:
                 "UHGV_default",
             ]
             assert db.taxonomy_sources()[0]["kind"] == "metadata"
-            assert db.taxonomy_sources()[0]["rows"] == 2
+            assert db.taxonomy_sources()[0]["keys"] == 2
             assert db.lookup(["GCF_000005845.2"])["GCF_000005845.2"]["genome_size"] == 1000
 
     def test_update_in_place(self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path) -> None:
@@ -780,7 +780,7 @@ class TestUpdate:
                 "UHGV_default",
                 "FungiRefSeq-latest",
             ]
-            assert sources[1]["rows"] == 1
+            assert sources[1]["keys"] == 1
 
     def test_update_does_not_replace_the_virtual_source(
         self, tmp_path: Path, gtdb_source: Path, fungi_file: Path
@@ -804,7 +804,7 @@ class TestUpdate:
                 ("GTDB_r232", "metadata"),
                 ("FungiRefSeq-latest", "sylphtax"),
             ]
-            assert sources[0]["rows"] == 2  # the virtual source still resolves GTDB
+            assert sources[0]["keys"] == 2  # the virtual source still resolves GTDB
 
     def test_update_imports_a_different_gtdb_release(
         self, tmp_path: Path, gtdb_source: Path, fungi_file: Path
@@ -904,9 +904,14 @@ class TestOverlaps:
             }
         ]
         with MetadataDB(output) as db:
-            sources = db.taxonomy_sources()
-        assert sources[0]["overlaps"] == {"Second": 7}
-        assert sources[1]["overlaps"] == {"First": 7}
+            outputs = db.taxonomy_overlaps()
+        assert outputs == [
+            {
+                "sources": ["First", "Second"],
+                "keys": 7,
+                "examples": ["SHARED-01", "SHARED-02", "SHARED-03", "SHARED-04", "SHARED-05"],
+            }
+        ]
 
     def test_overlap_with_the_virtual_gtdb_source(
         self, tmp_path: Path, gtdb_source: Path, capsys: pytest.CaptureFixture[str]
@@ -932,6 +937,14 @@ class TestOverlaps:
         assert "examples: GCF_000005845.2" in warning
         assert "the source imported later (Local) wins" in warning
         assert stats["taxonomy_overlaps"][0]["other"] == "GTDB_r232"
+        with MetadataDB(output) as db:
+            assert db.taxonomy_overlaps() == [
+                {
+                    "sources": ["GTDB_r232", "Local"],
+                    "keys": 1,
+                    "examples": ["GCF_000005845.2"],
+                }
+            ]
         # the counts are in the file, in both directions
         connection = sqlite3.connect(output)
         try:
@@ -962,11 +975,7 @@ class TestOverlaps:
         assert "warning" not in captured.out
         assert stats["taxonomy_overlaps"] == []
         with MetadataDB(output) as db:
-            assert [source["overlaps"] for source in db.taxonomy_sources()] == [
-                {},
-                {},
-                {},
-            ]
+            assert db.taxonomy_overlaps() == []
 
     def test_update_warns_about_the_source_it_adds(
         self, tmp_path: Path, gtdb_source: Path, capsys: pytest.CaptureFixture[str]
@@ -995,8 +1004,13 @@ class TestOverlaps:
                 "First",
                 "Second",
             ]
-            assert sources[1]["overlaps"] == {"Second": 7}
-            assert sources[2]["overlaps"] == {"First": 7}
+            assert db.taxonomy_overlaps() == [
+                {
+                    "sources": ["First", "Second"],
+                    "keys": 7,
+                    "examples": ["SHARED-01", "SHARED-02", "SHARED-03", "SHARED-04", "SHARED-05"],
+                }
+            ]
 
     def test_replacing_a_source_refreshes_the_counts(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -1015,9 +1029,7 @@ class TestOverlaps:
         )
         assert stats["taxonomy_overlaps"] == []  # the replacement is disjoint
         with MetadataDB(path) as db:
-            sources = db.taxonomy_sources()
-            assert sources[0]["overlaps"] == {}
-            assert sources[1]["overlaps"] == {}
+            assert db.taxonomy_overlaps() == []
         assert "warning" not in capsys.readouterr().err
 
     def test_an_old_v3_file_gains_the_counts_on_update(
@@ -1037,14 +1049,18 @@ class TestOverlaps:
         connection.commit()
         connection.close()
         with MetadataDB(path) as db:
-            assert [source["overlaps"] for source in db.taxonomy_sources()] == [{}, {}]
+            assert db.taxonomy_overlaps() == []
         capsys.readouterr()
         stats = update_metadata_db(path, path)
         assert stats["taxonomy_overlaps"] == []  # nothing imported, so no warning
         with MetadataDB(path) as db:
-            sources = db.taxonomy_sources()
-        assert sources[0]["overlaps"] == {"Second": 7}
-        assert sources[1]["overlaps"] == {"First": 7}
+            assert db.taxonomy_overlaps() == [
+                {
+                    "sources": ["First", "Second"],
+                    "keys": 7,
+                    "examples": ["SHARED-01", "SHARED-02", "SHARED-03", "SHARED-04", "SHARED-05"],
+                }
+            ]
         assert "warning" not in capsys.readouterr().err
 
     def test_info_reports_the_counts(
@@ -1062,13 +1078,19 @@ class TestOverlaps:
 
         app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, meta_path=path))
         with TestClient(app) as client:
-            sources = client.get("/info").json()["metadata"]["taxonomy_sources"]
-        overlaps = {source["name"]: source["overlaps"] for source in sources}
-        assert overlaps == {
-            "GTDB_r232": {},
-            "First": {"Second": 7},
-            "Second": {"First": 7},
-        }
+            metadata = client.get("/info").json()["metadata"]
+        assert [source["name"] for source in metadata["taxonomy_sources"]] == [
+            "GTDB_r232",
+            "First",
+            "Second",
+        ]
+        assert metadata["taxonomy_overlaps"] == [
+            {
+                "sources": ["First", "Second"],
+                "keys": 7,
+                "examples": ["SHARED-01", "SHARED-02", "SHARED-03", "SHARED-04", "SHARED-05"],
+            }
+        ]
 
     def test_sylphd_info_prints_the_counts(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
@@ -1092,8 +1114,11 @@ class TestOverlaps:
                 "built": "2026-01-01T00:00:00+00:00",
                 "columns": ["gtdb_taxonomy"],
                 "taxonomy_sources": [
-                    {"name": "First", "kind": "sylphtax", "rows": 9},
-                    {"name": "Second", "kind": "sylphtax", "rows": 10, "overlaps": {"First": 1234}},
+                    {"name": "First", "kind": "sylphtax", "keys": 9},
+                    {"name": "Second", "kind": "sylphtax", "keys": 10},
+                ],
+                "taxonomy_overlaps": [
+                    {"sources": ["First", "Second"], "keys": 1234, "examples": ["K1", "K2"]},
                 ],
             },
             "limits": {},
@@ -1116,7 +1141,9 @@ class TestOverlaps:
         assert cli.main(["info"]) == 0
         out = capsys.readouterr().out
         assert "    First: 9 keys" in out
-        assert "    Second: 10 keys, overlaps First (1,234 keys)" in out
+        assert "    Second: 10 keys" in out
+        assert "  taxonomy overlaps: 1" in out
+        assert "    First and Second: 1,234 shared keys; examples: K1, K2; the source imported later wins" in out
 
 
 class TestCliSpecs:

@@ -387,6 +387,7 @@ def test_tsv_header_is_stable(server, genome, tmp_path, capsys) -> None:
         "shared_rank",
         "ani_species_level",
         "accession",
+        "genome_id",
         "gtdb_species",
         "taxon",
         "n_close",
@@ -1144,7 +1145,7 @@ def test_contig_hits_classify_and_report_a_non_gtdb_hit() -> None:
     )
     assert assignment is not None and closest is not None
     assert assignment["taxon"] == "vOTU-9"
-    assert assignment["note"].startswith("viruses")
+    assert assignment["note"].startswith("UHGV_default (viruses)")
     assert hits[0]["taxon"] == "vOTU-9"
     assert hits[0]["taxonomy"] == {"level 1": "vFAM-1", "level 2": "vOTU-9"}
     assert hits[0]["taxonomy_source"] == "UHGV_default"

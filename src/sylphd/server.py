@@ -62,7 +62,7 @@ from .profiling import (
     run_contig_query,
     run_sample,
 )
-from .protocol import ProfileParams, ProtocolError
+from .protocol import PROFILE_PARAM_KEYS, ProfileParams, ProtocolError
 from .sketching import InputError, check_sample_name, sample_name_from_path
 
 log = logging.getLogger("uvicorn.error")
@@ -95,6 +95,21 @@ MIN_TOP, MAX_TOP = 1, 50
 
 #: ``min_ani`` range of ``POST /assembly``.
 MIN_ANI_RANGE = (70.0, 100.0)
+
+#: Query-string parameters ``POST /assembly`` accepts, with their validator:
+#: ``(kind, default, minimum, maximum)``.  The parser below and ``/info`` both
+#: read this table, so the advertised list cannot drift from the validation.
+ASSEMBLY_PARAMS: dict[str, tuple[str, Any, Any, Any]] = {
+    "top": ("integer", 10, MIN_TOP, MAX_TOP),
+    "min_ani": ("float", 80.0, *MIN_ANI_RANGE),
+    "name": ("name", "assembly", None, 1024),
+    "records": ("integer", None, 0, MAX_INFO_RECORDS),
+    "length": ("integer", None, 0, MAX_INFO_LENGTH),
+    "gc": ("float", None, 0.0, 100.0),
+}
+
+#: The keys of :data:`ASSEMBLY_PARAMS`, for ``/info``.
+ASSEMBLY_PARAM_KEYS: tuple[str, ...] = tuple(ASSEMBLY_PARAMS)
 
 
 @dataclass
@@ -251,12 +266,31 @@ async def _info(request: Request) -> JSONResponse:
                 "max_queue": state.max_queue,
             },
             "endpoints": _endpoints(state),
+            "params": _params_info(),
         }
     )
 
 
 def _endpoints(state: Any) -> list[str]:
     return ["/health", "/info", "/profile", "/query", "/assembly", "/contigs"]
+
+
+def _params_info() -> dict[str, list[str]]:
+    """Accepted ``params`` keys per POST endpoint, derived from the validators.
+
+    ``/query`` and ``/profile`` share :data:`PROFILE_PARAM_KEYS` (the
+    :class:`ProfileParams` fields plus ``names``, ``fields``, ``mode`` and
+    ``tax_sources``); ``/contigs`` advertises
+    :data:`sylphd.per_contig.PARAM_KEYS`; ``/assembly`` takes query-string
+    parameters, listed in :data:`ASSEMBLY_PARAM_KEYS`.
+    """
+    profile_keys = list(PROFILE_PARAM_KEYS)
+    return {
+        "/profile": profile_keys,
+        "/query": list(profile_keys),
+        "/contigs": sorted(per_contig.PARAM_KEYS),
+        "/assembly": list(ASSEMBLY_PARAM_KEYS),
+    }
 
 
 def _rate_limit_dict(rate_limit: tuple[int, float] | None) -> dict[str, Any] | None:
@@ -313,23 +347,21 @@ async def _assembly(request: Request) -> JSONResponse:
             )
 
     try:
-        top = _query_integer(request, "top", 10, MIN_TOP, MAX_TOP)
-        min_ani = _query_float(request, "min_ani", 80.0, *MIN_ANI_RANGE)
-        stats = (
-            {
-                "records": _query_integer(request, "records", None, 0, MAX_INFO_RECORDS),
-                "length": _query_integer(request, "length", None, 0, MAX_INFO_LENGTH),
-                "gc": _query_float(request, "gc", None, 0.0, 100.0),
-            }
-            if is_sketch
-            else None
-        )
+        parsed = _parse_assembly_params(request)
     except ValueError as error:
         return _error(str(error), 400)
-
-    name = request.query_params.get("name") or "assembly"
-    if len(name) > 1024:
-        return _error("'name' is too long (max 1024 characters)", 400)
+    top = parsed["top"]
+    min_ani = parsed["min_ani"]
+    stats = (
+        {
+            "records": parsed["records"],
+            "length": parsed["length"],
+            "gc": parsed["gc"],
+        }
+        if is_sketch
+        else None
+    )
+    name = parsed["name"]
 
     # Raw sequences have their own (small) limit; a sketch is bounded by the
     # general upload limit, which BodyLimitMiddleware already enforces.
@@ -422,6 +454,22 @@ def _too_large_response(limit: int, is_sketch: bool = False) -> JSONResponse:
     return _error(
         f"request body exceeds the {limit // (1024 * 1024)} MB {kind} limit", 413
     )
+
+
+def _parse_assembly_params(request: Request) -> dict[str, Any]:
+    """Validate every ``/assembly`` query parameter from :data:`ASSEMBLY_PARAMS`."""
+    values: dict[str, Any] = {}
+    for key, (kind, default, minimum, maximum) in ASSEMBLY_PARAMS.items():
+        if kind == "integer":
+            values[key] = _query_integer(request, key, default, minimum, maximum)
+        elif kind == "float":
+            values[key] = _query_float(request, key, default, minimum, maximum)
+        else:  # "name"
+            raw = request.query_params.get(key) or default
+            if len(raw) > maximum:
+                raise ValueError(f"'{key}' is too long (max {maximum} characters)")
+            values[key] = raw
+    return values
 
 
 def _query_integer(
@@ -906,6 +954,7 @@ def create_app(
     metadata_store = metadata
     if metadata_store is None and config.meta_path is not None:
         metadata_store = MetadataDB(config.meta_path)
+    loaded.annotate_gtdb(metadata_store)
 
     routes = [
         Route("/", _index, methods=["GET"]),

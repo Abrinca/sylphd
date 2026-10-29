@@ -324,6 +324,7 @@ class TestCLI:
             "relation",
             "shared_rank",
             "accession",
+            "genome_id",
             "taxon",
             "gtdb_species",
             "taxonomy_source",
@@ -332,10 +333,11 @@ class TestCLI:
         ]
         row = lines[1].split("\t")
         assert row[:5] == ["1", "100.00", "same species", "species", "GCA_000000001.1"]
+        assert row[5] == "GCA_000000001.1"  # genome_id
         # the fixture lineage has no s__ rank: gtdb_species is empty, the
         # generic taxon is the last named rank (design note B6)
-        assert row[5:8] == ["Test", "", "GTDB_r232"]
-        assert row[8] == ""  # ncbi organism name
+        assert row[6:9] == ["Test", "", "GTDB_r232"]
+        assert row[9] == ""  # ncbi organism name
 
 
 class TestGzipMembers:

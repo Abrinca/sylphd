@@ -114,6 +114,9 @@
   ui.unknown = el('input', { type: 'checkbox', id: 'r-unknown' });
   ui.unknownImplied = el('span', { class: 'implied-note', hidden: true, text: ' implied by “Estimate read counts”' });
   ui.readCounts = el('input', { type: 'checkbox', id: 'r-read-counts' });
+  ui.readCountsRow = el('label', { class: 'check' }, ui.readCounts,
+    el('span', null, el('strong', { text: 'Estimate read counts' }), ' (sylph ', el('code', { text: '--estimate-read-counts' }),
+      ', experimental): report the estimated number of reads of each genome instead of its share of the sample. It implies “Estimate unknown fraction”.'));
   ui.sketchOnly = el('input', { type: 'checkbox', id: 'r-sketch-only' });
   ui.start = el('button', { type: 'submit', class: 'btn btn-primary', id: 'r-start', text: 'Sketch and profile', disabled: true });
   ui.hint = el('span', { class: 'submit-hint', hidden: true });
@@ -133,9 +136,7 @@
       el('label', { class: 'check' }, ui.unknown,
         el('span', null, el('strong', { text: 'Estimate unknown fraction' }), ' (sylph ', el('code', { text: '--estimate-unknown' }),
           '): also reports how much of the sample the database does not cover.', ui.unknownImplied)),
-      el('label', { class: 'check' }, ui.readCounts,
-        el('span', null, el('strong', { text: 'Estimate read counts' }), ' (sylph ', el('code', { text: '--estimate-read-counts' }),
-          ', experimental): report the estimated number of reads of each genome instead of its share of the sample. It implies “Estimate unknown fraction”.')),
+      ui.readCountsRow,
       el('label', { class: 'check' }, ui.sketchOnly,
         el('span', null, el('strong', { text: 'Only sketch' }), ': do not upload; keep the sketch to download or to upload later.'))),
     el('div', { class: 'actions' }, ui.start, ui.hint));
@@ -362,12 +363,22 @@
     return db && isNum(db.c) && isNum(db.k) ? { c: db.c, k: db.k } : null;
   }
 
+  // The server lists the params each endpoint accepts; an older server without that
+  // list keeps the option, and its 400 (handled in httpProblem) is the fallback.
+  function readCountsSupported(info) {
+    const keys = info && info.params && info.params['/profile'];
+    return !Array.isArray(keys) || keys.includes('estimate_read_counts');
+  }
+
   function refresh() {
     let hint = '';
     const o = options();
     const info = S.info();
     const problem = S.problem();
     const profileOk = !info || !Array.isArray(info.endpoints) || info.endpoints.includes('/profile');
+    const readCountsOk = readCountsSupported(info);
+    if (!readCountsOk && ui.readCounts.checked) { ui.readCounts.checked = false; syncImpliedOptions(); }
+    ui.readCountsRow.hidden = !readCountsOk;
     if (unsupported()) hint = 'Not supported by this browser';
     else if (problem) hint = PROBLEM_HINT[problem] || 'Server unavailable';
     else if (!info) hint = 'Waiting for the server…';

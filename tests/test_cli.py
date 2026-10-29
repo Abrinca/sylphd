@@ -767,13 +767,13 @@ class TestNonGtdbClassification:
         )
         assert result.returncode == 0, result.stderr
         header, row = result.stdout.splitlines()[0].split("\t"), result.stdout.splitlines()[1]
-        assert header[5:8] == ["taxon", "gtdb_species", "taxonomy_source"]
+        assert header[6:9] == ["taxon", "gtdb_species", "taxonomy_source"]
         # the fixture genome is in GTDB metadata too, but the UHGV source
         # resolved this hit, so UHGV's lineage is the one that counts
-        assert row.split("\t")[5:8] == ["vOTU-1", "Clostridium difficile", "UHGV"]
+        assert row.split("\t")[6:9] == ["vOTU-1", "Clostridium difficile", "UHGV"]
         assert "assigned to vOTU-1 at the 95 % species threshold" in result.stderr
         assert result.stderr.count("warning:") == 1
-        assert "viruses (UHGV)" in result.stderr
+        assert "UHGV (viruses)" in result.stderr
 
     def test_quiet_suppresses_the_caveat(self, taxonomy_server, tmp_path) -> None:
         socket_path, _ = taxonomy_server
@@ -807,7 +807,7 @@ class TestNonGtdbClassification:
             "level 2": "vOTU-1",
         }
         assert payload["assignment"]["taxonomy_source"] == "UHGV"
-        assert payload["assignment"]["note"].startswith("viruses (UHGV)")
+        assert payload["assignment"]["note"].startswith("UHGV (viruses)")
         assert payload["closest"] == payload["assignment"]
         (hit,) = payload["hits"]
         assert hit["taxonomy_source"] == "UHGV"
@@ -827,7 +827,7 @@ class TestNonGtdbClassification:
         )
         assert result.returncode == 0, result.stderr
         assert len(result.stdout.splitlines()) == 3  # header + two contigs
-        assert result.stderr.count("viruses (UHGV)") == 1
+        assert result.stderr.count("UHGV (viruses)") == 1
         assert result.stderr.count("\n") == 3  # query line, consensus, caveat
 
     def test_tax_profile_prints_the_caveat_once(self, taxonomy_server) -> None:
@@ -844,7 +844,7 @@ class TestNonGtdbClassification:
             str(directory / "warn-"),
         )
         assert result.returncode == 0, result.stderr
-        assert result.stderr.count("viruses (UHGV)") == 1
+        assert result.stderr.count("UHGV (viruses)") == 1
         # A GTDB-only profile has nothing to warn about.
         gtdb = _run(
             "profile",

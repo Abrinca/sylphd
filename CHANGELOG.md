@@ -8,11 +8,37 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **`/info` says what each database is and which taxonomy it really uses.** Every entry of
+  `databases` gains `kind` (`two-stage` for a `.syl2db`, `plain` for a `.syldb`) and `gtdb`
+  (`true` when a sample of up to 100 genome names of that database are GTDB accessions of the
+  metadata file), so the web panel shows `GTDB r<release>` only when a GTDB database is actually
+  served — a fungi-only or UHGV server with GTDB metadata for taxonomy lookups no longer claims
+  to be GTDB r232. `metadata.taxonomy_sources[].rows` is renamed to `keys`, and overlapping
+  sources are reported once per pair in `metadata.taxonomy_overlaps` (`{"sources": [a, b],
+  "keys": n, "examples": [...]}`, in setup order, the later source wins) instead of a
+  both-direction `overlaps` dict on every source; `sylphd info` and the web panel follow.
+- **A hit's display identifier.** Every `/assembly` and `/contigs` hit gains `genome_id`: the
+  accession for a GTDB hit (or any hit that has one), the `tax_key` for a hit a non-GTDB taxonomy
+  source resolved, else the first contig id, else the genome file. The web result card/table and
+  the `sylphd assembly` tables use it, so a UHGV hit no longer says "Assigned from
+  votus_full.fna.gz" (the file every UHGV genome shares). The species-threshold caveats now name
+  the actual source (`UHGV_ictv (viruses): ...`, `FungiRefSeq-latest (fungi): ...`), and the web
+  relation legend lists the ranks of the hit's own lineage instead of GTDB's ranks for a UHGV or
+  fungal lineage.
+- **`/info` advertises the `params` each POST endpoint accepts**: `params: {"/profile": [...],
+  "/query": [...], "/contigs": [...], "/assembly": [...]}`. The lists come from the validators
+  (`ProfileParams` fields plus `names`/`fields`/`mode`/`tax_sources`, `per_contig.PARAM_KEYS`, the
+  `/assembly` query-string keys), not a second hand-maintained copy, so a client can hide an
+  option an older server does not know instead of probing it with a 400. `/profile` and `/query`
+  responses echo the **effective** profiling parameters (`params`, defaults included), as
+  `/assembly` already does.
+
 - Web page: the server panel lists the databases of a multi-database server and the taxonomy
   sources (with a warning when sources overlap); the Reads tab has an "Estimate read counts"
   option (reads in the table and the TSV, as `sylphd profile --estimate-read-counts`); non-GTDB
   hits show their generic taxon under a "Taxon" column, and non-GTDB assignments show the
-  server's species-threshold note.
+  server's species-threshold note. The option is hidden when `/info` says the server does not
+  accept `estimate_read_counts` (an older server's 400 still explains itself).
 
 - **Taxonomy sources in the metadata file (format version 3).** `sylphd setup --taxonomy SPEC`
   imports [sylph-tax](https://github.com/bluenote-1577/sylph-tax) files (`key<TAB>lineage[<TAB>host]`,
@@ -49,9 +75,10 @@ All notable changes to `sylphd` are documented here. The format follows
   rather than accepted on its size (GlobDB r232, whose publisher publishes no checksum, is the one
   size-only entry).
 - **`/info` and `sylphd info` report the taxonomy sources** of a format 3 metadata file: name,
-  kind, origin, MD5, key count and whether hosts are present (`metadata.taxonomy_sources`), plus
-  `metadata.sylphtax_rules`, the sylph-tax version whose file formats and rules the build
-  implements (`1.9.2`). Both keys are absent for a format 2 file, so existing output is unchanged.
+  kind, origin, MD5, key count (`keys`) and whether hosts are present (`metadata.taxonomy_sources`),
+  the shared-key pairs (`metadata.taxonomy_overlaps`), plus `metadata.sylphtax_rules`, the
+  sylph-tax version whose file formats and rules the build implements (`1.9.2`). Both keys are
+  absent for a format 2 file, so existing output is unchanged.
 - **Several databases in one server.** `sylphd serve --db [NAME=]PATH` is repeatable; `NAME`
   (letters, digits, `_`, `.`, `-`) is the name `/info` reports and defaults to the file name, and
   duplicate names are refused. The databases are loaded in parallel threads and profiled as one
@@ -164,7 +191,7 @@ All notable changes to `sylphd` are documented here. The format follows
   configures no logging and `-q` silences progress only; the import still succeeds. The counts are
   stored in the new, additive `taxonomy_overlap` table (both directions, format stays 3; a file
   written before the table existed still reads, and the next `--update` fills it) and are shown as
-  `overlaps: {"<other source>": <keys>}` per source by `sylphd info` and `GET /info`.
+  one `metadata.taxonomy_overlaps` entry per pair by `sylphd info` and `GET /info` (see above).
 
 - **`sylphd assembly` classifies hits from any taxonomy source, not only GTDB.** Lineages are
   parsed generically: rank prefixes `d` domain, `r` realm, `k` kingdom, `p` phylum, `c` class,

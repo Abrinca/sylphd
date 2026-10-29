@@ -347,8 +347,8 @@ class TestDictLayout:
                     "kind": "metadata",
                     "origin": "metadata_data",
                     "md5": None,
-                    "rows": 3,  # one row has no gtdb_taxonomy
+                    "keys": 3,  # one row has no gtdb_taxonomy
                     "has_host": False,
-                    "overlaps": {},
                 }
             ]
+            assert summary["taxonomy_overlaps"] == []

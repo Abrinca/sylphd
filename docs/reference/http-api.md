@@ -43,15 +43,20 @@ Reports:
   A single-database server reports exactly what it always did;
 - `databases`: one object per database, always present (a single entry on a single-database
   server): `name` (alias or file name), `file` (the file name, since `name` may be an alias),
-  `path`, `size`, `sha256`, `genomes`, `c`, `k`, `screen_c` and `two_stage`. Results carry no
+  `kind` (`two-stage` for a `.syl2db`, `plain` for a `.syldb`), `path`, `size`, `sha256`,
+  `genomes`, `c`, `k`, `screen_c`, `two_stage` and `gtdb` (`true` when a sample of up to 100
+  genome names of the database are GTDB accessions of the metadata file; a fungi or UHGV server
+  that has GTDB metadata only for taxonomy lookups reports `false`). Results carry no
   per-database field: a hit belongs to the database whose taxonomy it has;
 - `metadata`: `path`, `size`, `columns`, `rows`, `release`, `built`, `format_version`, `reps_only`
   and `sources`, or `null` without `--meta`. A format 3 file (taxonomy sources, see
   [the metadata reference](metadata.md#taxonomy-sources)) adds `taxonomy_sources` — one object per
   source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`,
-  `md5`, `rows`, `has_host` and `overlaps` (`{"<other source>": <shared keys>}`, empty when the
-  source is disjoint: the later-imported source wins for those keys) — and `sylphtax_rules` (the
-  sylph-tax version whose rules apply).
+  `md5`, `keys`, `has_host` — `taxonomy_overlaps` — the pairs of sources that share keys, each
+  pair once, in setup order: `{"sources": [a, b], "keys": n, "examples": [...]}`, where `b` is
+  the later-imported source and wins for those keys — and `sylphtax_rules` (the sylph-tax version
+  whose rules apply). `examples` holds up to five shared keys. Both keys are absent for a format 2
+  file, so its response is unchanged;
   Its `columns` also list the four `tax_*` columns, which `fields` can then select. A format 2 file
   has none of this, so its response is unchanged;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
@@ -66,7 +71,12 @@ Reports:
   form field, i.e. how large the JSON `params` of one request may grow), `allow_sequences`,
   `max_sequence_mb` (`null` unless sequences are allowed), `rate_limit` (`{"count",
   "window_seconds"}` or `null`) and `max_queue` (`null` means unlimited);
-- `endpoints`: the endpoint paths this server serves.
+- `endpoints`: the endpoint paths this server serves;
+- `params`: the keys each POST endpoint accepts, so a client does not have to probe with 400s:
+  `{"/profile": [...], "/query": [...], "/contigs": [...], "/assembly": [...]}`. The lists are
+  derived from the validators: `/query` and `/profile` list the `ProfileParams` fields plus
+  `names`, `fields`, `mode` and `tax_sources`; `/contigs` lists its `params` keys (including
+  `contigs`); `/assembly` lists its query-string parameters.
 
 ## `POST /query` and `POST /profile` { #post-query-and-post-profile }
 
@@ -109,7 +119,9 @@ pysylph's message, not a generic 500. `POST /query` and `POST /profile` run agai
 The response is a JSON list with one object per sample, in request order:
 
 ```json
-[{"name": "sample-a", "kind": "profile", "rows": [
+[{"name": "sample-a", "kind": "profile", "params": {"minimum_ani": null, "seq_id": null,
+   "estimate_unknown": false, "estimate_read_counts": false, "min_number_kmers": 10,
+   "min_contain": 7, "screen_ani": 85.0, "no_adjust": false}, "rows": [
   {"Sample_file": "sample-a", "Genome_file": "...", "Adjusted_ANI": 99.79,
    "ANI_5-95_percentile": [99.64, 99.95], "Eff_lambda": 0.36, "Lambda_status": "OK",
    "Lambda_5-95_percentile": [0.34, 0.38], "Median_cov": 1.0, "Mean_cov_geq1": 1.187,
@@ -118,7 +130,9 @@ The response is a JSON list with one object per sample, in request order:
    "accession": "GCA_...", "gtdb_taxonomy": "..."}]}]
 ```
 
-`kind` is `query` or `profile`. `Taxonomic_abundance`, `Sequence_abundance` and `kmers_reassigned`
+`kind` is `query` or `profile`. `params` echoes the **effective** profiling parameters, defaults
+included (the keys `/info` lists for the endpoint), so a client need not reproduce them.
+`Taxonomic_abundance`, `Sequence_abundance` and `kmers_reassigned`
 appear only for `profile`; with `estimate_read_counts`, `Sequence_abundance` holds the estimated
 number of reads per genome (a rounded float) instead of a relative abundance. Metadata columns
 follow `accession`. Rows keep sylph's column names; in JSON `Eff_cov` is never renamed to
@@ -210,6 +224,7 @@ carries `tax_lineage`/`tax_source` and is classified from that lineage: `taxonom
            "shared_rank": "species", "ani_species_level": true,
            "genome_file": "/db/GCA_000005845.2_genomic.fna.gz",
            "accession": "GCF_000005845.2",
+           "genome_id": "GCF_000005845.2",
            "gtdb_taxonomy": "d__Bacteria;...;s__Escherichia coli",
            "taxonomy": {"domain": "Bacteria", "...": "...", "species": "Escherichia coli"},
            "taxonomy_source": "GTDB_r232",
@@ -242,6 +257,10 @@ carries `tax_lineage`/`tax_source` and is classified from that lineage: `taxonom
   fraction sylph's ANI ignores), a heuristic for fungi, a generic text for other sources. It is
   absent for GTDB and for a hit without a lineage.
 - **`closest`** has the same shape for the best hit, or `null` without hits.
+- **`genome_id`** is the identifier to show for a hit: the `accession` for a GTDB hit (or any
+  hit that carries one), the `tax_key` for a hit a non-GTDB taxonomy source resolved, else the
+  first token of `Contig_name`, else `genome_file`. It exists because a genome file is not always
+  an identifier: UHGV stores every genome in `votus_full.fna.gz`.
 - **`thresholds.imprecise_below`** (`85`) is only a hint that k-mer ANI below it is imprecise. It
   never changes an assignment.
 - **Metadata:** every metadata column of the server's metadata database is added flat to each hit,
@@ -354,7 +373,7 @@ The response carries one result per contig, in request order, plus a summary of 
                   "reference_ani": 96.16, "reference_containment": [78, 8413],
                   "relation": "same species", "shared_rank": "species",
                   "ani_species_level": true, "genome_file": "...", "accession": "GCA_...",
-                  "gtdb_species": "...", "taxon": "...", "...": "..."}],
+                  "genome_id": "GCA_...", "gtdb_species": "...", "taxon": "...", "...": "..."}],
               "assignment": {"rank": "species", "taxon": "...", "accession": "...", "ani": 99.12},
               "closest": {"...": "..."},
               "consensus": {"rank": "family", "taxon": "Enterobacteriaceae",

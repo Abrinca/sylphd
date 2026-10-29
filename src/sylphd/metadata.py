@@ -37,7 +37,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, cast
+from typing import IO, Self, cast
 
 from . import __version__
 from .download import SYLPHTAX_VERSION
@@ -805,6 +805,26 @@ OVERLAP_EXAMPLES = 5
 
 
 @dataclass(frozen=True)
+class TaxonomyOverlapPair:
+    """One pair of sources that share keys, as ``/info`` reports it.
+
+    ``sources`` is in ``ord`` order (the later one wins for these keys) and the
+    pair appears once, even though ``taxonomy_overlap`` stores both directions.
+    """
+
+    sources: tuple[str, str]
+    keys: int
+    examples: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "sources": list(self.sources),
+            "keys": self.keys,
+            "examples": list(self.examples),
+        }
+
+
+@dataclass(frozen=True)
 class TaxonomyOverlap:
     """Keys that one imported source shares with another source.
 
@@ -1070,11 +1090,10 @@ def build_metadata_db(
     if not files and not taxonomy:
         raise ValueError("at least one metadata file or taxonomy source is required")
     output = Path(output)
-    if output.exists():
-        if not force:
-            raise FileExistsError(
-                f"{output} already exists (pass --force to overwrite it)"
-            )
+    if output.exists() and not force:
+        raise FileExistsError(
+            f"{output} already exists (pass --force to overwrite it)"
+        )
     if not output.parent.exists():
         raise FileNotFoundError(f"output directory does not exist: {output.parent}")
     # Build next to the target and replace it only on success, so a failure
@@ -1489,9 +1508,9 @@ class MetadataDB:
         self.has_taxonomy: bool = "taxonomy_source" in tables
         #: The sources, in ``ord`` order (empty for a version 2 file).
         self._sources: tuple[TaxonomySourceRow, ...] = self._read_sources()
-        #: ``source id -> {other source name: shared keys}``; ``{}`` for a file
+        #: The de-duplicated overlap pairs, in ``ord`` order; ``()`` for a file
         #: written before ``taxonomy_overlap`` existed.
-        self._overlaps: dict[int, dict[str, int]] = self._read_overlaps(
+        self._overlaps: tuple[TaxonomyOverlapPair, ...] = self._read_overlaps(
             "taxonomy_overlap" in tables
         )
         #: The virtual GTDB source, if the file has one.
@@ -1521,22 +1540,81 @@ class MetadataDB:
             for row in rows
         )
 
-    def _read_overlaps(self, has_table: bool) -> dict[int, dict[str, int]]:
-        """``source id -> {other source name: shared keys}``, in ``ord`` order."""
+    def _read_overlaps(self, has_table: bool) -> tuple[TaxonomyOverlapPair, ...]:
+        """The de-duplicated overlap pairs, each source pair listed once.
+
+        ``taxonomy_overlap`` stores both directions of a pair; the pair is
+        reported once, with the names in ``ord`` order (the later one wins).
+        The first shared keys are read here, once at startup, because the
+        metadata file only stores the counts.
+        """
         if not has_table:
-            return {}
+            return ()
+        sources = {source.id: source for source in self._sources}
+        sources_by_name = {source.name: source for source in self._sources}
         with self._lock:
             rows = self._connection.execute(
-                "SELECT o.source_id AS source_id, s.name AS name, o.keys AS keys "
-                "FROM taxonomy_overlap AS o "
-                "JOIN taxonomy_source AS s ON s.id = o.other_id ORDER BY s.ord"
+                "SELECT source_id, other_id, keys FROM taxonomy_overlap"
             ).fetchall()
-        overlaps: dict[int, dict[str, int]] = {}
+        pairs: list[TaxonomyOverlapPair] = []
+        seen: set[tuple[int, int]] = set()
         for row in rows:
-            overlaps.setdefault(int(row["source_id"]), {})[str(row["name"])] = int(
-                row["keys"]
+            first_id = int(row["source_id"])
+            second_id = int(row["other_id"])
+            if first_id == second_id:
+                continue
+            key = (min(first_id, second_id), max(first_id, second_id))
+            if key in seen:
+                continue
+            seen.add(key)
+            first = sources.get(first_id)
+            second = sources.get(second_id)
+            if first is None or second is None:
+                continue
+            if (second.ord, second.id) < (first.ord, first.id):
+                first, second = second, first
+            pairs.append(
+                TaxonomyOverlapPair(
+                    sources=(first.name, second.name),
+                    keys=int(row["keys"]),
+                    examples=self._overlap_examples(first, second),
+                )
             )
-        return overlaps
+        pairs.sort(
+            key=lambda pair: (
+                sources_by_name[pair.sources[0]].ord,
+                sources_by_name[pair.sources[1]].ord,
+            )
+        )
+        return tuple(pairs)
+
+    def _overlap_examples(
+        self, first: TaxonomySourceRow, second: TaxonomySourceRow, limit: int = 5
+    ) -> tuple[str, ...]:
+        """The first ``limit`` keys two sources share, sorted.
+
+        One of the two may be the virtual GTDB source, whose keys are
+        ``metadata_data.accession`` rows that have a lineage (exactly what
+        ``resolve`` looks up); the other keys are ``taxonomy_entry.key``.
+        """
+        with self._lock:
+            if first.kind == "metadata" or second.kind == "metadata":
+                other = second if first.kind == "metadata" else first
+                rows = self._connection.execute(
+                    "SELECT DISTINCT e.key AS key FROM taxonomy_entry AS e "
+                    "JOIN metadata_data AS m ON m.accession = e.key "
+                    "WHERE e.source_id = ? AND m.gtdb_taxonomy IS NOT NULL "
+                    "ORDER BY e.key LIMIT ?",
+                    (other.id, limit),
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    "SELECT e.key AS key FROM taxonomy_entry AS e "
+                    "JOIN taxonomy_entry AS o ON o.key = e.key AND o.source_id = ? "
+                    "WHERE e.source_id = ? ORDER BY e.key LIMIT ?",
+                    (second.id, first.id, limit),
+                ).fetchall()
+        return tuple(str(row["key"]) for row in rows)
 
     @property
     def taxonomy_columns(self) -> tuple[str, ...]:
@@ -1551,9 +1629,9 @@ class MetadataDB:
     def taxonomy_sources(self) -> list[dict[str, object]]:
         """The taxonomy sources of the file, in ``ord`` order (empty for v2).
 
-        ``overlaps`` maps another source's name to the number of keys both have
-        (``{}`` when the source is disjoint or the file predates the counts): an
-        operator can see that a server resolves some keys from a later import.
+        ``keys`` is the number of stored keys of the source.  Keys shared with
+        another source are reported once per pair at the metadata level
+        (:meth:`taxonomy_overlaps`), not per source.
         """
         return [
             {
@@ -1561,12 +1639,15 @@ class MetadataDB:
                 "kind": source.kind,
                 "origin": source.origin,
                 "md5": source.md5,
-                "rows": source.rows,
+                "keys": source.rows,
                 "has_host": source.has_host,
-                "overlaps": dict(self._overlaps.get(source.id, {})),
             }
             for source in self._sources
         ]
+
+    def taxonomy_overlaps(self) -> list[dict[str, object]]:
+        """The pairs of sources that share keys, each pair once, in ord order."""
+        return [pair.as_dict() for pair in self._overlaps]
 
     def source_names(self) -> list[str]:
         """Names of the taxonomy sources, in ``ord`` order."""
@@ -1589,6 +1670,28 @@ class MetadataDB:
     def lookup(self, accessions: Iterable[str]) -> dict[str, dict[str, object]]:
         """Return metadata rows keyed by accession, for the accessions found."""
         return self._chunked_lookup(list(accessions))
+
+    def contains_accessions(self, accessions: Iterable[str]) -> bool:
+        """Whether any of ``accessions`` is a genome of this metadata file.
+
+        Used to tell a GTDB database from one whose genome names merely look
+        like accessions (fungal RefSeq genomes are ``GCF_`` too, but they are
+        not in GTDB's metadata).  Stopping at the first match keeps the query
+        small even for a batch of sampled names.
+        """
+        unique = list(dict.fromkeys(value for value in accessions if value))
+        for start in range(0, len(unique), 500):
+            chunk = unique[start : start + 500]
+            placeholders = ", ".join("?" * len(chunk))
+            with self._lock:
+                row = self._connection.execute(
+                    f"SELECT 1 FROM metadata_data WHERE accession IN ({placeholders}) "
+                    "LIMIT 1",
+                    chunk,
+                ).fetchone()
+            if row is not None:
+                return True
+        return False
 
     # -- hit -> taxonomy -------------------------------------------------
 
@@ -1741,13 +1844,14 @@ class MetadataDB:
         if self.has_taxonomy:
             # Additive: a format 2 file reports exactly what it always did.
             summary["taxonomy_sources"] = self.taxonomy_sources()
+            summary["taxonomy_overlaps"] = self.taxonomy_overlaps()
             summary["sylphtax_rules"] = self.info.get("sylphtax_rules") or None
         return summary
 
     def close(self) -> None:
         self._connection.close()
 
-    def __enter__(self) -> "MetadataDB":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:

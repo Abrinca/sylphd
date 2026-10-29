@@ -117,6 +117,7 @@ class TestAssemblyUpload:
         assert payload["closest"]["accession"] == "GCA_000000001.1"
         assert hit["genome_file"] == "GCA_000000001.1_genomic.fna.gz"
         assert hit["accession"] == "GCA_000000001.1"
+        assert hit["genome_id"] == "GCA_000000001.1"
         assert hit["containment"] == [44, 44]
         assert hit["containment_fraction"] == 1.0
         # every metadata column is present, from the metadata database

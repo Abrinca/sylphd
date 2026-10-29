@@ -342,6 +342,38 @@ def parse_lineage(
     return Lineage(tuple(ranks), source, family)
 
 
+def genome_id(hit: Mapping[str, Any], *, contig_name: str | None = None) -> str | None:
+    """A stable identifier for the database genome a hit came from.
+
+    A hit's ``Genome_file`` is not always an identifier: UHGV stores every
+    genome in ``votus_full.fna.gz``, so the file name is the same for all of
+    them.  The rule is
+
+    * ``accession`` for a GTDB hit (and for any hit that carries one),
+    * ``tax_key`` for a hit a **non-GTDB** taxonomy source resolved (the UHGV
+      contig id, the fungal key, ...),
+    * else the first word of the hit's ``Contig_name`` (a database genome's
+      description often starts with its own id), and
+    * else the ``Genome_file``.
+
+    ``contig_name`` lets a caller pass the genome's ``description`` when the
+    hit mapping itself does not carry ``Contig_name`` (``/assembly``).
+    """
+    source = hit.get("tax_source")
+    key = hit.get("tax_key")
+    if key and isinstance(source, str) and source and not _is_gtdb_source(source):
+        return str(key)
+    accession = hit.get("accession")
+    if accession:
+        return str(accession)
+    contig = contig_name if contig_name is not None else hit.get("Contig_name")
+    words = str(contig or "").split()
+    if words:
+        return words[0]
+    genome = hit.get("genome_file") or hit.get("Genome_file")
+    return str(genome) if genome else None
+
+
 def _is_gtdb_source(source: object) -> bool:
     """Whether a taxonomy source name is one of GTDB's."""
     return isinstance(source, str) and source.upper().startswith("GTDB")
@@ -399,15 +431,17 @@ def comparable(a: Lineage, b: Lineage) -> bool:
 
 
 #: Species-threshold caveats for the sources that are not GTDB (B6).  The 95 %
-#: threshold is a prokaryote convention; outside prokaryotes it is a hint.
+#: threshold is a prokaryote convention; outside prokaryotes it is a hint.  The
+#: source's actual name is filled in, so a server with UHGV_ictv or
+#: FungiRefSeq-latest does not talk about UHGV or "fungi" in general.
 VIRUS_CAVEAT = (
-    "viruses (UHGV): 95 % ANI matches the vOTU convention (MIUViG: 95 % ANI over "
-    "85 % of the shorter genome), but sylph's ANI ignores the aligned fraction, "
-    "so a species call may be wrong"
+    "{source} (viruses): 95 % ANI matches the vOTU convention (MIUViG: 95 % ANI "
+    "over 85 % of the shorter genome), but sylph's ANI ignores the aligned "
+    "fraction, so a species call may be wrong"
 )
 FUNGI_CAVEAT = (
-    "fungi: there is no established ANI species boundary, so 95 % is a heuristic "
-    "and species calls may be wrong"
+    "{source} (fungi): there is no established ANI species boundary, so 95 % is "
+    "a heuristic and species calls may be wrong"
 )
 GENERIC_CAVEAT = (
     "{source}: the 95 % species threshold is a prokaryote convention, so it is a "
@@ -444,11 +478,12 @@ def species_caveat(lineage: Lineage) -> str | None:
     """
     if not lineage or lineage.family == GTDB_FAMILY:
         return None
+    source = lineage.source or "this source"
     if _is_virus(lineage):
-        return VIRUS_CAVEAT
+        return VIRUS_CAVEAT.format(source=source)
     if _is_fungi(lineage):
-        return FUNGI_CAVEAT
-    return GENERIC_CAVEAT.format(source=lineage.source or "this source")
+        return FUNGI_CAVEAT.format(source=source)
+    return GENERIC_CAVEAT.format(source=source)
 
 
 def classify_hits(

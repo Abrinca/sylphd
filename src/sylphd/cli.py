@@ -302,24 +302,26 @@ def cmd_info(args: argparse.Namespace) -> int:
         if sources:
             print(f"  taxonomy sources: {len(sources)}")
             for source in sources:
-                rows = source.get("rows")
-                details = [f"{rows:,} keys" if rows is not None else "key count unknown"]
+                keys = source.get("keys")
+                details = [f"{keys:,} keys" if keys is not None else "key count unknown"]
                 if source.get("kind") == "metadata":
                     details.append("virtual, from -m")
                 if source.get("has_host"):
                     details.append("with hosts")
                 if source.get("md5"):
                     details.append(f"md5 {source['md5']}")
-                overlaps = source.get("overlaps") or {}
-                if overlaps:
-                    details.append(
-                        "overlaps "
-                        + ", ".join(
-                            f"{name} ({int(keys):,} keys)"
-                            for name, keys in overlaps.items()
-                        )
-                    )
                 print(f"    {source.get('name')}: " + ", ".join(details))
+        overlaps = metadata.get("taxonomy_overlaps") or []
+        if overlaps:
+            print(f"  taxonomy overlaps: {len(overlaps)}")
+            for pair in overlaps:
+                names = " and ".join(str(name) for name in pair.get("sources") or ())
+                examples = pair.get("examples") or []
+                details = [f"{int(pair.get('keys') or 0):,} shared keys"]
+                if examples:
+                    details.append("examples: " + ", ".join(str(key) for key in examples))
+                details.append("the source imported later wins")
+                print(f"    {names}: " + "; ".join(details))
 
     limits = info.get("limits", {})
     print(
@@ -724,7 +726,7 @@ def cmd_assembly(args: argparse.Namespace) -> int:
     else:
         with _open_output(args.output) as output:
             output.write(
-                "rank\tani\trelation\tshared_rank\taccession\ttaxon\tgtdb_species\t"
+                "rank\tani\trelation\tshared_rank\taccession\tgenome_id\ttaxon\tgtdb_species\t"
                 "taxonomy_source\tncbi_organism_name\tncbi_taxid\n"
             )
             for hit in result.get("hits", ()):
@@ -736,6 +738,7 @@ def cmd_assembly(args: argparse.Namespace) -> int:
                             str(hit.get("relation") or ""),
                             str(hit.get("shared_rank") or ""),
                             str(hit.get("accession") or ""),
+                            str(hit.get("genome_id") or ""),
                             str(_taxon(hit) or ""),
                             gtdb_species(hit.get("gtdb_taxonomy")),
                             str(hit.get("taxonomy_source") or ""),

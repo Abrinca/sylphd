@@ -30,5 +30,52 @@
     "/profile",
     "/query",
     "/assembly"
-  ]
+  ],
+  "params": {
+    "/profile": [
+      "minimum_ani",
+      "seq_id",
+      "estimate_unknown",
+      "estimate_read_counts",
+      "min_number_kmers",
+      "min_contain",
+      "screen_ani",
+      "no_adjust",
+      "names",
+      "fields",
+      "mode",
+      "tax_sources"
+    ],
+    "/query": [
+      "minimum_ani",
+      "seq_id",
+      "estimate_unknown",
+      "estimate_read_counts",
+      "min_number_kmers",
+      "min_contain",
+      "screen_ani",
+      "no_adjust",
+      "names",
+      "fields",
+      "mode",
+      "tax_sources"
+    ],
+    "/contigs": [
+      "consensus_ratio",
+      "consensus_z",
+      "contigs",
+      "fields",
+      "min_ani",
+      "tax_sources",
+      "top"
+    ],
+    "/assembly": [
+      "top",
+      "min_ani",
+      "name",
+      "records",
+      "length",
+      "gc"
+    ]
+  }
 }
