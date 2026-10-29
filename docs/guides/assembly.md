@@ -54,6 +54,11 @@ metadata database. The JSON response carries every metadata column; see the
 In the [web app](https://abrinca.github.io/sylphd/#assembly) the sketching happens in your browser
 (WebAssembly, the same code as for [reads](profiling-in-browser.md)). Paste FASTA or drop a file of
 any size (gzip is fine); only the sketch is sent, and the result shows a *sketched locally* badge.
+You can also upload a sketch you made earlier (`.sylsp`, for example from `sylph sketch` or
+pysylph, or downloaded from the [Reads tab](profiling-in-browser.md#reupload)): it is sent as it
+is, after the page has checked its `c` and `k` against the server. Records, length and GC are
+then unknown and shown as "–".
+
 A browser without WebAssembly SIMD and workers (Chrome 91, Firefox 89, Safari 16.4 or newer have
 them) cannot use the page and says so; use `sylphd assembly` there. See
 [Running a public server](public-server.md#sketches-only-or-raw-sequences-too-allow-sequences).

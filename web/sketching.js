@@ -116,5 +116,50 @@
     return { done, cancel: () => { cancelled = true; kill(); } };
   }
 
-  window.SylphdSketch = { unsupported, loadModule, start };
+  const isSylsp = (file) => /\.sylsp$/i.test(file.name || '');
+
+  // Header of a ready-made sketch (.sylsp = bincode of sylph's SequencesSketch; same layout as
+  // src/sylphd/sketchcheck.py): u64 n, n x (u64 kmer, u32 count), u64 c, u64 k, String file_name,
+  // Option<String> sample_name, u8 paired, f64 mean_read_length. Only the 8 bytes at the start and the
+  // small tail after the k-mer entries are read, so a 200 MB sketch is not loaded.
+  // Resolves { kmers, c, k, fileName, sampleName, paired }; rejects with a short reason.
+  async function readSylspHeader(file) {
+    const bad = (why) => new Error(`not a valid sketch (${why})`);
+    if (file.size < 8) throw bad('too short');
+    const n = new DataView(await file.slice(0, 8).arrayBuffer()).getBigUint64(0, true);
+    const end = 8n + n * 12n;
+    if (end > BigInt(file.size)) throw bad(`declares ${n} k-mers but is only ${file.size} bytes long`);
+    const start = Number(end);
+    const tail = await file.slice(start, Math.min(file.size, start + 4096)).arrayBuffer();
+    const dv = new DataView(tail);
+    const u8 = new Uint8Array(tail);
+    const dec = new TextDecoder('utf-8', { fatal: true });
+    let o = 0;
+    const need = (len, what) => { if (o + len > tail.byteLength) throw bad(`truncated in ${what}`); };
+    const u64 = (what) => { need(8, what); const v = dv.getBigUint64(o, true); o += 8; return v; };
+    const str = (what) => {
+      const len = u64(`${what} length`);
+      if (len > BigInt(tail.byteLength - o)) throw bad(`${what} is too long`);
+      const text = dec.decode(u8.subarray(o, o + Number(len)));
+      o += Number(len);
+      return text;
+    };
+    try {
+      const c = u64('c');
+      const k = u64('k');
+      const fileName = str('file_name');
+      need(1, 'sample_name');
+      const tag = u8[o++];
+      if (tag > 1) throw bad('bad sample_name tag');
+      const sampleName = tag ? str('sample_name') : null;
+      need(1, 'paired');
+      const paired = u8[o++] === 1;
+      return { kmers: Number(n), c: Number(c), k: Number(k), fileName, sampleName, paired };
+    } catch (e) {
+      if (e instanceof TypeError) throw bad('text is not valid UTF-8');
+      throw e;
+    }
+  }
+
+  window.SylphdSketch = { unsupported, loadModule, start, isSylsp, readSylspHeader };
 })();

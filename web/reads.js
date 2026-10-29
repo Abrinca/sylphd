@@ -49,11 +49,11 @@
   const safeName = (s) => String(s || 'sample').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'sample';
 
   /* ----------------------------------------------------- support checks */
-  const { unsupported, loadModule } = window.SylphdSketch;
+  const { unsupported, loadModule, isSylsp, readSylspHeader } = window.SylphdSketch;
 
   /* --------------------------------------------------------- file names */
   const COMPRESSION = /\.(gz|bgz|bgzf)$/i;
-  const READ_SUFFIX = /\.(fastq|fq|fasta|fa|fna|fas|fsa)$/i;
+  const READ_SUFFIX = /\.(fastq|fq|fasta|fa|fna|fas|fsa|sylsp)$/i;
   const MATE_RE = /[_.]R?([12])(?:_001)?$/i; // sample_R1, sample.R2, sample_1, sample_R1_001
   const stem = (name) => name.replace(COMPRESSION, '').replace(READ_SUFFIX, '');
   const mateOf = (name) => { const m = MATE_RE.exec(stem(name)); return m ? Number(m[1]) : 0; };
@@ -69,6 +69,8 @@
     layout: 'single', // 'single' | 'interleaved' | 'paired'
     pairDetected: false,
     nameTouched: false,
+    kind: 'reads', // 'reads' | 'sketch' (one .sylsp) | 'multisketch' (several .sylsp) | 'mixed'
+    header: null, // parsed header of the .sylsp (kind 'sketch'), or { error }
     run: null,
     busy: false,
     view: null, // results view state
@@ -78,14 +80,15 @@
   const ui = {};
   const fileInput = el('input', {
     type: 'file', multiple: true, class: 'sr-only', tabindex: '-1', id: 'r-file',
-    accept: '.fastq,.fq,.fasta,.fa,.fna,.gz,application/gzip',
+    accept: '.fastq,.fq,.fasta,.fa,.fna,.gz,.sylsp,application/gzip',
   });
   ui.drop = el('div', { class: 'rdrop', id: 'r-drop', role: 'button', tabindex: '0', 'aria-label': 'Choose or drop read files' },
     dropIcon(),
     el('div', { class: 'rdrop-text' },
-      el('strong', { text: 'Drop FASTQ or FASTA reads here' }),
+      el('strong', { text: 'Drop FASTQ or FASTA reads (or a .sylsp sketch) here' }),
       el('span', null, 'or ', el('u', { text: 'choose files' }), '. One file (single-end or interleaved) or two files (R1 + R2). ',
         el('code', { text: '.fastq .fq .fasta .fa' }), ', optionally ', el('code', { text: '.gz' }), '.'),
+      el('span', null, 'Or one ', el('code', { text: '.sylsp' }), ' sketch you made earlier (for example downloaded here): it is uploaded as it is.'),
       el('span', { class: 'rdrop-private' }, 'Your reads are not uploaded: they are sketched on this computer.')),
     el('div', { class: 'drop-overlay', 'aria-hidden': 'true', text: 'Drop files to load' }));
 
@@ -101,6 +104,7 @@
   }
 
   ui.fileList = el('ul', { class: 'rfiles', 'aria-label': 'Selected files' });
+  ui.sketchInfo = el('p', { class: 'detail sketch-info', hidden: true });
   ui.layout = el('div', { class: 'rlayout' });
   ui.fileMsg = el('p', { class: 'input-msg', role: 'alert', hidden: true });
   ui.name = el('input', { type: 'text', id: 'r-name', maxlength: String(NAME_MAX), autocomplete: 'off', spellcheck: 'false', placeholder: 'sample' });
@@ -115,7 +119,7 @@
   ui.results = el('section', { class: 'results', id: 'r-results', 'aria-live': 'polite' });
 
   const form = el('form', { id: 'r-form', novalidate: true },
-    fileInput, ui.drop, ui.fileList, ui.layout, ui.fileMsg,
+    fileInput, ui.drop, ui.fileList, ui.sketchInfo, ui.layout, ui.fileMsg,
     el('div', { class: 'options' },
       el('label', { class: 'field field-name', for: 'r-name' }, el('span', { text: 'Sample name' }), ui.name)),
     el('details', { class: 'adv' },
@@ -144,6 +148,13 @@
     ui.results.replaceChildren();
     st.files = files;
     st.pairDetected = false;
+    classify();
+    if (st.kind !== 'reads') {
+      st.layout = 'single';
+      if (!st.nameTouched || !ui.name.value) { st.nameTouched = false; autoName(); }
+      renderFiles();
+      return;
+    }
     if (files.length === 2) {
       st.layout = 'paired';
       const [m0, m1] = [mateOf(files[0].name), mateOf(files[1].name)];
@@ -163,6 +174,19 @@
     renderFiles();
   }
 
+  // What was selected: reads, one ready-made sketch, or something that cannot be run. A sketch's
+  // header is read (a few KB) to check c and k against the server before anything is uploaded.
+  function classify() {
+    const n = st.files.filter(isSylsp).length;
+    st.kind = n === 0 ? 'reads' : n < st.files.length ? 'mixed' : n === 1 ? 'sketch' : 'multisketch';
+    st.header = null;
+    if (st.kind !== 'sketch') return;
+    const file = st.files[0];
+    readSylspHeader(file).then((h) => h, (e) => ({ error: e.message || String(e) })).then((h) => {
+      if (st.files[0] === file && st.kind === 'sketch') { st.header = h; renderFiles(); }
+    });
+  }
+
   function autoName() {
     if (st.nameTouched || !st.files.length) return;
     ui.name.value = sampleFromName(st.files[0].name, st.layout === 'paired');
@@ -171,7 +195,8 @@
   function removeFile(i) {
     st.files.splice(i, 1);
     st.pairDetected = false;
-    st.layout = st.files.length === 2 ? 'paired' : 'single';
+    classify();
+    st.layout = st.kind === 'reads' && st.files.length === 2 ? 'paired' : 'single';
     autoName();
     renderFiles();
   }
@@ -179,7 +204,7 @@
   function renderFiles() {
     const n = st.files.length;
     const total = st.files.reduce((a, f) => a + f.size, 0);
-    const roleOf = (i) => (st.layout === 'paired' ? `R${i + 1}` : st.layout === 'interleaved' ? 'interleaved' : n > 1 ? `part ${i + 1}` : 'reads');
+    const roleOf = (i) => (isSylsp(st.files[i]) ? 'sketch' : st.layout === 'paired' ? `R${i + 1}` : st.layout === 'interleaved' ? 'interleaved' : n > 1 ? `part ${i + 1}` : 'reads');
     ui.fileList.replaceChildren(...st.files.map((f, i) => el('li', { class: 'rfile' },
       el('span', { class: `badge ${st.layout === 'paired' ? 'badge-rel rel-closest' : 'badge-plain'}`, text: roleOf(i) }),
       el('span', { class: 'rfile-name', title: f.name, text: f.name }),
@@ -189,7 +214,9 @@
 
     // layout choices
     const kids = [];
-    if (n === 1) {
+    if (st.kind !== 'reads') {
+      // a sketch needs no layout
+    } else if (n === 1) {
       kids.push(layoutChoice('single', 'Single-end reads'), layoutChoice('interleaved', 'Interleaved pairs (R1, R2, R1, R2 …)'));
     } else if (n === 2) {
       kids.push(layoutChoice('paired', 'Paired-end: R1 + R2'), layoutChoice('single', 'Two single-end files, one sample'));
@@ -205,15 +232,34 @@
     ui.layout.hidden = !n;
 
     const sizeNote = n ? `${n === 1 ? '1 file' : `${n} files`}, ${fmtBytes(total)}` : '';
-    const msgs = [];
-    if (n === 2 && st.layout === 'paired' && !st.pairDetected) {
-      msgs.push('The file names do not look like a pair (_R1/_R2, _1/_2): check that the order is R1, R2, or choose “Two single-end files”.');
-    }
-    if (st.files.some((f) => f.size === 0)) msgs.push('A selected file is empty.');
     if (sizeNote) ui.fileList.append(el('li', { class: 'rfile-total', text: sizeNote }));
-    ui.fileMsg.textContent = msgs.join(' ');
-    ui.fileMsg.hidden = !msgs.length;
     refresh();
+  }
+
+  // Problems with the selection: `block` stops the run, `warn` is only a hint.
+  function fileProblems() {
+    const block = [];
+    const warn = [];
+    const n = st.files.length;
+    if (st.files.some((f) => f.size === 0)) block.push('A selected file is empty.');
+    if (st.kind === 'mixed') {
+      block.push('Sequencing reads and .sylsp sketches cannot be mixed: choose either the reads, or one sketch.');
+    } else if (st.kind === 'multisketch') {
+      block.push('Upload one .sylsp sketch at a time: a result shows one sample. Remove the others.');
+    } else if (st.kind === 'sketch') {
+      const h = st.header;
+      const db = dbParams();
+      const maxMb = (S.info() && S.info().limits && S.info().limits.max_upload_mb) || 0;
+      if (h && h.error) block.push(`${st.files[0].name} is ${h.error}.`);
+      else if (h && db && (h.k !== db.k || h.c > db.c)) {
+        block.push(`This sketch was made with c=${h.c}, k=${h.k}, but the server uses c=${db.c}, k=${db.k}. A sketch must have the same k and may not be sparser (c ≤ ${db.c}); sketch the reads again here.`);
+      } else if (maxMb && st.files[0].size > maxMb * 1048576) {
+        block.push(`This sketch is ${fmtBytes(st.files[0].size)}, over the server's upload limit of ${maxMb} MB.`);
+      }
+    } else if (n === 2 && st.layout === 'paired' && !st.pairDetected) {
+      warn.push('The file names do not look like a pair (_R1/_R2, _1/_2): check that the order is R1, R2, or choose “Two single-end files”.');
+    }
+    return { block, warn };
   }
 
   function layoutChoice(value, label) {
@@ -279,7 +325,14 @@
     else if (!profileOk) hint = 'This server has no /profile endpoint';
     else if (!dbParams()) hint = 'The server did not report its sketch parameters';
     else if (st.files.length && !o.ok) hint = 'Check the options';
-    const ready = st.files.length > 0 && st.files.every((f) => f.size > 0) && !hint;
+    const probs = fileProblems();
+    const headerOk = st.kind !== 'sketch' || (st.header && !st.header.error);
+    const ready = st.files.length > 0 && !probs.block.length && headerOk && !hint;
+    ui.fileMsg.textContent = [...probs.block, ...probs.warn].join(' ');
+    ui.fileMsg.hidden = !(probs.block.length || probs.warn.length);
+    const h = st.kind === 'sketch' && st.header && !st.header.error ? st.header : null;
+    ui.sketchInfo.hidden = !h;
+    if (h) ui.sketchInfo.textContent = `Ready-made sketch: ${fmtInt(h.kmers)} k-mers, c=${h.c}, k=${h.k}${h.paired ? ', from paired reads' : ''}. It is uploaded as it is, nothing is sketched.`;
     ui.start.disabled = st.busy || !ready;
     ui.hint.textContent = st.files.length ? hint : '';
     ui.hint.hidden = !(st.files.length && hint);
@@ -288,7 +341,7 @@
     for (const i of [ui.minAni, ui.minKmers, ui.unknown, ui.sketchOnly]) i.disabled = st.busy;
     ui.drop.classList.toggle('disabled', st.busy);
     ui.drop.setAttribute('aria-disabled', String(st.busy));
-    ui.start.textContent = o.sketchOnly ? 'Sketch' : 'Sketch and profile';
+    ui.start.textContent = st.kind === 'sketch' ? 'Upload and profile' : o.sketchOnly ? 'Sketch' : 'Sketch and profile';
   }
   ui.unknown.addEventListener('change', refresh);
   ui.sketchOnly.addEventListener('change', refresh);
@@ -353,10 +406,12 @@
     const o = options();
     if (!db || !st.files.length || !o.ok) return;
     const name = (ui.name.value.trim() || sampleFromName(st.files[0].name, st.layout === 'paired')).slice(0, NAME_MAX);
+    const fromSketch = st.kind === 'sketch' && st.header && !st.header.error;
     const run = {
-      files: st.files.slice(), layout: st.layout, name, c: db.c, k: db.k, opts: o,
-      total: st.files.reduce((n, f) => n + f.size, 0), t0: performance.now(), phase: 'sketch', phaseAt: performance.now(),
-      prog: { streams: [], sketch: {}, uploaded: 0 }, sketch: null, stats: null, cancelled: false, kill: null, xhr: null, warned: new Set(),
+      fromSketch, files: st.files.slice(), layout: st.layout, name, c: fromSketch ? st.header.c : db.c, k: fromSketch ? st.header.k : db.k, opts: o,
+      total: st.files.reduce((n, f) => n + f.size, 0), t0: performance.now(), phase: fromSketch ? 'upload' : 'sketch', phaseAt: performance.now(),
+      prog: { streams: [], sketch: {}, uploaded: 0 }, sketch: fromSketch ? st.files[0] : null,
+      stats: fromSketch ? { kmers: st.header.kmers } : null, cancelled: false, kill: null, xhr: null, warned: new Set(),
     };
     st.run = run;
     ui.results.replaceChildren();
@@ -365,6 +420,10 @@
     renderProgress(run);
     run.timer = setInterval(() => renderProgress(run), 200);
     ui.progress.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' });
+    if (fromSketch) {
+      // a ready-made sketch: no reading or sketching, straight to the upload
+      return profilePhase(run).catch((e) => failRun(run, e));
+    }
     try {
       const done = await sketchPhase(run);
       run.sketch = new Blob([done.sketch], { type: 'application/octet-stream' });
@@ -545,7 +604,11 @@
     const states = { read: 'todo', sketch: 'todo', upload: 'todo', profile: 'todo' };
     let frac = 0;
     let indeterminate = false;
-    if (run.phase === 'sketch') {
+    if (run.fromSketch) {
+      states.read = 'skipped'; states.sketch = 'skipped';
+      if (run.phase === 'upload') { states.upload = 'active'; frac = Math.min(1, p.uploaded / run.sketch.size); }
+      else { states.upload = 'done'; states.profile = 'active'; indeterminate = true; }
+    } else if (run.phase === 'sketch') {
       states.read = readDone ? 'done' : 'active';
       states.sketch = 'active';
       frac = run.total ? Math.min(1, read / run.total) : 0;
@@ -571,6 +634,15 @@
       ui.barText.textContent = `${fmtBytes(p.uploaded)} of ${fmtBytes(run.sketch.size)} sketch uploaded`;
     } else {
       ui.barText.textContent = `Sketch uploaded (${fmtBytes(run.sketch.size)}); the server is profiling it…`;
+    }
+    if (run.fromSketch) {
+      ui.stats.replaceChildren(
+        stat('Sketch k-mers', fmtInt(run.stats.kmers), `c=${run.c}, k=${run.k}`),
+        stat('Sketch size', fmtBytes(run.sketch.size)),
+        stat('Elapsed', fmtTime(elapsed)));
+      ui.warn.replaceChildren();
+      ui.cancel.textContent = 'Cancel upload';
+      return;
     }
     ui.stats.replaceChildren(
       stat(run.layout === 'single' ? 'Reads' : 'Read pairs', fmtInt(sk.reads || 0)),
@@ -635,6 +707,21 @@
   function summaryCard(run, result) {
     const item = (label, value, small) => el('div', null, el('dt', { text: label }), el('dd', null, value, small ? el('small', { text: small }) : null));
     const s = run.stats || {};
+    if (run.fromSketch) {
+      const items = [
+        item('Sample', run.name, 'uploaded sketch'),
+        item('Sketch', `${fmtInt(s.kmers)} k-mers`, `${fmtBytes(run.sketch.size)} · c=${run.c}, k=${run.k}`),
+      ];
+      if (result) {
+        items.push(item('Genomes detected', fmtInt(result.rows.length)));
+        items.push(item('Profiling', fmtTime(run.profileMs), 'upload and server'));
+        if (result.params.estimate_unknown) items.push(item('Unknown', fmtPct(unknownFraction(result.rows)), 'not covered by the database'));
+      }
+      return el('section', { class: 'card', 'aria-label': 'Sample summary' },
+        el('div', { class: 'card-head' }, el('h2', { text: 'Summary' }),
+          el('span', { class: 'badge badge-plain', title: 'Reads were not involved: a ready-made sketch was uploaded as it is.' }, 'uploaded sketch')),
+        el('dl', { class: 'summary rsummary' }, items));
+    }
     const items = [
       item('Sample', run.name, run.layout === 'paired' ? 'paired-end' : run.layout === 'interleaved' ? 'interleaved pairs' : 'single-end'),
       item(run.layout === 'single' ? 'Reads' : 'Read pairs', fmtInt(s.reads), fmtBases(s.bases)),

@@ -54,6 +54,19 @@ The downloaded sketch works with the command line: `sylphd profile sample.sylsp`
 is. The sketches are byte-identical to the ones `sylphd` makes with pysylph, apart from the order
 of the k-mer entries.
 
+## Re-uploading a sketch { #reupload }
+
+A `.sylsp` file, whether you downloaded it from this page, or `sylph sketch`, pysylph or `sylphd`
+wrote it, can be dropped on the Reads tab instead of reads (or on the Assembly tab, below). Nothing
+is read or sketched: the page shows the file, reads its small header and checks it against the
+server before uploading. The sketch must have the same `k` as the server and may not be sparser
+(`c` no larger than the server's), otherwise the page says which `c` and `k` it was made with and
+which the server uses. The sample name comes from the file name, the profile is the same as for the
+reads. A result shows one sample, so **one `.sylsp` at a time** (the page says so if you drop
+several), and a sketch cannot be mixed with reads. The *Upload* chip in the header is the largest
+sketch the server takes: a 1.5 GB ONT `fastq.gz` sketches to about 6 MB, 56 GB of paired-end reads
+to about 76 MB.
+
 ## Limits and what to expect
 
 - **Speed:** a 1.55 GB gzipped ONT file (254k reads, 2.1 Gbp) is sketched in about 10 s in
@@ -83,6 +96,11 @@ The page counts the records, length and GC content while sketching, sends only t
 application/vnd.sylph.sketch`) and marks the result *sketched locally*. A 2.8 Mb assembly takes
 about half a second, a 120 Mb pool of corrected reads about 2.5 s including the search. The hits are
 identical to those of a server-side sketch of the same assembly.
+
+A ready-made `.sylsp` sketch of an assembly can be dropped on the Assembly tab too. It is sent to
+the same endpoint as it is, with the checks described under [re-uploading a sketch](#reupload). The
+page cannot know the number of records, the length or the GC content of an assembly it did not
+see, so the summary shows "–" for them, and the result is marked *uploaded sketch*.
 
 ## Building the sketcher
 

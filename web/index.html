@@ -74,7 +74,7 @@
           <h3>Identify an assembly</h3>
           <p class="mode-lead">Find the closest GTDB genomes of a bacterial or archaeal genome and get a species call.</p>
           <ul class="mode-facts">
-            <li>Paste FASTA or upload a file (gzip is fine), <strong>any size</strong></li>
+            <li>Paste FASTA or upload a file (gzip is fine), <strong>any size</strong>, or a <code>.sylsp</code> sketch you made earlier</li>
             <li>Species call at 95&nbsp;% ANI, with the lineage relation of every hit</li>
             <li><strong>Sketched locally in your browser:</strong> the sequence never leaves your computer, only a small sketch is uploaded</li>
           </ul>
@@ -86,7 +86,7 @@
           <h3>Profile reads</h3>
           <p class="mode-lead">Find out which bacteria and archaea are in a sequencing run, with their abundances.</p>
           <ul class="mode-facts">
-            <li>Drop FASTQ or FASTA reads (<code>.gz</code> is fine): short, long or paired</li>
+            <li>Drop FASTQ or FASTA reads (<code>.gz</code> is fine): short, long or paired; or upload a <code>.sylsp</code> sketch you made earlier</li>
             <li><strong>Sketched locally in your browser:</strong> reads never leave your computer, only a sketch of a few MB is uploaded</li>
             <li>Abundance by species up to phylum, GTDB or NCBI taxonomy, downloads</li>
           </ul>
@@ -112,7 +112,7 @@
         <div id="drop" class="drop">
           <label for="fasta" class="sr-only">FASTA sequence</label>
           <textarea id="fasta" spellcheck="false" autocomplete="off" autocapitalize="off"
-            placeholder="Paste FASTA here (&gt;contig1 …), or drop a .fasta / .fa / .fna / .gz file"></textarea>
+            placeholder="Paste FASTA here (&gt;contig1 …), or drop a .fasta / .fa / .fna / .gz file, or a .sylsp sketch"></textarea>
           <div id="file-chip" class="file-chip" hidden>
             <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M3 1h6l4 4v10H3V1Zm6 1.5V5h2.5L9 2.5Z"/></svg>
             <span class="file-name" id="file-name"></span>
@@ -125,7 +125,7 @@
         <div class="toolbar">
           <button type="button" id="pick" class="btn">Choose file…</button>
           <input type="file" id="file" class="sr-only" tabindex="-1"
-            accept=".fasta,.fa,.fna,.fas,.fastq,.fq,.gz,.txt,text/plain,application/gzip">
+            accept=".fasta,.fa,.fna,.fas,.fastq,.fq,.gz,.sylsp,.txt,text/plain,application/gzip">
           <button type="button" id="example" class="btn">Load example</button>
           <button type="button" id="clear" class="btn btn-ghost">Clear</button>
           <span id="size" class="size" aria-live="polite"></span>

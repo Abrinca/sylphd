@@ -4,6 +4,17 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Web page: upload a ready-made sketch.** The Reads tab accepts one `.sylsp` instead of reads
+  (no sketching: the step is shown as skipped), and the Assembly tab sends a dropped `.sylsp` to
+  `POST /assembly` as it is, marked *uploaded sketch*. The page reads the sketch header and
+  refuses a `c` or `k` that does not fit the server before uploading anything.
+- Header chip *Upload* with the server's `max_upload_mb`, the largest sketch it accepts, visible on
+  every view; the other chips explain themselves in their tooltips.
+
 ## [0.1.2] - 2026-10-29
 
 ### Added
