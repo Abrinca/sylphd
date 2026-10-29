@@ -62,6 +62,15 @@ file named exactly like the virtual source is refused, because importing it woul
 Sources are stored in the order given; for a key found in two sources the later one wins (as the
 later file wins in sylph-tax). Re-importing a source name replaces it.
 
+**Import one taxonomy per database.** Overlapping sources are accepted, never silently: after each
+import `setup` counts the keys the source shares with the sources already in the file — including
+the virtual GTDB source, whose keys are the metadata accessions — and, for every pair that shares
+keys, prints a warning naming both sources, the number of shared keys, the first five keys and the
+rule that applies: *the source imported later wins for these keys; import only one of them, or
+rebuild without one*. The import still succeeds (a warning, not an error); the counts are stored in
+the file and shown by [`sylphd info`](info.md) and `GET /info`. This is the same collision that
+`profile --tax-source NAME` can work around per request.
+
 `--update` copies the existing file (the `-o` path, or `-m` when you want a separate output) and
 adds the sources; it needs no GTDB TSV files. The copy is written next to the output and replaces
 it only on success, so an interrupted or failed update leaves the old file untouched.

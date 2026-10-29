@@ -6,7 +6,18 @@ from typing import Any
 
 import pytest
 
-from sylphd.assembly import classify_hits, parse_gtdb_taxonomy, shared_rank
+from sylphd.assembly import (
+    FUNGI_CAVEAT,
+    GENERIC_CAVEAT,
+    VIRUS_CAVEAT,
+    Lineage,
+    classify_hits,
+    parse_gtdb_taxonomy,
+    parse_lineage,
+    shared_lineage_rank,
+    shared_rank,
+    species_caveat,
+)
 
 BACT = "d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;"
 LACTO = BACT + "f__Streptococcaceae;g__Lactococcus;"
@@ -77,8 +88,19 @@ def test_lactococcus_like_query_is_assigned_and_ranked_by_lineage() -> None:
         "gtdb_taxonomy": LACTIS,
         "accession": "GCF_L",
         "ani": 98.65,
+        "taxonomy": {
+            "domain": "Bacteria",
+            "phylum": "Bacillota",
+            "class": "Bacilli",
+            "order": "Lactobacillales",
+            "family": "Streptococcaceae",
+            "genus": "Lactococcus",
+            "species": "Lactococcus lactis",
+        },
+        "taxonomy_source": "GTDB",
     }
     assert closest == assignment
+    assert "note" not in assignment  # the 95 % threshold is GTDB's own
     assert relations(hits) == [
         "same species",
         "same genus",
@@ -181,3 +203,201 @@ def test_hit_without_lineage_among_classified_hits() -> None:
 
 def test_no_hits() -> None:
     assert classify_hits([]) == (None, None)
+
+
+# -- generic lineages (design note B6) ------------------------------------
+
+#: A UHGV_default lineage: prefix-less, the vOTU is the finest unit.
+UHGV_FAMILY = "vFAM-00013;vSUBFAM-00074;vGENUS-00044;vSUBGEN-00024;vOTU-052719"
+UHGV_SPECIES = "vFAM-00013;vSUBFAM-00074;vGENUS-00044;vSUBGEN-00024;vOTU-052720"
+#: An ICTV lineage of the same database, starting with ``root``.
+ICTV = "root;Monodnaviria;Sangervirae;Phixviricota;Malgrandaviricetes;Petitvirales;Microviridae"
+#: A fungal RefSeq lineage: no domain, kingdom first.
+FUNGI = "k__Eukaryota;p__Ascomycota;c__Sordariomycetes;o__Magnaporthales;f__Pyriculariaceae;g__Pyricularia;s__Pyricularia oryzae"
+
+
+def source_hit(
+    ani: float,
+    lineage: str | None,
+    source: str | None,
+    accession: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "ani": ani,
+        "accession": accession,
+        "gtdb_taxonomy": None,
+        "tax_lineage": lineage,
+        "tax_source": source,
+    }
+
+
+def test_parse_lineage_understands_every_source() -> None:
+    assert parse_lineage(LACTIS).taxonomy == {
+        "domain": "Bacteria",
+        "phylum": "Bacillota",
+        "class": "Bacilli",
+        "order": "Lactobacillales",
+        "family": "Streptococcaceae",
+        "genus": "Lactococcus",
+        "species": "Lactococcus lactis",
+    }
+    levels = parse_lineage(UHGV_FAMILY)
+    assert levels.taxonomy == {
+        "level 1": "vFAM-00013",
+        "level 2": "vSUBFAM-00074",
+        "level 3": "vGENUS-00044",
+        "level 4": "vSUBGEN-00024",
+        "level 5": "vOTU-052719",
+    }
+    assert levels.levels and levels.taxon == "vOTU-052719"
+    assert levels.species is None and levels.species_key == "level 5"
+    # "root" is not a taxon: the ICTV ranks are levels too
+    ictv = parse_lineage(ICTV)
+    assert ictv.ranks[0] == ("level 1", "Monodnaviria")
+    assert len(ictv) == 6
+    fungi = parse_lineage(FUNGI)
+    assert fungi.ranks[0] == ("k", "Eukaryota")
+    assert fungi.taxon == "Pyricularia oryzae" and fungi.species_key == "s"
+    assert parse_lineage(None) == Lineage()
+    assert parse_lineage("") == Lineage()
+    assert parse_lineage("d__Bacteria;p__X;g__;s__").taxonomy == {
+        "domain": "Bacteria",
+        "phylum": "X",
+    }
+
+
+def test_shared_lineage_rank_is_generic() -> None:
+    a = parse_lineage(UHGV_FAMILY)
+    b = parse_lineage(UHGV_SPECIES)
+    assert shared_lineage_rank(a, b) == "level 4"
+    assert shared_lineage_rank(a, a) == "level 5"
+    assert shared_lineage_rank(a, parse_lineage("vOTHER")) is None
+    assert shared_lineage_rank(
+        parse_lineage(LACTIS), parse_lineage(CREMORIS)
+    ) == "genus"
+
+
+def test_non_gtdb_best_hit_is_assigned_to_the_last_named_rank() -> None:
+    hits = [source_hit(98.0, UHGV_FAMILY, "UHGV_default")]
+    assignment, closest = classify_hits(hits)
+    assert assignment == {
+        "rank": "species",
+        "taxon": "vOTU-052719",
+        "gtdb_taxonomy": None,
+        "accession": None,
+        "ani": 98.0,
+        "taxonomy": {
+            "level 1": "vFAM-00013",
+            "level 2": "vSUBFAM-00074",
+            "level 3": "vGENUS-00044",
+            "level 4": "vSUBGEN-00024",
+            "level 5": "vOTU-052719",
+        },
+        "taxonomy_source": "UHGV_default",
+        "note": VIRUS_CAVEAT,
+    }
+    assert closest == assignment
+    assert hits[0]["taxonomy"]["level 5"] == "vOTU-052719"
+    assert hits[0]["taxonomy_source"] == "UHGV_default"
+    assert hits[0]["relation"] == "same species"
+
+
+def test_icv_and_imgvr_sources_are_viruses_too() -> None:
+    for lineage, source in ((ICTV, "UHGV_ictv"), (UHGV_FAMILY, "IMGVR_4.1")):
+        assignment, _ = classify_hits([source_hit(99.0, lineage, source)])
+        assert assignment is not None and assignment["note"] == VIRUS_CAVEAT
+
+
+def test_fungi_get_the_fungal_caveat() -> None:
+    hits = [source_hit(97.0, FUNGI, "FungiRefSeq-latest")]
+    assignment, closest = classify_hits(hits)
+    assert assignment is not None
+    assert assignment["taxon"] == "Pyricularia oryzae"
+    assert assignment["taxonomy"]["kingdom"] == "Eukaryota"
+    assert assignment["note"] == FUNGI_CAVEAT
+    assert closest is not None and closest["note"] == FUNGI_CAVEAT
+    # k__Fungi identifies a fungal lineage even under another source name
+    assert species_caveat(parse_lineage("k__Fungi;p__X", source="Local")) == FUNGI_CAVEAT
+
+
+def test_other_sources_get_the_generic_caveat() -> None:
+    lineage = "d__Bacteria;p__Bacillota;c__Bacilli"
+    hits = [source_hit(97.0, lineage, "SoilSMAG")]
+    assignment, _ = classify_hits(hits)
+    assert assignment is not None
+    assert assignment["note"] == GENERIC_CAVEAT.format(source="SoilSMAG")
+
+
+def test_below_the_threshold_the_note_is_on_the_closest_hit() -> None:
+    hits = [source_hit(90.0, UHGV_FAMILY, "UHGV_default")]
+    assignment, closest = classify_hits(hits)
+    assert assignment is None
+    assert closest is not None and closest["note"] == VIRUS_CAVEAT
+    assert closest["taxon"] == "vOTU-052719"
+
+
+def test_hits_of_two_sources_have_no_shared_rank() -> None:
+    hits = [
+        source_hit(98.0, UHGV_FAMILY, "UHGV_default"),
+        source_hit(97.0, UHGV_SPECIES, "UHGV_default"),
+        source_hit(96.0, FUNGI, "FungiRefSeq-latest"),
+        hit(95.5, LACTIS, "GCF_L"),
+        source_hit(95.0, UHGV_FAMILY, "UHGV_ictv"),
+    ]
+    assignment, _ = classify_hits(hits)
+    assert assignment is not None and assignment["taxon"] == "vOTU-052719"
+    assert [h["shared_rank"] for h in hits] == ["species", "level 4", None, None, None]
+    assert relations(hits) == [
+        "same species",
+        "same level 4",
+        "different source",
+        "different source",
+        "different source",
+    ]
+    # the hit's own taxonomy is still reported: only the *relation* is unknown
+    assert hits[2]["taxonomy_source"] == "FungiRefSeq-latest"
+    assert hits[3]["taxonomy_source"] == "GTDB"
+    # a GTDB hit compares with GTDB hits of another tax_source: one family
+    gtdb = [hit(97.0, LACTIS), {**hit(96.0, CREMORIS), "tax_source": "GTDB_r214"}]
+    classify_hits(gtdb)
+    assert gtdb[1]["shared_rank"] == "genus"
+
+
+def test_without_assignment_a_cross_source_hit_says_so() -> None:
+    hits = [
+        source_hit(90.0, UHGV_FAMILY, "UHGV_default"),
+        source_hit(89.0, FUNGI, "FungiRefSeq-latest"),
+    ]
+    classify_hits(hits)
+    assert hits[1]["relation"] == "different source from closest relative"
+    assert hits[1]["shared_rank"] is None
+
+
+def test_taxonomy_keys_are_absent_without_a_lineage() -> None:
+    hits = [hit(98.0, None)]
+    assignment, _ = classify_hits(hits)
+    assert assignment is not None
+    assert "taxonomy" not in assignment and "note" not in assignment
+    assert "taxonomy" not in hits[0] and "taxonomy_source" not in hits[0]
+
+
+def test_a_non_gtdb_source_wins_over_gtdb_metadata() -> None:
+    """The source that resolved the hit says which taxonomy it belongs to."""
+    hits = [
+        {
+            "ani": 99.0,
+            "accession": "GCA_1.1",
+            "gtdb_taxonomy": LACTIS,
+            "tax_lineage": UHGV_FAMILY,
+            "tax_source": "UHGV_default",
+        },
+        {**hit(98.0, LACTIS, "GCA_2.1"), "tax_source": "GTDB_r232"},
+    ]
+    assignment, _ = classify_hits(hits)
+    assert assignment is not None
+    assert assignment["taxon"] == "vOTU-052719"
+    assert assignment["gtdb_taxonomy"] is None  # it is not a GTDB call
+    assert hits[0]["taxonomy_source"] == "UHGV_default"
+    assert hits[1]["taxonomy_source"] == "GTDB_r232"
+    assert hits[1]["relation"] == "different source"
+

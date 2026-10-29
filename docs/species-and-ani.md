@@ -123,6 +123,41 @@ alignment-based ANI, and a sketch-based k-mer ANI at c=200 is not designed to
 resolve differences this small. If you need strain-level resolution, use
 dedicated tools on the closest genomes sylphd identifies.
 
+## Outside prokaryotes { #outside-prokaryotes }
+
+Everything above is about bacteria and archaea, the scope of GTDB. A server can
+also hold viral (UHGV), fungal (RefSeq) or MAG databases, and then a species
+call may come from a taxonomy where the 95 % rule means something else.
+
+sylphd keeps **one threshold for every source** — a per-source threshold is
+possible later without breaking the JSON — and tells you when it is a
+heuristic:
+
+- **Viruses (UHGV, IMG/VR).** 95 % ANI is the *vOTU* convention: MIUViG defines
+  a viral operational taxonomic unit as genomes with at least 95 % ANI over 85 %
+  of the shorter genome. sylph's ANI is computed from shared k-mers and
+  **ignores that aligned-fraction condition**, so two genomes that share a
+  small, conserved region can score above 95 % and still be different viruses.
+  Read a viral "same species" as "same vOTU by ANI", not as a taxonomic
+  assignment.
+- **Fungi.** There is no established ANI species boundary for fungi; published
+  genome comparisons use alignment-based ANI with their own cut-offs, usually
+  in the 95–97 % range. sylphd's 95 % is a heuristic there and species calls
+  may be wrong.
+- **Anything else** (MAG catalogues, other custom sources) gets a generic note:
+  the 95 % threshold is a prokaryote convention, not a property of that
+  taxonomy.
+
+The caveat appears as `note` on the `assignment` (or `closest`) object and as
+one `sylphd: warning:` line per output on stderr; `--quiet` hides it and
+`--json` never prints it. GTDB sources carry no note.
+
+The rank names follow the lineage of the source: GTDB's
+`domain … species`, ICTV's `realm`/`kingdom` (parsed from `r__`/`k__` tokens),
+and `level 1 … level N` for the prefix-less UHGV lineages. Relations between
+hits (`same genus`, ...) are only computed within one source, because two
+taxonomies' ranks are not the same yardstick.
+
 ## Reading the ANI value at a glance
 
 These bands are rules of thumb, not definitions. Each range includes its lower

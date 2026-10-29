@@ -101,6 +101,7 @@ def _to_v2(path: str | Path) -> Path:
         for table in (
             "taxonomy_entry",
             "taxonomy_source",
+            "taxonomy_overlap",
             "dict_tax_lineage",
             "dict_tax_host",
         ):
@@ -850,6 +851,272 @@ class TestUpdate:
                 taxonomy=[TaxonomySource("UHGV_default", uhgv_file)],
             )
         assert not (tmp_path / "out.sqlite").exists()
+
+
+def _key_file(path: Path, keys: int, prefix: str, extra: str = "") -> Path:
+    """A sylph-tax file with ``keys`` rows ``<prefix>-01`` ... plus ``extra`` lines."""
+    text = "".join(f"{prefix}-{index:02d}\tlineage-{index}\n" for index in range(1, keys + 1))
+    path.write_text(text + extra, newline="")
+    return path
+
+
+class TestOverlaps:
+    """Overlapping sources are allowed but counted, warned about, and reported."""
+
+    def _two_sources(self, tmp_path: Path) -> tuple[Path, Path]:
+        first = _key_file(tmp_path / "first.tsv", 7, "SHARED")
+        # keys 3..9 overlap with `first` (7 keys), `ONLY-01` does not
+        second = _key_file(
+            tmp_path / "second.tsv", 9, "SHARED", extra="ONLY-01\tlineage\n"
+        )
+        return first, second
+
+    def test_two_imported_sources_warn_once_per_pair(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        first, second = self._two_sources(tmp_path)
+        output = tmp_path / "meta.sqlite"
+        stats = build_metadata_db(
+            [],
+            output,
+            taxonomy=[
+                TaxonomySource("First", first),
+                TaxonomySource("Second", second),
+            ],
+        )
+        captured = capsys.readouterr()
+        assert captured.err.count("warning") == 1  # exactly one warning for the pair
+        warning = captured.err.strip()
+        assert "'First'" in warning and "'Second'" in warning
+        assert "7 key(s)" in warning
+        # the first five shared keys, sorted
+        assert "examples: SHARED-01, SHARED-02, SHARED-03, SHARED-04, SHARED-05" in warning
+        assert "the source imported later (Second) wins for these keys" in warning
+        assert "import only one of them, or rebuild without one" in warning
+
+        assert stats["taxonomy_overlaps"] == [
+            {
+                "source": "Second",
+                "other": "First",
+                "keys": 7,
+                "examples": ["SHARED-01", "SHARED-02", "SHARED-03", "SHARED-04", "SHARED-05"],
+                "later": "Second",
+            }
+        ]
+        with MetadataDB(output) as db:
+            sources = db.taxonomy_sources()
+        assert sources[0]["overlaps"] == {"Second": 7}
+        assert sources[1]["overlaps"] == {"First": 7}
+
+    def test_overlap_with_the_virtual_gtdb_source(
+        self, tmp_path: Path, gtdb_source: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The virtual source is counted on the accession, as ``resolve`` looks it up."""
+        path = tmp_path / "local.tsv"
+        path.write_text(
+            "GCF_000005845.2\tvFAM-1;root\n"
+            "GCF_964372435.1\tvFAM-2;root\n"  # not an accession of the file
+            "SHARED-01\tvFAM-3;root\n",
+            newline="",
+        )
+        output = tmp_path / "meta.sqlite"
+        stats = build_metadata_db(
+            [gtdb_source],
+            output,
+            release=232,
+            taxonomy=[TaxonomySource("Local", path)],
+        )
+        warning = capsys.readouterr().err
+        assert "'GTDB_r232'" in warning and "'Local'" in warning
+        assert "1 key(s)" in warning
+        assert "examples: GCF_000005845.2" in warning
+        assert "the source imported later (Local) wins" in warning
+        assert stats["taxonomy_overlaps"][0]["other"] == "GTDB_r232"
+        # the counts are in the file, in both directions
+        connection = sqlite3.connect(output)
+        try:
+            assert sorted(connection.execute("SELECT keys FROM taxonomy_overlap")) == [
+                (1,),
+                (1,),
+            ]
+        finally:
+            connection.close()
+
+    def test_disjoint_sources_do_not_warn(
+        self, tmp_path: Path, gtdb_source: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        first = _key_file(tmp_path / "first.tsv", 3, "AAA")
+        second = _key_file(tmp_path / "second.tsv", 4, "BBB")
+        output = tmp_path / "meta.sqlite"
+        stats = build_metadata_db(
+            [gtdb_source],
+            output,
+            release=232,
+            taxonomy=[
+                TaxonomySource("First", first),
+                TaxonomySource("Second", second),
+            ],
+        )
+        captured = capsys.readouterr()
+        assert "warning" not in captured.err
+        assert "warning" not in captured.out
+        assert stats["taxonomy_overlaps"] == []
+        with MetadataDB(output) as db:
+            assert [source["overlaps"] for source in db.taxonomy_sources()] == [
+                {},
+                {},
+                {},
+            ]
+
+    def test_update_warns_about_the_source_it_adds(
+        self, tmp_path: Path, gtdb_source: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        first, second = self._two_sources(tmp_path)
+        path = tmp_path / "meta.sqlite"
+        build_metadata_db(
+            [gtdb_source],
+            path,
+            release=232,
+            taxonomy=[TaxonomySource("First", first)],
+        )
+        capsys.readouterr()  # drop the build's own (empty) output
+        stats = update_metadata_db(
+            path, path, taxonomy=[TaxonomySource("Second", second)]
+        )
+        warning = capsys.readouterr().err
+        assert warning.count("warning") == 1
+        assert "'First'" in warning and "'Second'" in warning
+        assert "7 key(s)" in warning
+        assert stats["taxonomy_overlaps"][0]["later"] == "Second"
+        with MetadataDB(path) as db:
+            sources = db.taxonomy_sources()
+            assert [source["name"] for source in sources] == [
+                "GTDB_r232",
+                "First",
+                "Second",
+            ]
+            assert sources[1]["overlaps"] == {"Second": 7}
+            assert sources[2]["overlaps"] == {"First": 7}
+
+    def test_replacing_a_source_refreshes_the_counts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        first, second = self._two_sources(tmp_path)
+        path = tmp_path / "meta.sqlite"
+        build_metadata_db(
+            [],
+            path,
+            taxonomy=[TaxonomySource("First", first), TaxonomySource("Second", second)],
+        )
+        capsys.readouterr()  # the build's own overlap warning
+        disconnected = _key_file(tmp_path / "disjoint.tsv", 2, "NOPE")
+        stats = update_metadata_db(
+            path, path, taxonomy=[TaxonomySource("Second", disconnected)]
+        )
+        assert stats["taxonomy_overlaps"] == []  # the replacement is disjoint
+        with MetadataDB(path) as db:
+            sources = db.taxonomy_sources()
+            assert sources[0]["overlaps"] == {}
+            assert sources[1]["overlaps"] == {}
+        assert "warning" not in capsys.readouterr().err
+
+    def test_an_old_v3_file_gains_the_counts_on_update(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A file written before ``taxonomy_overlap`` reads and is filled by --update."""
+        first, second = self._two_sources(tmp_path)
+        path = tmp_path / "meta.sqlite"
+        build_metadata_db(
+            [],
+            path,
+            taxonomy=[TaxonomySource("First", first), TaxonomySource("Second", second)],
+        )
+        # what the first release of format 3 wrote: entries but no overlap table
+        connection = sqlite3.connect(path)
+        connection.execute("DROP TABLE taxonomy_overlap")
+        connection.commit()
+        connection.close()
+        with MetadataDB(path) as db:
+            assert [source["overlaps"] for source in db.taxonomy_sources()] == [{}, {}]
+        capsys.readouterr()
+        stats = update_metadata_db(path, path)
+        assert stats["taxonomy_overlaps"] == []  # nothing imported, so no warning
+        with MetadataDB(path) as db:
+            sources = db.taxonomy_sources()
+        assert sources[0]["overlaps"] == {"Second": 7}
+        assert sources[1]["overlaps"] == {"First": 7}
+        assert "warning" not in capsys.readouterr().err
+
+    def test_info_reports_the_counts(
+        self, tmp_path: Path, gtdb_source: Path
+    ) -> None:
+        first, second = self._two_sources(tmp_path)
+        path = tmp_path / "meta.sqlite"
+        build_metadata_db(
+            [gtdb_source],
+            path,
+            release=232,
+            taxonomy=[TaxonomySource("First", first), TaxonomySource("Second", second)],
+        )
+        from sylphd.server import ServerConfig, create_app
+
+        app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, meta_path=path))
+        with TestClient(app) as client:
+            sources = client.get("/info").json()["metadata"]["taxonomy_sources"]
+        overlaps = {source["name"]: source["overlaps"] for source in sources}
+        assert overlaps == {
+            "GTDB_r232": {},
+            "First": {"Second": 7},
+            "Second": {"First": 7},
+        }
+
+    def test_sylphd_info_prints_the_counts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """``sylphd info`` follows the JSON, so a fake client covers the layout."""
+        document = {
+            "database": {
+                "name": "db",
+                "path": "db.syl2db",
+                "size": 1,
+                "genomes": 1,
+                "c": 200,
+                "k": 31,
+                "screen_c": None,
+                "two_stage": False,
+            },
+            "metadata": {
+                "path": "meta.sqlite",
+                "release": "232",
+                "rows": 2,
+                "built": "2026-01-01T00:00:00+00:00",
+                "columns": ["gtdb_taxonomy"],
+                "taxonomy_sources": [
+                    {"name": "First", "kind": "sylphtax", "rows": 9},
+                    {"name": "Second", "kind": "sylphtax", "rows": 10, "overlaps": {"First": 1234}},
+                ],
+            },
+            "limits": {},
+            "version": "0.0.0",
+            "pysylph_version": "0.0.0",
+            "python_version": "3.14.0",
+        }
+
+        class FakeClient:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *info: object) -> None:
+                return None
+
+            def info(self) -> dict[str, object]:
+                return document
+
+        monkeypatch.setattr(cli, "_client_from_args", lambda args: FakeClient())
+        assert cli.main(["info"]) == 0
+        out = capsys.readouterr().out
+        assert "    First: 9 keys" in out
+        assert "    Second: 10 keys, overlaps First (1,234 keys)" in out
 
 
 class TestCliSpecs:

@@ -31,13 +31,23 @@ for MAG contamination checks; see [Per-contig mode](#per-contig-mode).
 | `--local-sketch`, `--no-local-sketch` | `--local-sketch` | sketch locally and upload only the sketch, or (`--no-local-sketch`) upload the raw sequence, which only a server started with `--allow-sequences` accepts; `--per-contig` always sketches locally |
 | `--json` | off | print JSON instead of the table |
 | `-o, --output FILE` | stdout | write the output here |
-| `-q, --quiet` | off | do not print the summary on stderr |
+| `-q, --quiet` | off | do not print the summary or caveat on stderr |
 
-The table has the columns `rank`, `ani`, `relation`, `shared_rank`, `accession`, `gtdb_species`,
-`ncbi_organism_name` and `ncbi_taxid`. A summary line on stderr says whether the query was assigned
-to a species (`assigned to species ... (99.53 % ANI)`) or only has a closest relative
-(`no species-level match (< 95 % ANI); closest relative ...`). `--quiet` suppresses that line;
-`--json` never prints it.
+The table has the columns `rank`, `ani`, `relation`, `shared_rank`, `accession`, `taxon`,
+`gtdb_species`, `taxonomy_source`, `ncbi_organism_name` and `ncbi_taxid`. `taxon` is the finest
+taxon the hit's lineage names (GTDB's species for a GTDB hit, a vOTU for UHGV, a species for fungal
+RefSeq), `taxonomy_source` the source that named it, and `gtdb_species` stays GTDB-only. A summary
+line on stderr says whether the query was assigned to a species (`assigned to species ...
+(99.53 % ANI)`) or only has a closest relative (`no species-level match (< 95 % ANI); closest
+relative ...`). `--quiet` suppresses that line; `--json` never prints it.
+
+When the best hit is **not from GTDB** — a UHGV, fungal RefSeq or MAG database — a second line
+follows the summary, once per run: `sylphd: warning: viruses (UHGV): 95 % ANI matches the vOTU
+convention ...` or the fungal/generic wording. The same text is the `note` of the JSON `assignment`
+(or `closest`), and the summary then reads `assigned to <taxon> at the 95 % species threshold`
+instead of `assigned to species <taxon>`, because the taxon is the source's last named rank (an
+ICTV genus, a vOTU, a fungal species). The 95 % threshold itself does not change per source; see
+[Outside prokaryotes](../guides/assembly.md#outside-prokaryotes).
 
 The ANI is the naive containment ANI (`no_adjust`), the meaningful measure for an assembly.
 [Identifying an assembly](../guides/assembly.md) explains this, the 95 % species assignment and
@@ -95,8 +105,8 @@ The TSV has one row per contig and hit (and one row for a contig that has none),
 columns followed by the metadata columns selected by `--fields`:
 
 ```text
-contig  contig_length  gc     status  rank  ani    shared_kmers  contig_kmers  explained_fraction  reference_ani  relation      shared_rank  ani_species_level  accession        gtdb_species              n_close  consensus_rank  consensus_taxon
-contig1 1954431        50.76  ok      1     99.12  6398          8413          0.7605              96.16          same species  species      true               GCA_000005845.2  Escherichia coli          2        family          Enterobacteriaceae
+contig  contig_length  gc     status  rank  ani    shared_kmers  contig_kmers  explained_fraction  reference_ani  relation      shared_rank  ani_species_level  accession        gtdb_species      taxon             n_close  consensus_rank  consensus_taxon
+contig1 1954431        50.76  ok      1     99.12  6398          8413          0.7605              96.16          same species  species      true               GCA_000005845.2  Escherichia coli  Escherichia coli  2        family          Enterobacteriaceae
 contig7 2500           44.10  too_short
 contig8 18000          61.20  no_hit
 ```
@@ -108,8 +118,10 @@ contig8 18000          61.20  no_hit
   land well below 1.
 - `reference_ani` is sylph's genome-denominator `Naive_ANI` in percent.
 - `ani_species_level` is `true` when the hit's ANI alone reaches 95 %; `relation` and `shared_rank`
-  come from the GTDB lineage, as in single-assembly mode; `gtdb_species` is empty without metadata
-  or without an `s__` rank.
+  come from the hit's lineage (within one taxonomy source), as in single-assembly mode;
+  `gtdb_species` is empty without metadata, without an `s__` rank or for a non-GTDB hit, and
+  `taxon` is the hit's finest named rank from whatever source resolved it (a GTDB species, a UHGV
+  vOTU, a fungal species).
 - `n_close`, `consensus_rank` and `consensus_taxon` describe the whole contig (see
   [Taxonomic consensus](#per-contig-consensus)); they are the same on every row of a contig.
 - `status` is `ok`, `too_short` or `no_hit`. Use `--fields none` for this compact table, `--fields
@@ -134,7 +146,7 @@ sd           = (100/k) * sqrt((1 - p) / (n * p))    p = shared_kmers / contig_km
 consensus    = lowest common rank of the GTDB lineages of the close species (best included)
 ```
 
-1. Only the best hit of each GTDB species counts (by unrounded ANI); `n_close` is the number of
+1. Only the best hit of each species counts (by unrounded ANI); `n_close` is the number of
    species left after that reduction.
 2. `R * d_best` says how much more divergent than the best hit a species may be, and the noise term
    widens that allowance exactly as much as the ANI estimates themselves are uncertain: `sd` is
@@ -148,9 +160,18 @@ consensus    = lowest common rank of the GTDB lineages of the close species (bes
    or lower it to 1 to require a species to be almost exactly as close as the best one;
    `--consensus-z 0` drops the noise allowance.
 4. A `species` consensus also requires the best hit to reach the same **95 % species threshold**
-   that `assignment` uses. Below it the lowest common rank is truncated to at most genus, even when
-   the closest species is the only close hit: a 25 kb contig at 91.75 % to *Leptospira alexanderi*
-   comes out as `Leptospira` (genus), not that species.
+   that `assignment` uses. Below it the lowest common rank is truncated to the rank above the
+   species-equivalent rank, even when the closest species is the only close hit: a 25 kb contig at
+   91.75 % to *Leptospira alexanderi* comes out as `Leptospira` (genus), not that species. For a
+   prefix-less lineage the species-equivalent rank is its deepest level, so a lone vOTU at 91 %
+   is reported one level up (a `level 4`, vSUBGEN) instead.
+5. Lineages are read generically: GTDB `d__..;s__`, fungal `k__Eukaryota;..`, ICTV
+   `root;Monodnaviria;..` (``root`` is not a taxon) and UHGV's prefix-less `vFAM-..;vOTU-..` become
+   `level 1` ... `level N`. `consensus_rank` is the rank's display name, so a viral consensus can
+   be `level 4`.
+6. Only lineages of **one source** are intersected. When the close set spans two taxonomy sources
+   the consensus is empty (`consensus_rank`/`consensus_taxon` empty in the TSV) and the JSON
+   consensus has `mixed_sources: true`: the ranks of two taxonomies are not the same yardstick.
 
 The consensus is not a claim that the contig is a member of that taxon: it is the deepest rank the
 close set agrees on. Below roughly **90-92 % ANI** there is little left to agree on — at 90 % ANI a
@@ -209,7 +230,7 @@ not detected: k-mer counts cannot tell them from a uniformly divergent contig.
   one POST and counts against `--rate-limit`.
 - **Classification** is identical to the single-assembly path, but with the contig-relative ANI:
   the 95 % species assignment (`assignment`), the closest relative, and the
-  `relation`/`shared_rank` from the GTDB lineage.
+  `relation`/`shared_rank` from the hit's lineage (generic, within one taxonomy source).
 - **`--top`** defaults to `1` here: one row per contig is what a contamination check needs, and the
   consensus already summarises the other hits. `--top N` lists up to N hits per contig, with the
   consensus columns repeated on each row. The consensus always uses every hit the server returns,
@@ -233,8 +254,9 @@ not detected: k-mer counts cannot tell them from a uniformly divergent contig.
 `sketch_kmers`, `contig_kmers`, optionally `reason`, a `consensus` object, and
 `assignment`/`closest` objects of the same shape as
 [`POST /assembly`](../reference/http-api.md#post-assembly), plus its `hits`. `consensus` is `null`
-for a contig without hits, otherwise `{"rank", "taxon", "n_close", "species"}`, with `rank` and
-`taxon` `null` when there is no metadata or the close species share no rank:
+for a contig without hits, otherwise `{"rank", "taxon", "n_close", "species"}` (and
+`"mixed_sources": true` when the close set spans two taxonomy sources), with `rank` and `taxon`
+`null` when there is no metadata, the close species share no rank or the sources are mixed:
 
 ```json
 "consensus": {"rank": "genus", "taxon": "Bacillus", "n_close": 2,
@@ -243,14 +265,18 @@ for a contig without hits, otherwise `{"rank", "taxon", "n_close", "species"}`, 
 
 Every hit carries `rank`, `ani`, `shared_kmers`, `contig_kmers`, `explained_fraction`,
 `reference_ani`, `reference_containment`, `relation`, `shared_rank`, `ani_species_level`,
-`genome_file`, `accession`, `gtdb_species`, and the metadata columns of `--fields` flat in the hit.
+`genome_file`, `accession`, `gtdb_species`, `taxon` and, when it has a lineage, `taxonomy` and
+`taxonomy_source`, and the metadata columns of `--fields` flat in the hit.
 `params` repeats `top`, `min_ani`, `min_contig_length`, `consensus_ratio`, `consensus_z` and the
 query settings sent to the server. JSON mode never writes to stderr, as in single-assembly mode:
 the summary is in the document, so `--quiet` is only useful in table mode.
 
 In table mode a summary goes to stderr: how many contigs and bases were queried, how many were
 skipped for length or k-mer count, how many had no hit, and the fraction of the queried bases per
-**consensus** taxon with its rank (the top five). Aggregating by consensus rather than by top hit
+**consensus** taxon with its rank (the top five). When a contig's best hit is not from GTDB, the
+caveat of that source (viruses, fungi, generic — see
+[Outside prokaryotes](../guides/assembly.md#outside-prokaryotes)) follows **once per output**,
+however many contigs it applies to. Aggregating by consensus rather than by top hit
 is what makes the line readable: one organism spread over several near-identical GTDB species
 (and their placeholder genera) counts once, at the rank the data supports. A large minority taxon
 is the contamination signal.

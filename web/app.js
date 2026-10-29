@@ -782,10 +782,19 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   function decorate(h) {
     const lin = parseLineage(h.gtdb_taxonomy);
     return Object.assign({}, h, {
-      _lin: lin, _species: lineageName(lin, 's'), _genus: lineageName(lin, 'g'),
+      _lin: lin, _species: lineageName(lin, 's') || genericTaxon(h), _genus: lineageName(lin, 'g'),
       _rel: relClass(h),
       _frac: Array.isArray(h.containment) && h.containment[1] > 0 ? h.containment[0] / h.containment[1] : (h.containment_fraction ?? null),
     });
+  }
+
+  // A hit outside GTDB carries the server's generic `taxonomy` object ({rank: taxon},
+  // shallowest first); its last value is the finest taxon, e.g. a vOTU or a fungal species.
+  function genericTaxon(h) {
+    const tax = h.taxonomy;
+    if (!tax || typeof tax !== 'object' || Array.isArray(tax)) return '';
+    const names = Object.values(tax).filter((name) => typeof name === 'string' && name.trim());
+    return names.length ? names[names.length - 1] : '';
   }
 
   function renderResults(data, clientMs, local) {

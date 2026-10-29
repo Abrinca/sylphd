@@ -91,9 +91,12 @@ The file contains:
   a source collapse), `has_host` and `built`;
 - **`taxonomy_entry`** — `(source_id, key)` → `lineage`/`host`, dictionary ids, `WITHOUT ROWID`,
   with an index on `key` for batched lookups;
+- **`taxonomy_overlap`** — `(source_id, other_id)` → `keys`: how many keys two sources share,
+  written in both directions; see [overlapping sources](#overlapping-sources);
 - **`dict_tax_lineage`**, **`dict_tax_host`** — `id`, `value`, like the other dictionary tables;
 - the `info` keys `sylphtax_rules` (the sylph-tax version whose file formats and rules were
-  implemented, currently `1.9.2`) and `taxonomy_sources` (a JSON copy of `taxonomy_source`).
+  implemented, currently `1.9.2`) and `taxonomy_sources` (a JSON copy of `taxonomy_source`,
+  including each source's `overlaps`).
 
 Two kinds of source exist:
 
@@ -103,8 +106,30 @@ Two kinds of source exist:
 | `sylphtax` | one imported file; `md5` is always computed from the file, `origin` is the path or the download URL |
 
 `GET /info` reports the sources under `metadata.taxonomy_sources` (name, kind, origin, md5, rows,
-has_host) and `metadata.sylphtax_rules`; `sylphd info` prints one line per source. A format 2
-file reports neither key, so its output is unchanged.
+has_host, `overlaps`) and `metadata.sylphtax_rules`; `sylphd info` prints one line per source. A
+format 2 file reports neither key, so its output is unchanged.
+
+### Overlapping sources { #overlapping-sources }
+
+**Import one taxonomy per database.** Sources that share keys are allowed — key spaces of GTDB
+(`GCA_/GCF_...`), UHGV (`UHGV-...`), fungi and GlobDB overlap in the wild — but they are never
+silent: when a source is imported (a build or `--update`), `setup` counts, in SQL, the keys it has
+in common with the sources already in the file, **including the virtual GTDB source** (compared on
+`metadata_data.accession`, the key `resolve` looks up, so an accession in the file and the same key
+in a sylph-tax file count), and warns once per pair:
+
+```text
+sylphd: warning: taxonomy sources 'UHGV_default' and 'UHGV_ictv' share 1,234 key(s)
+(examples: UHGV-0001, UHGV-0002, ...): the source imported later (UHGV_ictv) wins for
+these keys; import only one of them, or rebuild without one
+```
+
+The warning goes to the log and to stderr (it is not progress, so `-q` does not hide it) and the
+import still succeeds. For a shared key the source imported later wins (larger `ord`); `profile
+--tax-source NAME` restricts a request to one source. The counts are stored in `taxonomy_overlap`
+and reported as `overlaps: {"<other source>": <keys>}` per source by `sylphd info` and `GET /info`
+(`{}` when the source is disjoint). A version 3 file written before the table existed still reads;
+the next `--update` adds the table and fills the counts once.
 
 ### Resolving a hit { #resolving-a-hit }
 

@@ -1,7 +1,8 @@
 # Identifying an assembly
 
-`sylphd assembly` finds the closest GTDB genomes to one assembly. It is the command-line twin of
-the [web app](https://abrinca.github.io/sylphd/): both **sketch the assembly locally** with the
+`sylphd assembly` finds the closest database genomes to one assembly — GTDB genomes on a GTDB
+server, and viral, fungal or MAG genomes too when the server holds several databases with a
+format 3 metadata file. It is the command-line twin of the [web app](https://abrinca.github.io/sylphd/): both **sketch the assembly locally** with the
 database's `c` and `k` and send only the sketch to
 [`POST /assembly`](../reference/http-api.md#post-assembly), where the server runs sylph and
 classifies the hits. The sequence never leaves your machine (the command line sketches with
@@ -26,15 +27,27 @@ sample, so a multi-contig draft is fine. With `--no-local-sketch` the server acc
 A table on stdout with the closest genomes by decreasing ANI, and one summary line on stderr:
 
 ```text
-rank  ani    relation      shared_rank  accession        gtdb_species      ncbi_organism_name     ncbi_taxid
-1     99.53  same species  species      GCA_000005845.2  Escherichia coli  Escherichia coli K-12  562
-2     90.12  same genus    genus        GCF_000...       Escherichia sp...  ...                    ...
+rank  ani    relation      shared_rank  accession        taxon             gtdb_species      taxonomy_source  ncbi_organism_name     ncbi_taxid
+1     99.53  same species  species      GCA_000005845.2  Escherichia coli  Escherichia coli  GTDB_r232        Escherichia coli K-12  562
+2     90.12  same genus    genus        GCF_000...       Escherichia sp...  Escherichia sp...  GTDB_r232        ...                    ...
 ```
 
 ```text
 assigned to species Escherichia coli (99.53 % ANI)
+```
+
+```text
+assigned to Lambdavirus at the 95 % species threshold (99.98 % ANI)
+sylphd: warning: viruses (UHGV): 95 % ANI matches the vOTU convention (MIUViG: ...)
+```
+
+```text
 no species-level match (< 95 % ANI); closest relative ... (...)
 ```
+
+A non-GTDB assignment is worded as "assigned to *taxon* at the 95 % species threshold", because
+the taxon is the source's last named rank (an ICTV genus, a vOTU, a fungal species) and the
+threshold is a heuristic there.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -49,10 +62,14 @@ no species-level match (< 95 % ANI); closest relative ... (...)
 | `--local-sketch` / `--no-local-sketch` | `--local-sketch` | sketch on this machine and upload only the sketch, or upload the raw sequence (needs `--allow-sequences` on the server) |
 | `--json` | off | print JSON instead of the table |
 | `-o FILE` | stdout | write the output to a file |
-| `--quiet` | off | no summary on stderr |
+| `--quiet` | off | no summary or caveat on stderr |
 
-The columns `gtdb_species`, `ncbi_organism_name` and `ncbi_taxid` are empty when the server has no
-metadata database. The JSON response carries every metadata column; see the
+`taxon` is the finest taxon the hit's lineage names: GTDB's species for a GTDB hit, the vOTU for a
+UHGV hit, the species for a fungal RefSeq hit. `taxonomy_source` says which taxonomy named it
+(`GTDB_r232`, `UHGV_default`, `FungiRefSeq-latest`, ...). The columns `taxon`, `gtdb_species`,
+`ncbi_organism_name` and `ncbi_taxid` are empty when the server has no metadata database, and
+`gtdb_species` is also empty for a hit without an `s__` rank or from a non-GTDB source. The JSON
+response carries every metadata column and the structured `taxonomy` of each hit; see the
 [`POST /assembly` reference](../reference/http-api.md#post-assembly).
 
 ## Per-contig mode { #per-contig }
@@ -82,21 +99,26 @@ contig on the way.
 The output has one row per contig and hit with `contig`, `contig_length`, `gc`, `status`
 (`ok`, `too_short` or `no_hit`), `rank`, `ani`, `shared_kmers`, `contig_kmers`,
 `explained_fraction`, `reference_ani`, `relation`, `shared_rank`, `ani_species_level`, `accession`,
-`gtdb_species`, `n_close`, `consensus_rank` and `consensus_taxon`, then the metadata columns
-(`--fields`). `reference_ani` is sylph's genome-denominator value, kept for continuity;
+`gtdb_species`, `taxon`, `n_close`, `consensus_rank` and `consensus_taxon`, then the metadata
+columns (`--fields`). `taxon` is the hit's finest named rank from whatever source resolved it.
+`reference_ani` is sylph's genome-denominator value, kept for continuity;
 `explained_fraction` is the fraction of the contig's k-mers the hit explains. A summary on stderr
 gives the number of queried contigs and bases and the fraction of bases per consensus taxon (top
 five), which is the contamination signal. Duplicate record ids get a `_2`, `_3` suffix.
 
 **The consensus is what you should read.** The top hit is not stable: in GTDB r232 the genomes
 nearest to *E. coli* K-12 belong to several near-identical placeholder species and genera, so which
-one wins changes with a k-mer or two. Per contig the command therefore keeps the best hit per GTDB
+one wins changes with a k-mer or two. Per contig the command therefore keeps the best hit per
 species and takes the lowest common rank of the ones whose divergence is within `1.5x` the best
 hit's plus `2` standard deviations of the ANI sampling noise (see
 [the rule](../commands/assembly.md#per-contig-consensus)). A near-exact, well-covered contig
 resolves to its species; an ambiguous, short or noisy one widens to genus, family or higher instead
 of inventing a species. A species consensus also requires the 95 % species threshold, so a distant
-contig stops at genus. `--consensus-ratio` and `--consensus-z` tune the allowance; the defaults
+contig stops at genus. The lineages are read generically: a UHGV close set resolves to `level 4`
+(a vSUBGEN) where a GTDB one resolves to a genus. Lineages of **two sources are never combined** —
+a close set that spans sources has no consensus (`mixed_sources: true` in JSON), because the rank
+names of two taxonomies are not the same yardstick. `--consensus-ratio` and `--consensus-z` tune the
+allowance; the defaults
 resolve 166 of the 170 contigs of a real *Leptospira* assembly to *L. interrogans*, 3 to
 `Leptospira` (genus, 91.8-94.4 % to their closest species) and 1 to `Bacteria` (3.3 kb), while a
 K-12 contig comes out as `Enterobacteriaceae` (family) — exactly how far GTDB r232's *E. coli*
@@ -170,7 +192,9 @@ and `profile`, if you use an assembly as a sample there.
 The server answers with an `assignment`: does the best hit say which species the query is?
 
 - **95 % ANI is GTDB's species circumscription** and the only hard threshold. If the best hit
-  reaches `95` %, the query is **assigned to that hit's GTDB species**.
+  reaches `95` %, the query is **assigned to that hit's species** — for a hit from another
+  taxonomy source, to the last named rank of its lineage (see
+  [Outside prokaryotes](#outside-prokaryotes)).
 - Otherwise there is no species-level match. The response then has no assignment, and the
   `closest` relative (the best hit) is reported instead.
 - Below **85 %** the k-mer ANI is imprecise. `thresholds.imprecise_below` (`85`) is only a hint for
@@ -181,22 +205,45 @@ Without a metadata database the server cannot name the species. The assignment s
 
 ## Hit relations
 
-Every hit gets a `relation`, derived from the **GTDB lineage**, not from the ANI. The server
-compares the lineage of each hit (`d__;p__;c__;o__;f__;g__;s__`) with a reference lineage and takes
-the deepest rank they share. A rank only counts when all shallower ranks agree.
+Every hit gets a `relation`, derived from its **lineage**, not from the ANI. The server compares
+the lineage of each hit with a reference lineage and takes the deepest rank they share. A rank only
+counts when all shallower ranks agree.
 
 - With an assignment, the reference is the **assigned species**, and hits are labelled
   `same species`, `same genus`, `same family`, ... up to `same domain` (or `different domain`).
 - Without one, the reference is the **closest relative** (the best hit). That hit is labelled
   `closest relative`, and others `same genus as closest relative`, and so on.
 
-A hit in the same GTDB species as the assignment is `same species` whatever its ANI. Separately,
-`ani_species_level` is true for every hit with `ani >= 95`. A hit that has it but a different GTDB
+A hit in the same species as the assignment is `same species` whatever its ANI. Separately,
+`ani_species_level` is true for every hit with `ani >= 95`. A hit that has it but a different
 species name (a species boundary case) gets the lineage relation, for example `same genus`, plus
 `ani_species_level: true`. The full table of relations is in the
 [API reference](../reference/http-api.md#hit-relations).
 
 Without metadata (ANI only), a hit is `same species` for `ani >= 95` and `related` otherwise.
+
+Lineages are read whatever their shape: GTDB's `d__;p__;c__;o__;f__;g__;s__`, fungal RefSeq's
+`k__Eukaryota;p__...;s__...`, ICTV's `root;Monodnaviria;...` and UHGV's prefix-less
+`vFAM-...;vOTU-...` (which becomes `level 1` ... `level 5`). Relations are only computed **within
+one taxonomy source**: a hit from another source has no comparable ranks, so it gets
+`different source` (or `different source from closest relative`) with `shared_rank: null`. GTDB
+hits always compare with each other, whatever source name resolved them.
+
+## Outside prokaryotes { #outside-prokaryotes }
+
+The 95 % threshold is a prokaryote convention (see
+[What does "same species" mean?](../species-and-ani.md#outside-prokaryotes)). On a server with
+UHGV, fungal RefSeq or other non-GTDB databases the server still applies **the same 95 %** to every
+source, but it says so:
+
+- `assignment.note` (JSON) and a `sylphd: warning: ...` line on stderr (suppressed by `--quiet`,
+  never printed in `--json` mode) when the best hit is not from GTDB. Viruses (UHGV) get the vOTU
+  wording — MIUViG calls a vOTU at 95 % ANI over 85 % of the shorter genome, and sylph's ANI
+  ignores the aligned fraction. Fungi get "no established ANI boundary, a heuristic". Any other
+  source gets a generic note.
+- `--per-contig` and `--taxprof`/`--taxmatrix` with `--taxonomy tax` print the same caveat **once
+  per output**, not once per row.
+- `thresholds.species` in JSON is still one value; a per-source threshold may come later.
 
 ## Limits
 

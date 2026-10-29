@@ -349,5 +349,6 @@ class TestDictLayout:
                     "md5": None,
                     "rows": 3,  # one row has no gtdb_taxonomy
                     "has_host": False,
+                    "overlaps": {},
                 }
             ]

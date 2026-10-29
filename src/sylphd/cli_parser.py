@@ -212,7 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # assembly ----------------------------------------------------------
     assembly_parser = subparsers.add_parser(
-        "assembly", help="find the closest GTDB genomes to one assembly"
+        "assembly", help="find the closest database genomes to one assembly"
     )
     assembly_parser.add_argument(
         "file", metavar="FILE", help="assembly in FASTA or FASTQ, plain or gzip"

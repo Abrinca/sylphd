@@ -148,6 +148,41 @@ All notable changes to `sylphd` are documented here. The format follows
   repeated strain rows — are committed and always compared byte for byte, for all four
   `--taxmatrix-value`s and the one-sample path; the same comparisons rerun against the real
   sylph-tax when it is installed.
+- **Overlapping taxonomy sources are counted and warned about.** Importing one taxonomy per
+  database is the rule, but `setup` (build and `--update`) no longer accepts a silent overlap: when
+  a source is imported it counts in SQL the keys it shares with the sources already in the file —
+  the virtual GTDB source included, compared on `metadata_data.accession` as `resolve` does — and
+  prints one warning per pair, naming both sources, the number of shared keys, the first five keys
+  and what happens ("the source imported later (NAME) wins for these keys; import only one of them,
+  or rebuild without one"). The warning goes to the logger *and* to stderr, because `setup`
+  configures no logging and `-q` silences progress only; the import still succeeds. The counts are
+  stored in the new, additive `taxonomy_overlap` table (both directions, format stays 3; a file
+  written before the table existed still reads, and the next `--update` fills it) and are shown as
+  `overlaps: {"<other source>": <keys>}` per source by `sylphd info` and `GET /info`.
+
+- **`sylphd assembly` classifies hits from any taxonomy source, not only GTDB.** Lineages are
+  parsed generically: rank prefixes `d` domain, `r` realm, `k` kingdom, `p` phylum, `c` class,
+  `o` order, `f` family, `g` genus, `s` species, `t` strain, and `level 1` ... `level N` for the
+  prefix-less UHGV and ICTV lineages (`root;Monodnaviria;...` loses the root). The 95 % species
+  call applies to **every** source, and `assignment.taxon` is the last named rank of the hit's
+  lineage (a GTDB species, a vOTU, a fungal species). `assignment`, `closest` and every hit gain
+  the additive `taxonomy` object (`{rank: taxon}`, shallowest first) and `taxonomy_source`, absent
+  only when the hit has no lineage, so a metadata-less response keeps its shape and the
+  single-database `/assembly` golden is unchanged. Relations are computed **within one taxonomy
+  source**: a hit of another source is `different source` (or `different source from closest
+  relative`) with `shared_rank: null`, while GTDB hits always compare with each other. The CLI
+  table adds `taxon` and `taxonomy_source` columns.
+- **The 95 % caveat outside prokaryotes.** When the best hit is not from GTDB, `assignment` (or
+  `closest` without an assignment) carries a `note` and the CLI prints one `sylphd: warning:` line
+  on stderr (suppressed by `--quiet`, never in `--json`): the vOTU convention for viruses (MIUViG's
+  95 % ANI over 85 % of the shorter genome, which sylph's ANI does not check), "no established ANI
+  boundary, a heuristic" for fungi, a generic text for other sources. `assembly --per-contig` and
+  `profile --taxprof`/`--taxmatrix` with `--taxonomy tax` print each caveat once per output.
+- **Per-contig consensus outside GTDB.** The consensus parses lineages generically and reports the
+  rank's display name (`level 4` for a UHGV vSUBGEN); the sub-95 % cap moves one rank up from the
+  species-equivalent rank (GTDB species -> genus, a prefix-less vOTU -> its parent level). A close
+  set spanning two taxonomy sources has no consensus (`mixed_sources: true` in JSON, empty
+  `consensus_rank`/`consensus_taxon` in the table). The table adds a `taxon` column.
 
 ### Changed
 

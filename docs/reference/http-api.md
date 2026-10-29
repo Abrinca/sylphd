@@ -48,7 +48,9 @@ Reports:
   and `sources`, or `null` without `--meta`. A format 3 file (taxonomy sources, see
   [the metadata reference](metadata.md#taxonomy-sources)) adds `taxonomy_sources` — one object per
   source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`,
-  `md5`, `rows` and `has_host` — and `sylphtax_rules` (the sylph-tax version whose rules apply).
+  `md5`, `rows`, `has_host` and `overlaps` (`{"<other source>": <shared keys>}`, empty when the
+  source is disjoint: the later-imported source wins for those keys) — and `sylphtax_rules` (the
+  sylph-tax version whose rules apply).
   Its `columns` also list the four `tax_*` columns, which `fields` can then select. A format 2 file
   has none of this, so its response is unchanged;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
@@ -178,8 +180,11 @@ sequences are accepted.
 Both bodies get exactly the same treatment from then on: the server profiles the sketch with
 `no_adjust=True` and keeps the `top` hits sorted by ANI. The same assembly gives the same hits,
 assignment and closest hit whichever way it is sent. `/assembly` queries the whole pool, so a hit
-list may mix databases; a hit from a database without GTDB metadata has `null` metadata columns
-and is classified `unknown lineage` (the taxonomy columns say which database it belongs to).
+list may mix databases. A hit resolved by a sylph-tax taxonomy source of a format 3 metadata file
+carries `tax_lineage`/`tax_source` and is classified from that lineage: `taxonomy` and
+`taxonomy_source` are added to the hit and to `assignment`/`closest` (GTDB's
+`d__..;s__`, fungal `k__Eukaryota;..`, ICTV `root;..`, UHGV `vFAM-..;vOTU-..`, see
+[hit relations](#hit-relations)). A hit without any lineage stays `unknown lineage`.
 
 ```json
 {"query": {"name": "assembly", "records": 1, "length": 6013491,
@@ -190,10 +195,13 @@ and is classified `unknown lineage` (the taxonomy columns say which database it 
  "thresholds": {"species": 95.0, "imprecise_below": 85.0},
  "assignment": {"rank": "species", "taxon": "Escherichia coli",
                 "gtdb_taxonomy": "d__Bacteria;...;s__Escherichia coli",
-                "accession": "GCF_000005845.2", "ani": 98.65},
+                "accession": "GCF_000005845.2", "ani": 98.65,
+                "taxonomy": {"domain": "Bacteria", "...": "...", "species": "Escherichia coli"},
+                "taxonomy_source": "GTDB_r232"},
  "closest": {"rank": "species", "taxon": "Escherichia coli",
              "gtdb_taxonomy": "d__Bacteria;...;s__Escherichia coli",
-             "accession": "GCF_000005845.2", "ani": 98.65},
+             "accession": "GCF_000005845.2", "ani": 98.65, "taxonomy": {"...": "..."},
+             "taxonomy_source": "GTDB_r232"},
  "elapsed_ms": 412.7,
  "hits": [{"rank": 1, "ani": 98.65, "containment": [7096, 10826],
            "containment_fraction": 0.655, "relation": "same species",
@@ -201,6 +209,8 @@ and is classified `unknown lineage` (the taxonomy columns say which database it 
            "genome_file": "/db/GCA_000005845.2_genomic.fna.gz",
            "accession": "GCF_000005845.2",
            "gtdb_taxonomy": "d__Bacteria;...;s__Escherichia coli",
+           "taxonomy": {"domain": "Bacteria", "...": "...", "species": "Escherichia coli"},
+           "taxonomy_source": "GTDB_r232",
            "ncbi_organism_name": "Escherichia coli K-12", "...": null}]}
 ```
 
@@ -217,8 +227,18 @@ and is classified `unknown lineage` (the taxonomy columns say which database it 
   k-mers occur in the assembly, and how many k-mers that genome's sketch holds (sylph's
   `Containment_ind`). `containment_fraction` is their ratio.
 - **`assignment`** is the species assignment: `{"rank": "species", "taxon", "gtdb_taxonomy",
-  "accession", "ani"}` when the best hit reaches `thresholds.species` (95 %), otherwise `null`.
-  `taxon` and `gtdb_taxonomy` are `null` without metadata.
+  "accession", "ani", "taxonomy", "taxonomy_source"}` when the best hit reaches
+  `thresholds.species` (95 %), otherwise `null`. `taxon` and `gtdb_taxonomy` are `null` without
+  metadata; `taxon` is the **last named rank** of the hit's lineage (GTDB's species, a UHGV vOTU, a
+  fungal species). `taxonomy` is the lineage as `{rank: taxon}`, shallowest first — `{"domain":
+  "Bacteria", ..., "species": "Escherichia coli"}` or `{"level 1": "vFAM-00013", ..., "level 5":
+  "vOTU-052719"}` — and `taxonomy_source` the source that named it (`GTDB_r232`, `UHGV_default`,
+  ...). Both keys are **absent** when the hit has no lineage, so a metadata-less response keeps its
+  shape.
+- **`note`** (on `assignment`, or on `closest` when there is no assignment) explains what 95 % ANI
+  means for a best hit that is **not** from GTDB: the vOTU convention for viruses (whose aligned
+  fraction sylph's ANI ignores), a heuristic for fungi, a generic text for other sources. It is
+  absent for GTDB and for a hit without a lineage.
 - **`closest`** has the same shape for the best hit, or `null` without hits.
 - **`thresholds.imprecise_below`** (`85`) is only a hint that k-mer ANI below it is imprecise. It
   never changes an assignment.
@@ -252,25 +272,38 @@ default, before decompression); over the rate limit you get a `429` with `Retry-
 
 ### Hit relations { #hit-relations }
 
-`relation` is the human label and `shared_rank` its machine form. They come from the GTDB lineage
-(`d__;p__;c__;o__;f__;g__;s__`), not from the ANI. `shared_rank` is the deepest rank a hit shares
-with the reference lineage (`species`, `genus`, `family`, `order`, `class`, `phylum`, `domain` or
-`null`); a rank only counts when all shallower ranks agree. The reference is the best hit's lineage.
+`relation` is the human label and `shared_rank` its machine form. They come from the hit's
+**lineage**, not from the ANI. Lineages are parsed generically: rank prefixes `d` domain,
+`r` realm, `k` kingdom, `p` phylum, `c` class, `o` order, `f` family, `g` genus, `s` species,
+`t` strain; a prefix-less lineage (UHGV's `vFAM-..;vOTU-..`, ICTV's `root;Monodnaviria;..`) is
+read as `level 1` ... `level N`, with a leading `root` dropped. `shared_rank` is the deepest rank a
+hit shares with the reference lineage (`species` ... `domain`, `realm`, `kingdom`, `strain`,
+`level N`, or `null`); a rank only counts when all shallower ranks agree. The reference is the best
+hit's lineage.
+
+Relations are computed **within one taxonomy source only**. A hit from another source has no
+comparable ranks, so it gets `different source` (or `different source from closest relative`) and
+`shared_rank: null`. GTDB hits always compare with each other, whatever `tax_source` resolved them;
+a hit whose lineage shares nothing with a non-GTDB reference is `different lineage`.
 
 | Situation | `relation` of the hit |
 |---|---|
-| assigned, shares rank *R* with the assigned species | `same species`, `same genus`, `same family`, `same order`, `same class`, `same phylum`, `same domain` |
-| assigned, shares nothing | `different domain` |
+| assigned, shares rank *R* with the assigned species | `same species`, `same genus`, `same family`, `same order`, `same class`, `same phylum`, `same domain`, `same level 4`, ... |
+| assigned, shares nothing | `different domain` (GTDB) or `different lineage` |
+| a hit of another taxonomy source | `different source` |
 | not assigned, the best hit | `closest relative` (`shared_rank` is `null`) |
 | not assigned, other hits, sharing rank *R* with the best hit | `same genus as closest relative`, ... |
-| not assigned, sharing nothing with the best hit | `different domain from closest relative` |
+| not assigned, sharing nothing with the best hit | `different domain from closest relative` or `different lineage from closest relative` |
+| not assigned, a hit of another source | `different source from closest relative` |
 | a hit without lineage next to classified hits | `unknown lineage` |
 | no metadata at all (ANI only) | `same species` for `ani >= 95`, else `related` |
 
-A hit in the same GTDB species as the assignment is `same species` whatever its ANI.
-`ani_species_level` is `ani >= 95` for every hit: a hit that has it but a different GTDB species
-name (a species boundary case) gets the lineage relation, for example `same genus`, plus
-`ani_species_level: true`.
+A hit in the same species as the assignment is `same species` whatever its ANI.
+`ani_species_level` is `ani >= 95` for every hit: a hit that has it but a different species name (a
+species boundary case) gets the lineage relation, for example `same genus`, plus
+`ani_species_level: true`. The 95 % threshold is a prokaryote convention and applies to every
+source for now; the `note` above says so where it is a heuristic, and `--per-contig` and the `tax`
+profile print the same caveat once on stderr.
 
 ## Errors
 

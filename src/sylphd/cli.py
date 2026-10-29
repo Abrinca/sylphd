@@ -22,7 +22,7 @@ import httpx
 
 from . import per_contig
 from .about import About, check_name
-from .assembly import gtdb_species
+from .assembly import gtdb_species, hit_lineage, species_caveat
 from .cli_parser import PROG, build_parser
 from .client import ClientError, connect
 from .download import (
@@ -310,6 +310,15 @@ def cmd_info(args: argparse.Namespace) -> int:
                     details.append("with hosts")
                 if source.get("md5"):
                     details.append(f"md5 {source['md5']}")
+                overlaps = source.get("overlaps") or {}
+                if overlaps:
+                    details.append(
+                        "overlaps "
+                        + ", ".join(
+                            f"{name} ({int(keys):,} keys)"
+                            for name, keys in overlaps.items()
+                        )
+                    )
                 print(f"    {source.get('name')}: " + ", ".join(details))
 
     limits = info.get("limits", {})
@@ -476,7 +485,28 @@ def cmd_contain(args: argparse.Namespace) -> int:
         )
         for path in written:
             print(f"{PROG}: wrote {path}", file=sys.stderr)
+        if "tax" in taxonomies:
+            # The 95 % threshold is a prokaryote convention: say so once per
+            # source the merged profile actually used (design note B6).
+            for note in _profile_caveats(result):
+                print(f"{PROG}: warning: {note}", file=sys.stderr)
     return 0
+
+
+def _profile_caveats(samples: Sequence[dict[str, Any]]) -> list[str]:
+    """Distinct species-threshold caveats of a merged ``tax`` profile.
+
+    One line per non-GTDB source, however many rows it has.  The rows carry
+    ``tax_source``/``tax_lineage`` because ``--taxonomy tax`` requests them
+    (``--fields`` does not matter).
+    """
+    notes: list[str] = []
+    for sample in samples:
+        for row in sample.get("rows") or ():
+            note = species_caveat(hit_lineage(row))
+            if note and note not in notes:
+                notes.append(note)
+    return notes
 
 
 def _client_from_args(args: argparse.Namespace):
@@ -694,8 +724,8 @@ def cmd_assembly(args: argparse.Namespace) -> int:
     else:
         with _open_output(args.output) as output:
             output.write(
-                "rank\tani\trelation\tshared_rank\taccession\tgtdb_species\t"
-                "ncbi_organism_name\tncbi_taxid\n"
+                "rank\tani\trelation\tshared_rank\taccession\ttaxon\tgtdb_species\t"
+                "taxonomy_source\tncbi_organism_name\tncbi_taxid\n"
             )
             for hit in result.get("hits", ()):
                 output.write(
@@ -706,7 +736,9 @@ def cmd_assembly(args: argparse.Namespace) -> int:
                             str(hit.get("relation") or ""),
                             str(hit.get("shared_rank") or ""),
                             str(hit.get("accession") or ""),
+                            str(_taxon(hit) or ""),
                             gtdb_species(hit.get("gtdb_taxonomy")),
+                            str(hit.get("taxonomy_source") or ""),
                             str(hit.get("ncbi_organism_name") or ""),
                             "" if hit.get("ncbi_taxid") is None else str(hit["ncbi_taxid"]),
                         ]
@@ -716,7 +748,31 @@ def cmd_assembly(args: argparse.Namespace) -> int:
     # JSON is a machine-readable document and has always been silent on stderr.
     if not args.json and not args.quiet:
         print(_assignment_summary(result), file=sys.stderr)
+        note = _species_note(result)
+        if note:
+            print(f"{PROG}: warning: {note}", file=sys.stderr)
     return 0
+
+
+def _taxon(hit: dict[str, Any]) -> str | None:
+    """The hit's last named rank from the additive ``taxonomy`` object."""
+    taxonomy = hit.get("taxonomy")
+    if not isinstance(taxonomy, dict) or not taxonomy:
+        return None
+    return str(next(reversed(taxonomy.values())))
+
+
+def _species_note(result: dict[str, Any]) -> str | None:
+    """The 95 % caveat of the best hit, or ``None`` for GTDB/no lineage (B6).
+
+    ``classify_hits`` puts it on ``assignment`` when the query was assigned and
+    on ``closest`` otherwise.
+    """
+    for key in ("assignment", "closest"):
+        summary = result.get(key)
+        if isinstance(summary, dict) and summary.get("note"):
+            return str(summary["note"])
+    return None
 
 
 def _assignment_summary(result: dict[str, Any]) -> str:
@@ -724,6 +780,13 @@ def _assignment_summary(result: dict[str, Any]) -> str:
     assignment = result.get("assignment")
     if assignment:
         taxon = assignment.get("taxon") or assignment.get("accession") or "the best hit"
+        if assignment.get("note"):
+            # Not GTDB: the 95 % threshold is a heuristic there, and the taxon is
+            # the last named rank of the source, which need not be a species.
+            return (
+                f"assigned to {taxon} at the 95 % species threshold "
+                f"({float(assignment['ani']):.2f} % ANI)"
+            )
         return f"assigned to species {taxon} ({float(assignment['ani']):.2f} % ANI)"
     closest = result.get("closest")
     if closest:

@@ -741,6 +741,125 @@ class TestTaxonomyOutputs:
         assert "no metadata database" in result.stderr
 
 
+class TestNonGtdbClassification:
+    """The 95 % caveat for a best hit outside GTDB (design note B6)."""
+
+    def _half(self, tmp_path: Path, records: int = 1) -> Path:
+        with dnaio.open(CLODF13_FASTA) as handle:
+            sequence = next(iter(handle)).sequence
+        half = sequence[: len(sequence) // 2]
+        size = len(half) // records
+        path = tmp_path / "half.fasta"
+        path.write_text(
+            "".join(
+                f">part{index}\n{half[index * size : (index + 1) * size]}\n"
+                for index in range(records)
+            )
+        )
+        return path
+
+    def test_assembly_warns_and_shows_the_generic_taxon(
+        self, taxonomy_server, tmp_path
+    ) -> None:
+        socket_path, _ = taxonomy_server
+        result = _run(
+            "assembly", str(self._half(tmp_path)), "--socket", str(socket_path)
+        )
+        assert result.returncode == 0, result.stderr
+        header, row = result.stdout.splitlines()[0].split("\t"), result.stdout.splitlines()[1]
+        assert header[5:8] == ["taxon", "gtdb_species", "taxonomy_source"]
+        # the fixture genome is in GTDB metadata too, but the UHGV source
+        # resolved this hit, so UHGV's lineage is the one that counts
+        assert row.split("\t")[5:8] == ["vOTU-1", "Clostridium difficile", "UHGV"]
+        assert "assigned to vOTU-1 at the 95 % species threshold" in result.stderr
+        assert result.stderr.count("warning:") == 1
+        assert "viruses (UHGV)" in result.stderr
+
+    def test_quiet_suppresses_the_caveat(self, taxonomy_server, tmp_path) -> None:
+        socket_path, _ = taxonomy_server
+        result = _run(
+            "assembly",
+            str(self._half(tmp_path)),
+            "--socket",
+            str(socket_path),
+            "--quiet",
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+    def test_json_carries_the_note_and_no_stderr(
+        self, taxonomy_server, tmp_path
+    ) -> None:
+        socket_path, _ = taxonomy_server
+        result = _run(
+            "assembly",
+            str(self._half(tmp_path)),
+            "--socket",
+            str(socket_path),
+            "--json",
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        payload = json.loads(result.stdout)
+        assert payload["assignment"]["taxon"] == "vOTU-1"
+        assert payload["assignment"]["taxonomy"] == {
+            "level 1": "vFAM-1",
+            "level 2": "vOTU-1",
+        }
+        assert payload["assignment"]["taxonomy_source"] == "UHGV"
+        assert payload["assignment"]["note"].startswith("viruses (UHGV)")
+        assert payload["closest"] == payload["assignment"]
+        (hit,) = payload["hits"]
+        assert hit["taxonomy_source"] == "UHGV"
+        assert hit["taxonomy"]["level 2"] == "vOTU-1"
+        assert hit["shared_rank"] == "species"
+
+    def test_per_contig_prints_the_caveat_once(self, taxonomy_server, tmp_path) -> None:
+        socket_path, _ = taxonomy_server
+        result = _run(
+            "assembly",
+            str(self._half(tmp_path, records=2)),
+            "--per-contig",
+            "--min-contig-length",
+            "1000",
+            "--socket",
+            str(socket_path),
+        )
+        assert result.returncode == 0, result.stderr
+        assert len(result.stdout.splitlines()) == 3  # header + two contigs
+        assert result.stderr.count("viruses (UHGV)") == 1
+        assert result.stderr.count("\n") == 3  # query line, consensus, caveat
+
+    def test_tax_profile_prints_the_caveat_once(self, taxonomy_server) -> None:
+        socket_path, directory = taxonomy_server
+        result = _run(
+            "profile",
+            str(directory / "one.sylsp"),
+            str(directory / "two.sylsp"),
+            "--socket",
+            str(socket_path),
+            "--taxonomy",
+            "tax",
+            "--taxprof",
+            str(directory / "warn-"),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stderr.count("viruses (UHGV)") == 1
+        # A GTDB-only profile has nothing to warn about.
+        gtdb = _run(
+            "profile",
+            str(directory / "one.sylsp"),
+            "--socket",
+            str(socket_path),
+            "--taxonomy",
+            "gtdb",
+            "--taxprof",
+            str(directory / "quiet-"),
+        )
+        assert gtdb.returncode == 0, gtdb.stderr
+        assert "warning:" not in gtdb.stderr
+
+
 class TestShutdown:
     # Last on purpose: it terminates the module-scoped ``server``.
     def test_graceful_shutdown_removes_socket(self, server) -> None:

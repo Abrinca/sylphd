@@ -38,7 +38,9 @@ genomes, and the best one changes with a k-mer or two.  Like CAT/BAT, the
 consensus is the lowest common rank of every species whose divergence from the
 best hit is within the ANI noise (see :func:`consensus`), so the answer
 degrades from species to genus to family only as far as the evidence is
-ambiguous.
+ambiguous.  Lineages are read generically (GTDB, ICTV, fungal RefSeq, UHGV
+levels), but only within one taxonomy source: a close set that spans two
+sources has no consensus.
 """
 
 from __future__ import annotations
@@ -53,13 +55,15 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from .assembly import (
-    GTDB_RANKS,
     INTERPRETATION_THRESHOLDS,
     SPECIES_ANI,
     classify_hits,
+    comparable,
     gtdb_species,
-    parse_gtdb_taxonomy,
+    hit_lineage,
+    rank_display,
 )
+from .cli_parser import PROG
 from .client import ClientError, SylphClient
 from .protocol import ProfileParams, params_json_size
 from .sketching import Contig, sketch_contigs
@@ -99,6 +103,7 @@ COLUMNS: tuple[str, ...] = (
     "ani_species_level",
     "accession",
     "gtdb_species",
+    "taxon",
     "n_close",
     "consensus_rank",
     "consensus_taxon",
@@ -149,10 +154,10 @@ def consensus(
     """Taxonomic consensus of one contig, from its hits (any order).
 
     Each hit is a mapping with ``ani`` (percent, unrounded), ``shared_kmers``,
-    ``gtdb_taxonomy``, ``accession`` and optionally ``genome_file``.  The rule,
-    per contig:
+    ``gtdb_taxonomy`` and/or ``tax_lineage``/``tax_source``, ``accession`` and
+    optionally ``genome_file``.  The rule, per contig:
 
-    1. Keep the best hit of every GTDB species (by ``ani``).  A hit without a
+    1. Keep the best hit of every species (by ``ani``).  A hit without a
        species name is its own taxon, keyed by its lineage or accession.
     2. A species is **close** to the best one when its divergence
        ``d = 100 - ani`` is within ``ratio`` times the best divergence plus
@@ -163,18 +168,26 @@ def consensus(
        The noise term (:func:`ani_noise`) widens the band for short contigs
        and shrinks it for long ones, so a 5 kb contig at 99 % resolves to
        genus while a 500 kb contig at 99 % resolves to species.
-    3. The consensus is the lowest common rank of the GTDB lineages of the
-       close set, including the best one.  With a single close species that is
-       its species; two species of one genus give the genus, and so on.
-    4. A species consensus needs the best hit at or above the species
+    3. The consensus is the lowest common rank of the lineages of the close
+       set, including the best one.  With a single close species that is its
+       species; two species of one genus give the genus, and so on.  Lineages
+       are parsed generically (:func:`~sylphd.assembly.parse_lineage`), so a
+       UHGV close set gives a ``level N`` and a fungal one a kingdom first.
+    4. Only lineages of the **same source** are combined (design note B6):
+       when the close set spans two taxonomy sources the consensus is empty
+       and ``mixed_sources`` is true.
+    5. A species consensus needs the best hit at or above the species
        threshold (:data:`~sylphd.assembly.SPECIES_ANI`, 95 %): below it the
-       answer is truncated to at most genus, because the GTDB species that
-       happens to be the only close hit is not a species-level identification.
+       answer is truncated to the rank above the species-equivalent rank —
+       genus for GTDB, one level up for a prefix-less lineage — because the
+       species that happens to be the only close hit is not a species-level
+       identification.
 
-    Returns ``{"rank", "taxon", "n_close", "species"}``, or ``None`` without
-    hits.  ``rank`` and ``taxon`` are ``None`` when a close lineage is missing
-    (no metadata): there is then nothing to place the contig on, but
-    ``n_close`` still counts the species.
+    Returns ``{"rank", "taxon", "n_close", "species"}`` (plus
+    ``"mixed_sources": True`` when rule 4 applied), or ``None`` without hits.
+    ``rank`` and ``taxon`` are ``None`` when a close lineage is missing (no
+    metadata): there is then nothing to place the contig on, but ``n_close``
+    still counts the species.
     """
     if not hits:
         return None
@@ -193,12 +206,12 @@ def consensus(
     candidates: list[dict[str, Any]] = []
     seen: set[Any] = set()
     for index, hit in enumerate(ordered):
-        lineage = parse_gtdb_taxonomy(hit.get("gtdb_taxonomy"))
-        species = lineage.get("s", "")
+        lineage = hit_lineage(hit)
+        species = lineage.species or ""
         if species:
-            key: Any = ("species", species)
+            key: Any = ("species", lineage.family, species)
         elif lineage:
-            key = ("lineage", tuple(sorted(lineage.items())))
+            key = ("lineage", lineage.family, lineage.ranks)
         elif hit.get("accession"):
             key = ("accession", hit["accession"])
         else:
@@ -211,6 +224,7 @@ def consensus(
                 "ani": float(hit["ani"]),
                 "sd": ani_noise(int(hit.get("shared_kmers") or 0), contig_kmers, k),
                 "lineage": lineage,
+                "names": lineage.names,
                 "species": species,
                 "accession": hit.get("accession"),
             }
@@ -227,24 +241,42 @@ def consensus(
 
     rank: str | None = None
     taxon: str | None = None
+    mixed_sources = False
     if all(candidate["lineage"] for candidate in close):
-        for prefix, name in GTDB_RANKS:
-            names = {candidate["lineage"].get(prefix) for candidate in close}
-            if len(names) == 1 and None not in names:
-                rank, taxon = name, names.pop()
-            else:
-                break
+        if any(
+            not comparable(best["lineage"], candidate["lineage"]) for candidate in close
+        ):
+            # Two taxonomy sources are two yardsticks: their ranks cannot be
+            # intersected, so the contig gets no consensus (design note B6).
+            mixed_sources = True
+        else:
+            rank_key: str | None = None
+            for key, name in best["lineage"].ranks:
+                if all(candidate["names"].get(key) == name for candidate in close):
+                    rank_key, taxon = key, name
+                else:
+                    break
+            if rank_key is not None:
+                rank = rank_display(rank_key)
 
-    if rank == "species" and best["ani"] < SPECIES_ANI:
+    species_key = best["lineage"].species_key
+    if (
+        rank is not None
+        and species_key is not None
+        and rank == rank_display(species_key)
+        and best["ani"] < SPECIES_ANI
+    ):
         # The species threshold is the only hard boundary the tool recognises.
         # A species that is merely the closest one (and the only close hit) is
-        # not a species-level call, so stop at the genus.
-        rank = "genus"
-        taxon = best["lineage"].get("g")
-        if taxon is None:
-            rank = None
+        # not a species-level call, so stop at the rank above it.
+        keys = [key for key, _ in best["lineage"].ranks]
+        index = keys.index(species_key)
+        rank = taxon = None
+        if index > 0:
+            rank = rank_display(keys[index - 1])
+            taxon = best["lineage"].ranks[index - 1][1]
 
-    return {
+    summary: dict[str, Any] = {
         "rank": rank,
         "taxon": taxon,
         "n_close": len(close),
@@ -257,6 +289,9 @@ def consensus(
             if name
         ],
     }
+    if mixed_sources:
+        summary["mixed_sources"] = True
+    return summary
 
 
 @dataclass(frozen=True)
@@ -437,6 +472,7 @@ class PerContigRun:
                         "true" if hit.get("ani_species_level") else "false",
                         str(hit.get("accession") or ""),
                         str(hit.get("gtdb_species") or ""),
+                        str(hit.get("taxon") or ""),
                         str(consensus.get("n_close") or 0),
                         str(consensus.get("rank") or ""),
                         str(consensus.get("taxon") or ""),
@@ -451,7 +487,11 @@ class PerContigRun:
             )
 
     def print_summary(self, stream: TextIO | None = None) -> None:
-        """Two human lines on stderr: query size and bases per consensus taxon."""
+        """Two human lines on stderr (plus a caveat per non-GTDB source).
+
+        The caveat of a source whose best hit is not GTDB (design note B6) is
+        printed **once per output**, however many contigs it applies to.
+        """
         if stream is None:
             stream = sys.stderr
         summary = self.summary()
@@ -476,6 +516,23 @@ class PerContigRun:
         if summary["consensus_bp"]:
             parts = [_format_taxon(item) for item in summary["consensus_bp"]]
             print("bp by consensus: " + ", ".join(parts), file=stream)
+        for note in self.caveats():
+            print(f"{PROG}: warning: {note}", file=stream)
+
+    def caveats(self) -> list[str]:
+        """Distinct species-threshold caveats of this run, in first-seen order.
+
+        The note comes from the best hit's summary (:func:`classify_hits`), so
+        a GTDB-only run has none, and a run with several non-GTDB sources gets
+        one line per source instead of one per contig.
+        """
+        notes: list[str] = []
+        for record in self.records:
+            summary = record.get("assignment") or record.get("closest") or {}
+            note = summary.get("note")
+            if note and note not in notes:
+                notes.append(note)
+        return notes
 
 
 class _Batch:
@@ -578,15 +635,18 @@ def chunk_size_for(info: dict[str, Any]) -> int:
 def classification_fields(
     fields: Sequence[str], metadata: dict[str, Any] | None
 ) -> list[str]:
-    """Metadata to request: the displayed columns plus the GTDB lineage.
+    """Metadata to request: the displayed columns plus the lineages.
 
     Per-contig hits are classified exactly like ``/assembly`` hits, which needs
-    ``gtdb_taxonomy`` even when ``--fields`` hides it from the table.
+    a lineage even when ``--fields`` hides it from the table: GTDB's
+    ``gtdb_taxonomy``, and the ``tax_lineage``/``tax_source`` a sylph-tax
+    source resolved for a non-GTDB hit (design note B6).
     """
     requested = list(fields)
     available = list((metadata or {}).get("columns") or [])
-    if "gtdb_taxonomy" in available and "gtdb_taxonomy" not in requested:
-        requested.append("gtdb_taxonomy")
+    for column in ("gtdb_taxonomy", "tax_lineage", "tax_source"):
+        if column in available and column not in requested:
+            requested.append(column)
     return requested
 
 
@@ -799,6 +859,8 @@ def _contig_hits(
                 "ani": ani,
                 "shared_kmers": shared,
                 "gtdb_taxonomy": row.get("gtdb_taxonomy"),
+                "tax_lineage": row.get("tax_lineage"),
+                "tax_source": row.get("tax_source"),
                 "accession": row.get("accession"),
                 "genome_file": row.get("Genome_file"),
             }
@@ -817,6 +879,8 @@ def _contig_hits(
             "ani": ani,
             "accession": row.get("accession"),
             "gtdb_taxonomy": row.get("gtdb_taxonomy"),
+            "tax_lineage": row.get("tax_lineage"),
+            "tax_source": row.get("tax_source"),
         }
         for _, ani, _, _, _, row in displayed
     ]
@@ -840,7 +904,11 @@ def _contig_hits(
             "genome_file": row.get("Genome_file"),
             "accession": row.get("accession"),
             "gtdb_species": gtdb_species(row.get("gtdb_taxonomy")),
+            "taxon": hit_lineage(row).taxon,
         }
+        for key in ("taxonomy", "taxonomy_source"):
+            if key in label:
+                hit[key] = label[key]
         for column in options.fields:
             hit[column] = row.get(column)
         hits.append(hit)

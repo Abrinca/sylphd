@@ -376,6 +376,7 @@ def test_tsv_header_is_stable(server, genome, tmp_path, capsys) -> None:
         "ani_species_level",
         "accession",
         "gtdb_species",
+        "taxon",
         "n_close",
         "consensus_rank",
         "consensus_taxon",
@@ -994,6 +995,130 @@ def test_consensus_without_taxonomy_falls_back_to_empty() -> None:
     )
     assert mixed["n_close"] == 2
     assert (mixed["rank"], mixed["taxon"]) == (None, None)
+
+
+def _source_hit(
+    ani: float,
+    lineage: str,
+    source: str,
+    *,
+    contig_kmers: int = 400,
+    accession: str | None = None,
+) -> dict[str, object]:
+    """One non-GTDB hit as :func:`per_contig.consensus` sees it."""
+    shared = round(contig_kmers * (ani / 100.0) ** 31)
+    return {
+        "ani": ani,
+        "shared_kmers": shared,
+        "gtdb_taxonomy": None,
+        "tax_lineage": lineage,
+        "tax_source": source,
+        "accession": accession,
+    }
+
+
+def test_consensus_of_prefix_less_lineages_uses_levels() -> None:
+    """UHGV lineages have no rank prefixes: the consensus is a ``level N``."""
+    family = "vFAM-00013;vSUBFAM-00074;vGENUS-00044;vSUBGEN-00024"
+    result = per_contig.consensus(
+        [
+            _source_hit(99.9, f"{family};vOTU-052719", "UHGV_default", accession="A"),
+            _source_hit(99.8, f"{family};vOTU-052720", "UHGV_default", accession="B"),
+        ],
+        k=31,
+        contig_kmers=400,
+    )
+    assert (result["rank"], result["taxon"]) == ("level 4", "vSUBGEN-00024")
+    assert result["n_close"] == 2
+    assert result["species"] == ["A", "B"]
+
+
+def test_prefix_less_consensus_caps_below_the_species_threshold() -> None:
+    """A lone vOTU at 91 % is capped at the level above it, like genus for GTDB."""
+    lineage = "vFAM-00013;vSUBFAM-00074;vGENUS-00044;vSUBGEN-00024;vOTU-052719"
+    result = per_contig.consensus(
+        [_source_hit(91.0, lineage, "UHGV_default", accession="A")],
+        k=31,
+        contig_kmers=440,
+    )
+    assert (result["rank"], result["taxon"]) == ("level 4", "vSUBGEN-00024")
+    at_threshold = per_contig.consensus(
+        [_source_hit(95.0, lineage, "UHGV_default", accession="A")],
+        k=31,
+        contig_kmers=440,
+    )
+    assert (at_threshold["rank"], at_threshold["taxon"]) == ("level 5", "vOTU-052719")
+
+
+def test_consensus_of_fungal_lineages_starts_at_the_kingdom() -> None:
+    result = per_contig.consensus(
+        [
+            _source_hit(
+                99.0,
+                "k__Eukaryota;p__Ascomycota;c__Sordariomycetes;o__Magnaporthales;"
+                "f__Pyriculariaceae;g__Pyricularia;s__Pyricularia oryzae",
+                "FungiRefSeq-latest",
+                accession="GCF_000002495.2_MG8",
+            )
+        ],
+        k=31,
+        contig_kmers=400,
+    )
+    assert (result["rank"], result["taxon"]) == ("species", "Pyricularia oryzae")
+    assert result["species"] == ["Pyricularia oryzae"]
+
+
+def test_consensus_across_sources_is_mixed_sources() -> None:
+    """Lineages of two sources cannot be intersected (design note B6)."""
+    result = per_contig.consensus(
+        [
+            _source_hit(99.9, "vFAM-1;vOTU-1", "UHGV_default", accession="A"),
+            _source_hit(
+                99.8,
+                "k__Eukaryota;p__Ascomycota;s__Pyricularia oryzae",
+                "FungiRefSeq-latest",
+                accession="B",
+            ),
+        ],
+        k=31,
+        contig_kmers=400,
+    )
+    assert (result["rank"], result["taxon"]) == (None, None)
+    assert result["n_close"] == 2
+    assert result["mixed_sources"] is True
+    assert "mixed_sources" not in per_contig.consensus(
+        [_source_hit(99.9, "vFAM-1;vOTU-1", "UHGV_default", accession="A")],
+        k=31,
+        contig_kmers=400,
+    )
+
+
+def test_contig_hits_classify_and_report_a_non_gtdb_hit() -> None:
+    """A ``/query`` row resolved by a sylph-tax source gets its generic taxon."""
+    rows = [
+        {
+            "Containment_ind": [85, 10_000],
+            "Naive_ANI": 90.0,
+            "gtdb_taxonomy": None,
+            "tax_lineage": "vFAM-1;vOTU-9",
+            "tax_source": "UHGV_default",
+            "accession": None,
+            "Genome_file": "votus_full.fna.gz",
+        }
+    ]
+    hits, assignment, closest, summary = per_contig._contig_hits(
+        rows, k=31, contig_kmers=85, options=per_contig.PerContigOptions()
+    )
+    assert assignment is not None and closest is not None
+    assert assignment["taxon"] == "vOTU-9"
+    assert assignment["note"].startswith("viruses")
+    assert hits[0]["taxon"] == "vOTU-9"
+    assert hits[0]["taxonomy"] == {"level 1": "vFAM-1", "level 2": "vOTU-9"}
+    assert hits[0]["taxonomy_source"] == "UHGV_default"
+    assert summary is not None and (summary["rank"], summary["taxon"]) == (
+        "level 2",
+        "vOTU-9",
+    )
 
 
 def test_consensus_columns_and_json(consensus_server, consensus_data, tmp_path, capsys) -> None:

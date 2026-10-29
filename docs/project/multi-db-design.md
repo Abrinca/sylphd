@@ -7,10 +7,13 @@ fungal, MAG and GlobDB databases get a lineage. They were coupled by one questio
 the taxonomy itself says where a hit came from (Decisions).
 
 **Status 2026-10-29: phases 1 (A core), 2 (B schema and `setup`) and 3 (B resolution and the `tax`
-profile) are implemented**; phase 4 (the extras) is not. The implementation measurements are in
-`scratch/multi-db/REPORT.md` (phase 1), `scratch/taxonomy/REPORT.md` (phase 2) and
-`scratch/taxonomy/PHASE3.md` (phase 3, including the real-data parity run) and are folded into the
-sections marked *measured*.
+profile) are implemented**, and of phase 4 the first item — generic lineage classification in
+`classify_hits`/per-contig with the 95 % hints and warnings (B6) — is **done**; the other extras
+(`--taxprof-virus-hosts`, per-database association, `download --with-taxonomy`, the web label from
+`databases`) are not. The implementation measurements are in `scratch/multi-db/REPORT.md` (phase 1),
+`scratch/taxonomy/REPORT.md` (phase 2), `scratch/taxonomy/PHASE3.md` (phase 3, including the
+real-data parity run) and `scratch/taxonomy/PHASE4A.md` (B6, with the real phage/fungal/per-contig
+runs) and are folded into the sections marked *measured*.
 
 Primary use is the owner's own backend through the CLI. The public web app stays on one database;
 it must keep working but gets no multi-database features here.
@@ -466,6 +469,16 @@ take the lineage from the largest `ord` whose source has the key, and the host f
 `ord` whose source has that key *and* a host. (For the target trio the key spaces do not overlap,
 so this only matters for GlobDB/UHGV-style multi-source setups; it is cheap to get right.)
 
+**Owner decision (phase 3 follow-up): import one taxonomy per database.** Overlaps are therefore
+*not* an error: `setup` counts, after each import, the keys the new source shares with the sources
+already in the file and with the virtual GTDB source (same key form as `resolve`: the verbatim
+`taxonomy_entry.key`, and `metadata_data.accession` for the virtual source) in one SQL pass over the
+key index, stores the per-pair counts in an additive `taxonomy_overlap` table, and emits one
+warning per pair (logger and stderr) with both names, the count, five example keys and "the source
+imported later (NAME) wins for these keys; import only one of them, or rebuild without one". The
+counts are reported per source as `overlaps` by `sylphd info` and `GET /info`, so a server operator
+sees a collision without re-running `setup`. `--tax-source` stays the per-request escape hatch.
+
 ### B4. Mixed-taxonomy profiles
 
 **Findings that shape the design**
@@ -535,19 +548,52 @@ quirk).
 `classify_hits` and the web page's lineage colouring need a GTDB lineage and treat 95 % ANI as
 species. For a non-GTDB best hit today: ANI-only labels, `taxon` null.
 
-Phases: (1) leave as is, document. (2) Parse `tax_lineage` generically in `classify_hits`: rank
-names from the prefix (`d domain, r realm, k kingdom, p phylum, c class, o order, f family,
-g genus, s species`), `level N` for prefix-less sources; `assignment.taxon` = last named rank; keep
-`gtdb_taxonomy` for GTDB hits and add `taxonomy` and `taxonomy_source` to `assignment`, `closest`
-and hits (additive JSON). (3) **Decided: 95 % ANI for every source**, no per-source threshold for
-now. Add hints and warnings instead:
+**Implemented 2026-10-29** (all three phases; measurements and real-data runs in
+`scratch/taxonomy/PHASE4A.md`). What was built, and the choices it needed:
+
+- `assembly.parse_lineage` reads any lineage into ordered `(rank key, taxon)` pairs: a rank prefix
+  `d r k p c o f g s t` when the tokens carry one, otherwise `level 1` ... `level N` (a leading
+  `root` is dropped, since it is not a taxon). `hit_lineage` picks the lineage of a hit: a hit that
+  no source resolved, or that a GTDB source resolved, uses `gtdb_taxonomy` (as before); a hit that
+  a **non-GTDB** source resolved uses that source's `tax_lineage`, even when the genome also has
+  GTDB metadata — the resolution says which taxonomy the hit belongs to (this is what a UHGV source
+  overriding a GTDB accession looks like in the tests).
+- `Lineage.family` is what a relation may be compared within: every GTDB lineage is one family
+  whatever `tax_source` resolved it (`GTDB_r232`, a `GTDB_r214` catalogue file, no source at all),
+  any other lineage only compares with hits of its own source. A cross-source hit gets
+  `shared_rank: null` and `different source` (`different source from closest relative` without an
+  assignment); a matching hit whose lineage shares nothing says `different lineage` instead of
+  `different domain`, which is GTDB's wording.
+- `assignment.taxon` is the last named rank (`Lineage.taxon`); `taxonomy` (`{rank: taxon}`,
+  shallowest first, e.g. `{"level 1": "vFAM-00013", ..., "level 5": "vOTU-052719"}`) and
+  `taxonomy_source` are added to `assignment`, `closest` and the hits **only when the hit has a
+  lineage**. That keeps the single-database `/assembly` golden byte-identical (its hits have no
+  metadata) and a metadata-less response keeps its shape.
+- Per-contig consensus: the LCA runs over the generic ranks; the sub-95 % cap moves one rank up
+  from the species-equivalent rank (`Lineage.species_key`: `s` when the lineage has it, else the
+  deepest level, so a lone vOTU at 91 % becomes its `vSUBGEN`). A close set spanning two families
+  has no consensus and sets `mixed_sources: true` in JSON (the table leaves `consensus_rank` and
+  `consensus_taxon` empty).
+- The CLI table gained `taxon` and `taxonomy_source`; the per-contig table gained `taxon`.
+- The web app's `decorate` falls back to the last value of the additive `taxonomy` object when
+  there is no `gtdb_taxonomy`, so a non-GTDB hit shows its vOTU/species instead of the accession.
+  Nothing else in the page changed; the JS port (`web/taxonomy.js`) stays GTDB/NCBI-only.
+
+(3) **Decided: 95 % ANI for every source**, no per-source threshold for now. Add hints and warnings
+instead (all implemented):
 
 - When the best hit is not from GTDB, `assignment` carries a `note` (JSON) and the CLI prints a
-  stderr warning (unless `--quiet`): viruses (UHGV): 95 % ANI matches the vOTU convention (MIUViG:
-  95 % ANI over 85 % of the shorter genome), but sylph's ANI ignores aligned fraction; fungi: there
-  is no established ANI species boundary, 95 % is a heuristic and species calls may be wrong.
-- Per-contig mode and taxonomic profiles add the same caveat once per output (stderr), not per row.
-- Docs (`guides/assembly.md`, `species-and-ani.md`) get a short "outside prokaryotes" section.
+  stderr warning (unless `--quiet`, never with `--json`); without an assignment the note is on
+  `closest`. Viruses (`assembly.VIRUS_CAVEAT`, detected by a `UHGV*`/`IMGVR*` source name, a
+  `vOTU`/`vFAM` token or a `Viruses` token): 95 % ANI matches the vOTU convention (MIUViG: 95 % ANI
+  over 85 % of the shorter genome), but sylph's ANI ignores aligned fraction. Fungi
+  (`FUNGI_CAVEAT`, a `Fungi*` source or a `Fungi` token): no established ANI species boundary,
+  95 % is a heuristic and species calls may be wrong. Any other source (`GENERIC_CAVEAT`, naming
+  the source): the threshold is a prokaryote convention.
+- Per-contig mode (`PerContigRun.caveats`, from the best hit of every contig) and taxonomic
+  profiles (`--taxonomy tax`, from the rows' `tax_source`) add the same caveat once per output
+  (stderr), not per row.
+- Docs (`guides/assembly.md`, `species-and-ani.md`) got the "outside prokaryotes" section.
 - `thresholds.species` stays a single value in JSON; making it per source remains possible later
   without breaking the format.
 The web app keeps working in all phases because its JSON is only ever extended.
@@ -641,7 +687,8 @@ before step 0:
    (ord 2) imported, every UHGV key resolves through **ICTV**; `--tax-source UHGV_default`
    selects the other one.
 4. **Extras.** `--taxprof-virus-hosts`, per-database association (`?tax=`; needs A7 to come back),
-   generic lineage in `classify_hits`, `download --with-taxonomy`, web label from `databases`.
+   `download --with-taxonomy`, web label from `databases`. **Generic lineage in `classify_hits` is
+   done 2026-10-29** (B6, with the 95 % notes and warnings); see `scratch/taxonomy/PHASE4A.md`.
 
 A and B are independent until step 3: a one-database server with `--taxonomy UHGV_default` is
 useful by itself, and step 1 is useful without any taxonomy work. A hit-origin step no longer
@@ -707,7 +754,9 @@ source (owner decision, 2026-10-29), with hints and warnings; see B6.
   multi-database work fork-free, at the cost of one small piece of state shared across requests
   (must be thread-safe and invalidated only on shutdown).
 - **Rank semantics.** 95 % ANI as "same species" and the rank names are prokaryote conventions;
-  applying them to viruses and eukaryotes is a labelling choice, not a measurement.
+  applying them to viruses and eukaryotes is a labelling choice, not a measurement. Since phase 4
+  the server applies it everywhere and says so (`note`/stderr caveat), and only compares lineages
+  within one source, so a mixed hit list shows `different source` instead of a guessed relation.
 
 ## Verification notes
 

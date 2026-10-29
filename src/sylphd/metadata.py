@@ -12,8 +12,11 @@ Format version 3 adds the ``taxonomy_*`` tables: the GTDB metadata is a
 *virtual* source (its entries are ``metadata_data.accession`` and
 ``gtdb_taxonomy``, so no lineage is stored twice) and every imported sylph-tax
 file is one ``taxonomy_source`` with its ``key -> lineage [-> host]`` rows in
-``taxonomy_entry``.  Version 2 files keep loading and serving; a version 3 file
-still opens with a version 2 reader, which ignores the new tables.
+``taxonomy_entry``.  ``taxonomy_overlap`` records, per pair of sources, how
+many keys both have: importing overlapping sources is allowed (the one
+imported later wins, as in sylph-tax) but never silent.  Version 2 files keep
+loading and serving; a version 3 file still opens with a version 2 reader,
+which ignores the new tables.
 """
 
 from __future__ import annotations
@@ -22,18 +25,33 @@ import csv
 import gzip
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
 import stat
+import sys
 import threading
+import time
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Iterable, Iterator, Sequence
+from typing import IO, cast
 
 from . import __version__
 from .download import SYLPHTAX_VERSION
+
+logger = logging.getLogger(__name__)
+# A plain library warning would vanish in a process that configures no logging
+# (``sylphd setup`` does not), and Python's ``lastResort`` handler would then
+# print it *and* the explicit stderr copy below.  The null handler keeps the
+# record silent for a reader and leaves the CLI's own handler working.
+logger.addHandler(logging.NullHandler())
+
+#: Prefix of the CLI's messages (``sylphd: error: ...``), reused for warnings
+#: that must reach the terminal even when no logging is configured.
+_PROG = "sylphd"
 
 #: Schema version of the generated SQLite file.  Bump when the column layout
 #: or the meaning of the ``info`` table changes.
@@ -420,7 +438,9 @@ def _taxonomy_schema_sql() -> tuple[str, ...]:
 
     ``taxonomy_entry`` maps a source-local key to dictionary ids; the entry
     index on ``key`` is what phase 3's batched ``IN`` lookups use, because the
-    primary key starts with ``source_id``.
+    primary key starts with ``source_id``.  ``taxonomy_overlap`` stores, for
+    every pair of sources, how many keys they share; importing a source writes
+    both directions, so any reader finds the counts of either source.
     """
     return (
         (
@@ -448,7 +468,21 @@ def _taxonomy_schema_sql() -> tuple[str, ...]:
         "CREATE INDEX taxonomy_entry_key ON taxonomy_entry (key)",
         "CREATE TABLE dict_tax_lineage (id INTEGER PRIMARY KEY, value TEXT NOT NULL)",
         "CREATE TABLE dict_tax_host (id INTEGER PRIMARY KEY, value TEXT NOT NULL)",
+        _OVERLAP_TABLE_SQL,
     )
+
+
+#: ``taxonomy_overlap``: ``(source, other) -> shared keys``.  A table of its
+#: own rather than a column so that a version 3 file written before it existed
+#: still reads, and gets it filled by the next ``--update``.
+_OVERLAP_TABLE_SQL = (
+    "CREATE TABLE IF NOT EXISTS taxonomy_overlap (\n"
+    "    source_id INTEGER NOT NULL,\n"
+    "    other_id INTEGER NOT NULL,\n"
+    "    keys INTEGER NOT NULL,\n"
+    "    PRIMARY KEY (source_id, other_id)\n"
+    ") WITHOUT ROWID"
+)
 
 
 def _create_schema(connection: sqlite3.Connection) -> None:
@@ -642,7 +676,12 @@ def _add_taxonomy_source(
     hosts: _Dictionary,
     progress: object = None,
 ) -> dict[str, object]:
-    """Insert one sylph-tax file as a source, replacing a source of the same name."""
+    """Insert one sylph-tax file as a source, replacing a source of the same name.
+
+    The returned mapping describes the source and carries the list of
+    :class:`TaxonomyOverlap` records for the keys it shares with the sources
+    already in the file (empty when it is disjoint).
+    """
     path = Path(source.path)
     if not path.is_file():
         raise FileNotFoundError(f"taxonomy file not found: {path}")
@@ -660,6 +699,10 @@ def _add_taxonomy_source(
         ord_value = int(existing[1])
         connection.execute(
             "DELETE FROM taxonomy_entry WHERE source_id = ?", (existing[0],)
+        )
+        connection.execute(
+            "DELETE FROM taxonomy_overlap WHERE source_id = ? OR other_id = ?",
+            (existing[0], existing[0]),
         )
         connection.execute("DELETE FROM taxonomy_source WHERE id = ?", (existing[0],))
     built = datetime.now(UTC).isoformat(timespec="seconds")
@@ -713,6 +756,12 @@ def _add_taxonomy_source(
     )
     if callback is not None:
         callback(rows, path)
+    # Importing overlapping files is allowed but must not pass silently: count
+    # the keys this source shares with the others (the virtual GTDB source
+    # included) and record them for `info`.
+    overlaps = _record_overlaps(
+        connection, source_id=source_id, name=source.name, ord_value=ord_value
+    )
     return {
         "name": source.name,
         "kind": "sylphtax",
@@ -723,6 +772,7 @@ def _add_taxonomy_source(
         "rows": int(stored),
         "has_host": has_host,
         "ord": ord_value,
+        "overlaps": overlaps,
     }
 
 
@@ -748,6 +798,186 @@ def _insert_taxonomy_batch(
         "host = COALESCE(excluded.host, taxonomy_entry.host)",
         batch,
     )
+
+
+#: How many example keys a warning lists.
+OVERLAP_EXAMPLES = 5
+
+
+@dataclass(frozen=True)
+class TaxonomyOverlap:
+    """Keys that one imported source shares with another source.
+
+    Importing overlapping sources is allowed (the source imported later wins,
+    as in sylph-tax) but must never be silent, so one of these is produced and
+    warned about per pair of sources.
+    """
+
+    source: str
+    """The source just imported."""
+
+    other: str
+    """The source it collides with (another import or the virtual GTDB source)."""
+
+    keys: int
+    """Number of keys both contain."""
+
+    examples: tuple[str, ...]
+    """The first ``OVERLAP_EXAMPLES`` shared keys, sorted."""
+
+    later: str
+    """The name whose lineages win: the source with the larger ``ord``."""
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "source": self.source,
+            "other": self.other,
+            "keys": self.keys,
+            "examples": list(self.examples),
+            "later": self.later,
+        }
+
+    def message(self) -> str:
+        """The warning text: both names, the count, examples, and what happens."""
+        examples = ", ".join(self.examples)
+        return (
+            f"taxonomy sources {self.other!r} and {self.source!r} share "
+            f"{self.keys:,} key(s) (examples: {examples}): the source imported "
+            f"later ({self.later}) wins for these keys; import only one of "
+            "them, or rebuild without one"
+        )
+
+
+def _record_overlaps(
+    connection: sqlite3.Connection, *, source_id: int, name: str, ord_value: int
+) -> list[TaxonomyOverlap]:
+    """Count the keys ``source_id`` shares with every other source; store them.
+
+    The keys of an imported source are ``taxonomy_entry.key`` verbatim; the
+    virtual GTDB source's keys are ``metadata_data.accession``, which is what
+    :meth:`MetadataDB.resolve` looks up for it (only rows with a lineage), so
+    both are counted in the form resolution uses.  The work is done in SQL over
+    the ``taxonomy_entry(key)`` index after the insert, so a 170k-key file costs
+    one index pass per source instead of a Python set of every key.
+    """
+    started = time.perf_counter()
+    connection.execute("DROP TABLE IF EXISTS temp._overlap_keys")
+    connection.execute(
+        "CREATE TEMP TABLE _overlap_keys (key TEXT PRIMARY KEY) WITHOUT ROWID"
+    )
+    try:
+        connection.execute(
+            "INSERT OR IGNORE INTO _overlap_keys (key) "
+            "SELECT key FROM taxonomy_entry WHERE source_id = ?",
+            (source_id,),
+        )
+        counts: dict[int, int] = dict(
+            connection.execute(
+                "SELECT e.source_id, COUNT(*) FROM taxonomy_entry AS e "
+                "JOIN _overlap_keys AS k ON k.key = e.key "
+                "WHERE e.source_id <> ? GROUP BY e.source_id",
+                (source_id,),
+            ).fetchall()
+        )
+        # One row per virtual source (there is at most one in a file).
+        counts.update(
+            dict(
+                connection.execute(
+                    "SELECT s.id, COUNT(*) FROM metadata_data AS m "
+                    "JOIN _overlap_keys AS k ON k.key = m.accession "
+                    "JOIN taxonomy_source AS s ON s.kind = 'metadata' "
+                    "WHERE m.gtdb_taxonomy IS NOT NULL GROUP BY s.id"
+                ).fetchall()
+            )
+        )
+        others = {
+            int(row[0]): (str(row[1]), int(row[2]), str(row[3]))
+            for row in connection.execute(
+                "SELECT id, name, ord, kind FROM taxonomy_source"
+            )
+        }
+        overlaps: list[TaxonomyOverlap] = []
+        for other_id, keys in sorted(
+            (item for item in counts.items() if item[1]),
+            key=lambda item: others[item[0]][1],
+        ):
+            if other_id == source_id:
+                continue
+            other_name, other_ord, other_kind = others[other_id]
+            if other_kind == "metadata":
+                examples = [
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT DISTINCT k.key FROM _overlap_keys AS k "
+                        "JOIN metadata_data AS m ON m.accession = k.key "
+                        "WHERE m.gtdb_taxonomy IS NOT NULL "
+                        "ORDER BY k.key LIMIT ?",
+                        (OVERLAP_EXAMPLES,),
+                    )
+                ]
+            else:
+                examples = [
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT key FROM taxonomy_entry "
+                        "WHERE source_id = ? AND key IN (SELECT key FROM _overlap_keys) "
+                        "ORDER BY key LIMIT ?",
+                        (other_id, OVERLAP_EXAMPLES),
+                    )
+                ]
+            connection.executemany(
+                "INSERT OR REPLACE INTO taxonomy_overlap (source_id, other_id, keys) "
+                "VALUES (?, ?, ?)",
+                [(source_id, other_id, keys), (other_id, source_id, keys)],
+            )
+            overlaps.append(
+                TaxonomyOverlap(
+                    source=name,
+                    other=other_name,
+                    keys=int(keys),
+                    examples=tuple(str(example) for example in examples),
+                    later=name if ord_value >= other_ord else other_name,
+                )
+            )
+    finally:
+        connection.execute("DROP TABLE IF EXISTS temp._overlap_keys")
+    logger.debug(
+        "taxonomy overlap check for %s: %.2f s", name, time.perf_counter() - started
+    )
+    return overlaps
+
+
+def _backfill_overlaps(connection: sqlite3.Connection) -> None:
+    """Fill ``taxonomy_overlap`` for the sources of a file that lacks the table.
+
+    Files written before the table existed (all version 3 files of the first
+    release) have the entries but no counts; ``--update`` adds the table, so it
+    recomputes the pairs once.  Only the counts are recorded: those sources are
+    not being imported now, so nothing is warned about.
+    """
+    connection.execute("DELETE FROM taxonomy_overlap")
+    for source_id, name, ord_value in connection.execute(
+        "SELECT id, name, ord FROM taxonomy_source WHERE kind = 'sylphtax' ORDER BY ord"
+    ).fetchall():
+        _record_overlaps(
+            connection,
+            source_id=int(source_id),
+            name=str(name),
+            ord_value=int(ord_value),
+        )
+
+
+def _report_taxonomy_overlaps(overlaps: Sequence[TaxonomyOverlap]) -> None:
+    """Warn about every pair of sources that share keys (logger *and* stderr).
+
+    ``setup`` configures no logging, and a warning about conflicting taxonomy
+    files is exactly what the owner must see, so it is written to stderr too
+    (``-q`` silences progress, not conflicts).  One warning per pair.
+    """
+    for overlap in overlaps:
+        message = overlap.message()
+        logger.warning(message)
+        print(f"{_PROG}: warning: {message}", file=sys.stderr)
 
 
 def is_redundant_gtdb_source(source: TaxonomySource, release: str | None) -> bool:
@@ -869,6 +1099,7 @@ def build_metadata_db(
     hosts = _Dictionary()
     taxonomy_source_rows: list[dict[str, object]] = []
     skipped_taxonomy: list[str] = []
+    overlaps: list[TaxonomyOverlap] = []
 
     def encode(accession: str, values: list[object]) -> tuple[object, ...]:
         for position, name in _DICT_POSITIONS:
@@ -947,7 +1178,7 @@ def build_metadata_db(
             if files and is_redundant_gtdb_source(source, release_text):
                 skipped_taxonomy.append(source.name)
                 continue
-            _add_taxonomy_source(
+            imported = _add_taxonomy_source(
                 connection,
                 source,
                 ord_value=ord_value,
@@ -955,6 +1186,7 @@ def build_metadata_db(
                 hosts=hosts,
                 progress=callback,
             )
+            overlaps.extend(cast(list[TaxonomyOverlap], imported["overlaps"]))
             ord_value += 1
         lineages.flush(connection, "dict_tax_lineage")
         hosts.flush(connection, "dict_tax_host")
@@ -983,6 +1215,7 @@ def build_metadata_db(
     else:
         connection.close()
         temporary.replace(output)
+    _report_taxonomy_overlaps(overlaps)
 
     return {
         "path": str(output),
@@ -990,6 +1223,7 @@ def build_metadata_db(
         "sources": sources,
         "taxonomy_sources": taxonomy_source_rows,
         "skipped_taxonomy": skipped_taxonomy,
+        "taxonomy_overlaps": [overlap.as_dict() for overlap in overlaps],
         "size": output.stat().st_size,
         "release": None if release is None else str(release),
         "format_version": METADATA_FORMAT_VERSION,
@@ -1009,14 +1243,29 @@ def _insert_batch(
 
 
 def _taxonomy_source_list(connection: sqlite3.Connection) -> list[dict[str, object]]:
+    """The sources in ``ord`` order, each with its ``overlaps`` counts.
+
+    ``overlaps`` maps an other source's name to the number of keys both have;
+    it is empty when the file has no ``taxonomy_overlap`` table (a version 3
+    file written before it existed) or no overlap.
+    """
     columns = ("name", "kind", "ord", "origin", "md5", "rows", "has_host", "built")
+    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
+    overlaps: dict[int, dict[str, int]] = {}
+    if "taxonomy_overlap" in tables:
+        for source_id, other, keys in connection.execute(
+            "SELECT o.source_id, s.name, o.keys FROM taxonomy_overlap AS o "
+            "JOIN taxonomy_source AS s ON s.id = o.other_id ORDER BY s.ord"
+        ):
+            overlaps.setdefault(int(source_id), {})[str(other)] = int(keys)
     sources = []
     for row in connection.execute(
-        "SELECT name, kind, ord, origin, md5, rows, has_host, built "
+        "SELECT id, name, kind, ord, origin, md5, rows, has_host, built "
         "FROM taxonomy_source ORDER BY ord"
     ):
-        record = dict(zip(columns, row))
+        record = dict(zip(columns, row[1:]))
         record["has_host"] = bool(record["has_host"])
+        record["overlaps"] = overlaps.get(int(row[0]), {})
         sources.append(record)
     return sources
 
@@ -1034,9 +1283,10 @@ def update_metadata_db(
     This is ``setup --update``: it adds the ``taxonomy_*`` tables to a version
     2 file (and the virtual GTDB source), bumps ``format_version`` to 3, and
     appends (or replaces, by name) the given sources.  The GTDB rows are copied
-    as they are, so no GTDB TSV files are needed.  The copy is built next to
-    ``output`` and replaces it only on success, like ``setup --force``; a
-    failure leaves ``output`` untouched.
+    as they are, so no GTDB TSV files are needed.  A version 3 file written
+    before ``taxonomy_overlap`` existed gets it (and its counts) here.  The copy
+    is built next to ``output`` and replaces it only on success, like
+    ``setup --force``; a failure leaves ``output`` untouched.
     """
     source_path = Path(source)
     output_path = Path(output)
@@ -1060,6 +1310,7 @@ def update_metadata_db(
     )
 
     skipped_taxonomy: list[str] = []
+    overlaps: list[TaxonomyOverlap] = []
     uri = f"{source_path.resolve().as_uri()}?mode=ro"
     reader = sqlite3.connect(uri, uri=True)
     connection = sqlite3.connect(str(temporary))
@@ -1092,6 +1343,16 @@ def update_metadata_db(
         if "taxonomy_source" not in tables:
             for statement in _taxonomy_schema_sql():
                 connection.execute(statement)
+            # A version 2 file has no sources to count; a version 3 file written
+            # before ``taxonomy_overlap`` existed has them, so fill it now (once).
+            needs_backfill = False
+        elif "taxonomy_overlap" not in tables:
+            connection.execute(_OVERLAP_TABLE_SQL)
+            needs_backfill = True
+        else:
+            needs_backfill = False
+        if needs_backfill:
+            _backfill_overlaps(connection)
         if version == "2":
             _add_virtual_gtdb_source(connection, info)
             info["format_version"] = METADATA_FORMAT_VERSION
@@ -1117,7 +1378,7 @@ def update_metadata_db(
             if virtual_source is not None and is_redundant_gtdb_source(entry, release):
                 skipped_taxonomy.append(entry.name)
                 continue
-            _add_taxonomy_source(
+            imported = _add_taxonomy_source(
                 connection,
                 entry,
                 ord_value=_next_ord(connection),
@@ -1125,6 +1386,7 @@ def update_metadata_db(
                 hosts=hosts,
                 progress=progress,
             )
+            overlaps.extend(cast(list[TaxonomyOverlap], imported["overlaps"]))
         lineages.flush(connection, "dict_tax_lineage")
         hosts.flush(connection, "dict_tax_host")
         _write_info(
@@ -1147,6 +1409,7 @@ def update_metadata_db(
     else:
         connection.close()
         temporary.replace(output_path)
+    _report_taxonomy_overlaps(overlaps)
 
     return {
         "path": str(output_path),
@@ -1154,6 +1417,7 @@ def update_metadata_db(
         "sources": [],
         "taxonomy_sources": sources,
         "skipped_taxonomy": skipped_taxonomy,
+        "taxonomy_overlaps": [overlap.as_dict() for overlap in overlaps],
         "size": output_path.stat().st_size,
         "release": info.get("release") or None,
         "format_version": METADATA_FORMAT_VERSION,
@@ -1225,6 +1489,11 @@ class MetadataDB:
         self.has_taxonomy: bool = "taxonomy_source" in tables
         #: The sources, in ``ord`` order (empty for a version 2 file).
         self._sources: tuple[TaxonomySourceRow, ...] = self._read_sources()
+        #: ``source id -> {other source name: shared keys}``; ``{}`` for a file
+        #: written before ``taxonomy_overlap`` existed.
+        self._overlaps: dict[int, dict[str, int]] = self._read_overlaps(
+            "taxonomy_overlap" in tables
+        )
         #: The virtual GTDB source, if the file has one.
         self._virtual_source: TaxonomySourceRow | None = next(
             (source for source in self._sources if source.kind == "metadata"), None
@@ -1252,6 +1521,23 @@ class MetadataDB:
             for row in rows
         )
 
+    def _read_overlaps(self, has_table: bool) -> dict[int, dict[str, int]]:
+        """``source id -> {other source name: shared keys}``, in ``ord`` order."""
+        if not has_table:
+            return {}
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT o.source_id AS source_id, s.name AS name, o.keys AS keys "
+                "FROM taxonomy_overlap AS o "
+                "JOIN taxonomy_source AS s ON s.id = o.other_id ORDER BY s.ord"
+            ).fetchall()
+        overlaps: dict[int, dict[str, int]] = {}
+        for row in rows:
+            overlaps.setdefault(int(row["source_id"]), {})[str(row["name"])] = int(
+                row["keys"]
+            )
+        return overlaps
+
     @property
     def taxonomy_columns(self) -> tuple[str, ...]:
         """The ``tax_*`` columns a row can carry (empty without sources)."""
@@ -1263,7 +1549,12 @@ class MetadataDB:
         return self.columns + self.taxonomy_columns
 
     def taxonomy_sources(self) -> list[dict[str, object]]:
-        """The taxonomy sources of the file, in ``ord`` order (empty for v2)."""
+        """The taxonomy sources of the file, in ``ord`` order (empty for v2).
+
+        ``overlaps`` maps another source's name to the number of keys both have
+        (``{}`` when the source is disjoint or the file predates the counts): an
+        operator can see that a server resolves some keys from a later import.
+        """
         return [
             {
                 "name": source.name,
@@ -1272,6 +1563,7 @@ class MetadataDB:
                 "md5": source.md5,
                 "rows": source.rows,
                 "has_host": source.has_host,
+                "overlaps": dict(self._overlaps.get(source.id, {})),
             }
             for source in self._sources
         ]
