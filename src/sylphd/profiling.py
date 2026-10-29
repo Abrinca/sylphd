@@ -104,7 +104,7 @@ def run_assembly(
         "records": parsed.records,
         "length": parsed.length,
         "gc": parsed.gc,
-        "sketch_kmers": len(sketch.kmer_counts),
+        "sketch_kmers": sketch.n_kmers,
         "input": "sequence",
     }
     return result

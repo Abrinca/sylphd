@@ -92,7 +92,7 @@ class TestAcceptsValidSketches:
         c, k = validate_sketch_bytes(data)
         sketch = pysylph.SampleSketch.from_bytes(data)
         assert (c, k) == (sketch.c, sketch.k)
-        assert parse_sketch_header(data).kmer_count == len(sketch.kmer_counts)
+        assert parse_sketch_header(data).kmer_count == sketch.n_kmers
 
     def test_fresh_single_sketch(self, single_sketch: pysylph.SampleSketch) -> None:
         data = single_sketch.to_bytes()
@@ -100,7 +100,7 @@ class TestAcceptsValidSketches:
         header = parse_sketch_header(data)
         assert header.paired is False
         assert header.file_name == "single"
-        assert header.kmer_count == len(single_sketch.kmer_counts)
+        assert header.kmer_count == single_sketch.n_kmers
 
     def test_fresh_paired_sketch(self, paired_sketch: pysylph.SampleSketch) -> None:
         data = paired_sketch.to_bytes()
@@ -108,7 +108,7 @@ class TestAcceptsValidSketches:
         header = parse_sketch_header(data)
         assert header.paired is True
         assert header.file_name == "paired"
-        assert header.kmer_count == len(paired_sketch.kmer_counts)
+        assert header.kmer_count == paired_sketch.n_kmers
 
     def test_trailing_bytes_are_allowed(self) -> None:
         data = _build()
