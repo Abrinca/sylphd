@@ -43,6 +43,8 @@ die() { log "error: $*"; exit 1; }
 #   SYLPH_META=        metadata SQLite file name in /srv/sylphd/db
 #   SYLPH_SERVE_ARGS=  site policy flags appended to `sylphd serve`, one
 #                      whitespace-separated string (see deploy/sylphd.service)
+#   SYLPH_NAME=        display name of the instance (`sylphd serve --name`);
+#                      may contain spaces
 #   SYLPH_HTTP_MAX=    Caddy request_body max_size (e.g. 64MB)
 site_env="${SYLPHD_SITE_ENV:-$HERE/site.env}"
 if [[ -f $site_env ]]; then
@@ -56,7 +58,7 @@ DOMAIN=${DOMAIN:-${1:-}}
 # One name, or several separated by commas (e.g. while moving to a new name).
 name_re='[A-Za-z0-9.-]+(:[0-9]+)?'
 [[ $DOMAIN =~ ^$name_re(,\ *$name_re)*$ ]] ||
-    die "DOMAIN does not look like a host name (or a comma-separated list): $DOMAIN"
+    die "DOMAIN does not look like a host name or a comma-separated list: $DOMAIN (quote a comma-separated value: DOMAIN=\"a.org,b.org\")"
 
 # ---------------------------------------------------------------------------
 # 1. service account and directory layout
@@ -203,6 +205,7 @@ site_conf=$(mktemp)
     echo "[Service]"
     [[ -n ${SYLPH_DB:-} ]] && echo "Environment=\"SYLPH_DB=$SYLPH_DB\""
     [[ -n ${SYLPH_META:-} ]] && echo "Environment=\"SYLPH_META=$SYLPH_META\""
+    [[ -n ${SYLPH_NAME:-} ]] && echo "Environment=\"SYLPH_NAME=$SYLPH_NAME\""
     [[ -n ${SYLPH_SERVE_ARGS:-} ]] && echo "Environment=\"SYLPH_SERVE_ARGS=$SYLPH_SERVE_ARGS\""
     true
 } >"$site_conf"

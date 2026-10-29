@@ -35,7 +35,6 @@ Reports:
   `screen_c` (`null` for a plain `.syldb`) and `two_stage`;
 - `metadata`: `path`, `size`, `columns`, `rows`, `release`, `built`, `format_version`, `reps_only`
   and `sources`, or `null` without `--meta`;
-- `terms_url`: the value of `--terms-url`, or `null`;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
   `name` is the string of `--name` (at most 80 characters, one line); `about` is
   `{"format": "markdown", "text": "..."}` with the contents of the `--about` file (UTF-8, at most
@@ -167,7 +166,9 @@ assignment and closest hit whichever way it is sent.
 - **`ani`** is the naive containment ANI (`no_adjust=True`). There is no confidence interval: the
   coverage-adjusted ANI is meaningless for assemblies, see
   [Identifying an assembly](../guides/assembly.md#why-the-ani-is-not-adjusted).
-- **`containment`** is `[contained k-mers, sample k-mers]`; `containment_fraction` is their ratio.
+- **`containment`** is `[contained k-mers, genome k-mers]`: how many of the hit genome's sketched
+  k-mers occur in the assembly, and how many k-mers that genome's sketch holds (sylph's
+  `Containment_ind`). `containment_fraction` is their ratio.
 - **`assignment`** is the species assignment: `{"rank": "species", "taxon", "gtdb_taxonomy",
   "accession", "ani"}` when the best hit reaches `thresholds.species` (95 %), otherwise `null`.
   `taxon` and `gtdb_taxonomy` are `null` without metadata.
@@ -207,9 +208,9 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 
 | Status | When |
 |---|---|
-| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch; for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, or malformed or non-`ACGTN` raw sequence |
+| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request; for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, or malformed or non-`ACGTN` raw sequence |
 | `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted) |
-| `413` | the body exceeds `--max-upload-mb`, more than 4096 sketches, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
+| `413` | the body exceeds `--max-upload-mb`, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
 | `415` | `/query` and `/profile` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |
 | `429` | rate limited (`--rate-limit`); with `Retry-After` in seconds |
 | `503` | the job queue is full (`--max-queue`); with `Retry-After: 1` |

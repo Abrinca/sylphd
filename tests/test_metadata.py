@@ -248,6 +248,13 @@ class TestBuildMetadata:
         with pytest.raises(ValueError, match="missing column"):
             build_metadata_db([path], tmp_path / "out.sqlite")
 
+    def test_malformed_row_reports_line_number(self, tmp_path: Path) -> None:
+        path = _write_tsv(tmp_path / "big.tsv", [_row("GCA_1"), _row("GCA_2")], compress=False)
+        text = path.read_text().replace("GCA_2", "x" * 200_000)  # over csv's field limit
+        path.write_text(text)
+        with pytest.raises(ValueError, match=r"big\.tsv: line 3: .*field larger"):
+            build_metadata_db([path], tmp_path / "out.sqlite")
+
     def test_refuses_overwrite(self, tmp_path: Path) -> None:
         source = _write_tsv(tmp_path / "one.tsv", [_row("GCA_1")])
         output = tmp_path / "meta.sqlite"
@@ -255,6 +262,29 @@ class TestBuildMetadata:
         with pytest.raises(FileExistsError):
             build_metadata_db([source], output)
         build_metadata_db([source], output, force=True)
+
+    def test_opens_path_with_uri_characters(self, tmp_path: Path) -> None:
+        source = _write_tsv(tmp_path / "one.tsv", [_row("GCA_1")])
+        output = tmp_path / "meta#1?x%20.sqlite"
+        build_metadata_db([source], output)
+        with MetadataDB(output) as db:
+            assert set(db.lookup(["GCA_1"])) == {"GCA_1"}
+
+    def test_failed_force_rebuild_keeps_old_database(self, tmp_path: Path) -> None:
+        source = _write_tsv(tmp_path / "one.tsv", [_row("GCA_1")])
+        output = tmp_path / "meta.sqlite"
+        build_metadata_db([source], output)
+        before = output.read_bytes()
+
+        broken = tmp_path / "broken.tsv"
+        broken.write_text("accession\tgenome_size\nGCA_1\t1\n")
+        with pytest.raises(ValueError, match="missing column"):
+            build_metadata_db([broken], output, force=True)
+        with pytest.raises(FileNotFoundError):
+            build_metadata_db([tmp_path / "nope.tsv"], output, force=True)
+
+        assert output.read_bytes() == before
+        assert sorted(path.name for path in tmp_path.glob("meta*")) == ["meta.sqlite"]
 
     def test_schema(self, tmp_path: Path) -> None:
         source = _write_tsv(tmp_path / "one.tsv", [_row("GCA_1")])

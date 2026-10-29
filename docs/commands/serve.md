@@ -9,7 +9,7 @@ sylphd serve --db PATH [--meta PATH] [--socket PATH | --tcp HOST:PORT]
              [--max-jobs N] [--max-upload-mb N] [--hash]
              [--allow-sequences] [--max-sequence-mb N] [--rate-limit N/min]
              [--max-queue N] [--trusted-proxy IP] [--cors-origin ORIGIN]
-             [--terms-url URL] [--name TEXT] [--about FILE] [--log-level LEVEL]
+             [--name TEXT] [--about FILE] [--log-level LEVEL]
 ```
 
 ## Database and metadata
@@ -55,7 +55,6 @@ All off by default.
 | `--allow-sequences` | off | also accept *raw* FASTA/FASTQ on `POST /assembly`. Without it that endpoint takes sketches only (the web app and `sylphd assembly` sketch locally) and answers raw sequences with a 404, so **the server can never receive a sequence** |
 | `--trusted-proxy IP` | none | peer whose `X-Forwarded-For` header is believed; repeatable. `unix` means a Unix-socket peer. Without it the header is ignored |
 | `--cors-origin ORIGIN` | none | allowed CORS origin; repeatable. `'*'`, a specific origin, or `local` |
-| `--terms-url URL` | none | terms-of-use page, reported as `terms_url` by `/info` |
 | `--name TEXT` | none | display name of the instance (one line, at most 80 characters), reported as `name` by `/info` and shown by the web page |
 | `--about FILE` | none | UTF-8 Markdown file (at most 16 KiB) describing the instance, reported as `about` by `/info` and shown by the web page. Checked at startup (an unreadable or too large file is an error) and re-read whenever it changes, so you can edit it without restarting; see [Describing your instance](../guides/public-server.md#describing-your-instance) |
 

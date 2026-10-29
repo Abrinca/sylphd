@@ -33,16 +33,18 @@ The scripts are the mechanism; these are the knobs you choose:
   `caddy.service` drop-in and Caddy requests a certificate for it.
 - **Public flags** — `SYLPH_SERVE_ARGS` in `site.env`, on top of the defaults
   in `sylphd.service`. The shipped set is an example, not a requirement:
-  `--allow-sequences` (needed by the web app), `--max-jobs`, `--max-queue`,
-  `--rate-limit`, `--trusted-proxy unix`, `--cors-origin`, `--terms-url`.
+  `--max-jobs`, `--max-queue`, `--rate-limit`, `--trusted-proxy unix`,
+  `--cors-origin`. The web app and `sylphd assembly` send
+  sketches, so the public instance runs without `--allow-sequences`
+  (optional raw FASTA uploads for scripts).
   `--about /etc/sylphd/about.md` publishes a Markdown description of your
   instance (shown at the top of the web page, editable without a restart;
   put the file somewhere the `sylphd` service account can read, for example
-  `/etc/sylphd/about.md`) and `--name` a display name. `SYLPH_SERVE_ARGS` is
-  split on whitespace, so use a one-word `--name` there and put anything longer
-  in the about file.
-  Narrow `--cors-origin` to your page's origin if you run one; drop
-  `--terms-url` unless you publish terms. See
+  `/etc/sylphd/about.md`). `SYLPH_SERVE_ARGS` is split on whitespace, so the
+  display name has its own variable, `SYLPH_NAME` in `site.env` (may contain
+  spaces, e.g. `SYLPH_NAME="GTDB r232"`; it becomes `--name`).
+  Narrow `--cors-origin` to your page's origin if you run one. Terms of use,
+  if you have any, go into the `--about` text. See
   [Running a public server](../docs/guides/public-server.md) and the
   [security notes](../docs/reference/security.md).
 - **Upload ceiling** — `SYLPH_HTTP_MAX` (Caddy `request_body max_size`).
@@ -151,9 +153,8 @@ restart (see above); all releases that were not pruned are still installed.
    old.example.org"`), republish the page (step 4), then drop the old name.
 2. Caddy obtains a certificate for the new name automatically and keeps the old
    one until it expires.
-3. Re-check `--cors-origin` in `SYLPH_SERVE_ARGS` if the web page moves, and
-   `--terms-url` if you publish terms. Re-running the script applies them;
-   `sudo systemctl restart sylphd` picks them up.
+3. Re-check `--cors-origin` in `SYLPH_SERVE_ARGS` if the web page moves.
+   Re-running the script applies it; `sudo systemctl restart sylphd` picks it up.
 4. Point the published page at the new URL (`apiBase` in `web/config.js`) and
    republish it.
 

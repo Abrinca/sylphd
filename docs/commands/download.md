@@ -21,7 +21,7 @@ their names, sizes and mirrors.
 | Option | Default | Meaning |
 |---|---|---|
 | `--database NAME` | none | pre-built database to fetch (repeatable); `list` prints the catalogue |
-| `--url URL` | catalogue mirrors | fetch from this source instead of the catalogue mirrors (repeatable) |
+| `--url URL` | catalogue mirrors | fetch from this source instead of the catalogue mirrors (repeatable; the file name is taken from the URL, so two URLs must not end in the same name) |
 | `--list-databases` | off | print the catalogue and exit |
 | `--outdir DIR` | `.` | output directory |
 | `--verify` | off | also compare the MD5 with the catalogue entry |
@@ -58,7 +58,8 @@ resumes nothing and starts nothing. Metadata files keep their `MD5SUM.txt` verif
 
 Transfers go to `FILE.part` and are renamed only after the size (and checksum) matches. An
 interrupted download resumes from where it stopped using an HTTP `Range` request; a server that
-ignores `Range` simply sends the file again. If a mirror fails, the next one is tried.
+ignores `Range` (or answers without a matching `Content-Range`) simply sends the file again. If a
+mirror fails (or its file has the wrong size or checksum), the next one is tried.
 
 If [`aria2c`](https://aria2.github.io/) is on `PATH`, database downloads use it instead, with all
 mirrors at once and sixteen connections splitting each file:
@@ -67,8 +68,9 @@ mirrors at once and sixteen connections splitting each file:
 aria2c -s 16 -x 8 -k 5M -c --file-allocation=none -d data -o FILE URL1 URL2
 ```
 
-`aria2c` prints its own progress and can resume its own `.aria2` control file. Pass `--no-aria2c`
-to use the built-in downloader.
+`aria2c` prints its own progress and can resume from its `.aria2` control file, which is kept when a
+transfer fails or is interrupted. The built-in downloader never resumes such a file: it starts over.
+Pass `--no-aria2c` to use the built-in downloader.
 
 Feed the downloaded database to [`sylphd serve`](serve.md) and the metadata files to
 [`sylphd setup`](setup.md):

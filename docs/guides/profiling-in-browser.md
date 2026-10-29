@@ -20,7 +20,9 @@ sketch leaves your computer.
     - **one file**: single-end reads, or *interleaved pairs* (`R1, R2, R1, R2, …`);
     - **two files**: paired-end `R1` + `R2`. Names like `_R1`/`_R2`, `_1`/`_2` or `.R1`/`.R2` are
       recognised and put in order; *Swap R1 / R2* flips them, and *Two single-end files* combines
-      them into one single-end sample instead;
+      them into one single-end sample instead. The page compares the name of the first record of each
+      file (ignoring `/1`, `/2` and the Illumina comment after the first space) and warns if they
+      differ; only the first pair is checked, not the rest of the files;
     - **three or more files** are combined into one single-end sample (for example lanes).
 3. Check the sample name (it defaults to the file name without suffixes) and press **Sketch and
    profile**.
@@ -90,7 +92,7 @@ to about 76 MB.
 ## The Assembly mode sketches the same way { #assembly-mode }
 
 The Assembly tab uses the same WebAssembly sketcher: a pasted FASTA goes straight to it, a file
-(plain or `.gz`, any size, up to a 2 GB sanity cap) through the same decompress and sketch workers.
+(plain or `.gz`, up to 2 GiB) through the same decompress and sketch workers.
 The page counts the records, length and GC content while sketching, sends only the sketch to
 [`POST /assembly`](../reference/http-api.md#post-assembly) (`Content-Type:
 application/vnd.sylph.sketch`) and marks the result *sketched locally*. A 2.8 Mb assembly takes

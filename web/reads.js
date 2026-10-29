@@ -68,6 +68,7 @@
     files: [], // File[]; for the paired layout [R1, R2]
     layout: 'single', // 'single' | 'interleaved' | 'paired'
     pairDetected: false,
+    pairMismatch: false, // the first records of R1 and R2 have different names
     nameTouched: false,
     kind: 'reads', // 'reads' | 'sketch' (one .sylsp) | 'multisketch' (several .sylsp) | 'mixed'
     header: null, // parsed header of the .sylsp (kind 'sketch'), or { error }
@@ -180,11 +181,43 @@
     const n = st.files.filter(isSylsp).length;
     st.kind = n === 0 ? 'reads' : n < st.files.length ? 'mixed' : n === 1 ? 'sketch' : 'multisketch';
     st.header = null;
+    st.pairMismatch = false;
+    if (st.kind === 'reads' && st.files.length === 2) {
+      const files = st.files.slice();
+      Promise.all(files.map(firstRecordName)).then(([a, b]) => {
+        if (st.files.length === 2 && files.every((f) => st.files.includes(f))) { st.pairMismatch = !!a && !!b && a !== b; refresh(); }
+      });
+    }
     if (st.kind !== 'sketch') return;
     const file = st.files[0];
     readSylspHeader(file).then((h) => h, (e) => ({ error: e.message || String(e) })).then((h) => {
       if (st.files[0] === file && st.kind === 'sketch') { st.header = h; renderFiles(); }
     });
+  }
+
+  // Name of the first record (FASTQ/FASTA) without a /1 or /2 mate suffix and without the comment
+  // after the first space (Illumina "1:N:0:..."), or '' if it cannot be read. Only the first
+  // few KB are read; a gzip file is decompressed as far as that goes.
+  async function firstRecordName(file) {
+    try {
+      const [b0, b1] = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+      let stream = file.slice(0, 16384).stream();
+      if (b0 === 0x1f && b1 === 0x8b) stream = stream.pipeThrough(new DecompressionStream('gzip'));
+      const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+      let text = '';
+      try {
+        while (!text.includes('\n')) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          text += value;
+        }
+      } catch { /* a cut-off gzip stream ends in an error; keep what was decoded */ }
+      reader.cancel().catch(() => {});
+      const line = text.split('\n')[0].trim();
+      return /^[@>]/.test(line) ? line.slice(1).split(/\s/)[0].replace(/\/[12]$/, '') : '';
+    } catch {
+      return '';
+    }
   }
 
   function autoName() {
@@ -256,8 +289,9 @@
       } else if (maxMb && st.files[0].size > maxMb * 1048576) {
         block.push(`This sketch is ${fmtBytes(st.files[0].size)}, over the server's upload limit of ${maxMb} MB.`);
       }
-    } else if (n === 2 && st.layout === 'paired' && !st.pairDetected) {
-      warn.push('The file names do not look like a pair (_R1/_R2, _1/_2): check that the order is R1, R2, or choose “Two single-end files”.');
+    } else if (n === 2 && st.layout === 'paired') {
+      if (!st.pairDetected) warn.push('The file names do not look like a pair (_R1/_R2, _1/_2): check that the order is R1, R2, or choose “Two single-end files”.');
+      if (st.pairMismatch) warn.push('The first read names of R1 and R2 differ: these files may not belong together.');
     }
     return { block, warn };
   }

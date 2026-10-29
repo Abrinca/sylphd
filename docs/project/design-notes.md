@@ -28,7 +28,7 @@ shares one copy across runs, parallel jobs and users.
 ## Architecture
 
 - **Server.** Loads the database at startup and offers `/health`, `/info`, `/profile`, `/query`
-  and, only with `--allow-sequences`, `/assembly`.
+  and `/assembly`.
 - **Client library and CLI.** Ask the server for `c` and `k`, sketch locally, send the sketches and
   write the rows. Inputs: single-end reads (also long reads and assemblies), paired reads,
   interleaved reads, several files per sample (combined into one sketch) and existing `.sylsp`
@@ -52,15 +52,17 @@ column each. See [Metadata database](../reference/metadata.md).
 ## The web front end
 
 The aim: a public page where a visitor pastes one assembly and gets its closest GTDB genomes, with
-no install and no sketching on the client.
+no install. The page sketches the assembly in the browser (WebAssembly) and sends only the sketch.
 
-- **Server.** An opt-in `POST /assembly` takes raw FASTA or FASTQ, plain or gzip, as one sample,
-  with size caps for the body and its decompressed form, `top` and `min_ani` parameters, and flat
+- **Server.** `POST /assembly` takes the sketch of one assembly (always accepted), or, with the
+  optional `--allow-sequences`, raw FASTA or FASTQ, plain or gzip, which it sketches itself, with
+  size caps for the raw body and its decompressed form, `top` and `min_ani` parameters, and flat
   metadata in each hit. `Profiler(no_adjust=True)` gives the naive containment ANI, which is the
   meaningful ANI for a genome. `sylphd assembly` is a client for it.
 - **Public-deployment flags.** `--allow-sequences`, `--max-sequence-mb`, `--rate-limit`,
-  `--max-queue`, `--trusted-proxy` and `--cors-origin`. Everything is off by default and `/assembly`
-  is a 404 without `--allow-sequences`, so local behaviour is unchanged.
+  `--max-queue`, `--trusted-proxy` and `--cors-origin`. Everything is off by default, and raw
+  sequence uploads to `/assembly` are a 404 without `--allow-sequences`, so local behaviour is
+  unchanged.
 - **Deployment.** A reverse proxy terminates TLS on a small host.
 - **Page.** The static page calls the API directly from the browser with `fetch`, so the server
   needs the CORS origin and a rate limit per client IP.

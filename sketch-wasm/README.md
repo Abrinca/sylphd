@@ -82,7 +82,8 @@ re-emitted with the k-mer entries sorted (this crate always writes them sorted, 
 order, which no reader depends on) and compared **byte for byte**; the profile against
 `tests/data/ecoli.syl2db` is compared as well.
 
-All of these are identical (`SKETCH_WASM_BIG=1` adds the 1.55 GB ONT file):
+All of these are identical (`SKETCH_WASM_BIG=1` adds a large ONT file, which you put at
+`scratch/big/ont.fastq.gz`; the numbers below are for a 1.55 GB one):
 
 | case | |
 |---|---|

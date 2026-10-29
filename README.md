@@ -32,8 +32,11 @@ x86_64 and aarch64 (CPython 3.14):
 
 ```console
 uv venv --python 3.14
-uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/v0.1.0 "sylphd==0.1.0"
+uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z "sylphd==X.Y.Z"
 ```
+
+Replace `vX.Y.Z` / `X.Y.Z` with the tag and version of a release from the
+[releases page](https://github.com/Abrinca/sylphd/releases) (the newest is marked *Latest*).
 
 See [Install from a release](https://abrinca.github.io/sylphd/docs/install/#from-a-release-no-rust-needed)
 for the details.
@@ -61,8 +64,8 @@ GlobDB, viral and eukaryotic catalogues). They are built and hosted by the
 [`aria2c`](https://aria2.github.io/) when it is installed and resumes interrupted transfers
 otherwise.
 
-The default address is `$XDG_RUNTIME_DIR/sylphd.sock`. To identify an assembly, start the server
-with `--allow-sequences` and run `sylphd assembly assembly.fasta`.
+The default address is `$XDG_RUNTIME_DIR/sylphd.sock`. To identify an assembly, run
+`sylphd assembly assembly.fasta`; it sketches locally, so any server will do.
 
 ## Documentation
 

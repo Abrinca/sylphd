@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Dev dependencies of the browser tests (test_web_about_browser.py); see .github/workflows/web-tests.yml",
+  "devDependencies": {
+    "playwright-core": "1.64.1"
+  }
+}

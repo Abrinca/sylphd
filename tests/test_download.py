@@ -103,7 +103,7 @@ def test_checksum_mismatch_removes_partial(tmp_path: Path, http_server) -> None:
     (directory / "ar53_metadata_r232.tsv.gz").write_bytes(b"corrupt")
 
     out = tmp_path / "out"
-    with pytest.raises(ValueError, match="checksum mismatch"):
+    with pytest.raises(DownloadError, match="checksum mismatch"):
         download_release(232, out, domains=["ar53"], base_url=base_url)
     assert not (out / "ar53_metadata_r232.tsv.gz").exists()
     assert not list(out.glob("*.part"))
@@ -202,11 +202,13 @@ class _FileHandler(http.server.BaseHTTPRequestHandler):
         *args: object,
         directory: str,
         honor_range: bool = True,
+        content_range: bool = True,
         records: list[str | None] | None = None,
         **kwargs: object,
     ) -> None:
         self.directory = Path(directory)
         self.honor_range = honor_range
+        self.content_range = content_range
         self.records = records
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
 
@@ -228,9 +230,10 @@ class _FileHandler(http.server.BaseHTTPRequestHandler):
             start = int(range_header.split("=", 1)[1].split("-", 1)[0])
             body = data[start:]
             self.send_response(206)
-            self.send_header(
-                "Content-Range", f"bytes {start}-{len(data) - 1}/{len(data)}"
-            )
+            if self.content_range:
+                self.send_header(
+                    "Content-Range", f"bytes {start}-{len(data) - 1}/{len(data)}"
+                )
         else:
             body = data
             self.send_response(200)
@@ -249,12 +252,14 @@ def serve(tmp_path: Path):
         root: Path,
         *,
         honor_range: bool = True,
+        content_range: bool = True,
         records: list[str | None] | None = None,
     ) -> str:
         handler = functools.partial(
             _FileHandler,
             directory=str(root),
             honor_range=honor_range,
+            content_range=content_range,
             records=records,
         )
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -325,15 +330,76 @@ def test_server_ignoring_range_restarts(tmp_path: Path, www: Path, serve) -> Non
     assert records == ["bytes=25-"]  # asked, was ignored, started over
 
 
+def test_resume_without_content_range_restarts(tmp_path: Path, www: Path, serve) -> None:
+    content = b"0123456789" * 1000
+    (www / "db.syldb").write_bytes(content)
+    records: list[str | None] = []
+    base_url = serve(www, content_range=False, records=records)
+
+    destination = tmp_path / "db.syldb"
+    partial = destination.with_name("db.syldb.part")
+    partial.write_bytes(b"x" * 3000)  # not a prefix of the served file
+
+    download_urls([base_url + "db.syldb"], destination, expected_size=len(content))
+
+    assert destination.read_bytes() == content
+    assert records == ["bytes=3000-", None]  # bad 206, then a fresh full request
+
+
+def test_http_does_not_resume_aria2c_partial(tmp_path: Path, www: Path, serve) -> None:
+    content = b"0123456789" * 1000
+    (www / "db.syldb").write_bytes(content)
+    records: list[str | None] = []
+    base_url = serve(www, records=records)
+
+    destination = tmp_path / "db.syldb"
+    partial = destination.with_name("db.syldb.part")
+    control = destination.with_name("db.syldb.part.aria2")
+    partial.write_bytes(content[:3000])
+    control.write_bytes(b"control")
+
+    download_urls([base_url + "db.syldb"], destination, expected_size=len(content))
+
+    assert destination.read_bytes() == content
+    assert not control.exists()
+    assert records == [None]
+
+
 def test_mirror_fallback(tmp_path: Path, www: Path, serve) -> None:
     content = b"second mirror has it"
-    first = serve(www)  # empty: 404
+    empty = tmp_path / "empty"
+    empty.mkdir()
     (www / "db.syldb").write_bytes(content)
-    second = serve(www)
+    records: list[str | None] = []
+    first = serve(empty)  # 404
+    second = serve(www, records=records)
 
     destination = tmp_path / "db.syldb"
     download_urls([first + "db.syldb", second + "db.syldb"], destination)
     assert destination.read_bytes() == content
+    assert records == [None]  # the second mirror really served it
+
+
+def test_checksum_mismatch_falls_back_to_next_mirror(
+    tmp_path: Path, www: Path, serve
+) -> None:
+    content = b"good content"
+    corrupt = tmp_path / "corrupt"
+    corrupt.mkdir()
+    (corrupt / "db.syldb").write_bytes(b"evil content")  # same length
+    (www / "db.syldb").write_bytes(content)
+    first = serve(corrupt)
+    second = serve(www)
+
+    destination = tmp_path / "db.syldb"
+    download_urls(
+        [first + "db.syldb", second + "db.syldb"],
+        destination,
+        expected_size=len(content),
+        expected_md5=hashlib.md5(content).hexdigest(),
+    )
+    assert destination.read_bytes() == content
+    assert not destination.with_name("db.syldb.part").exists()
 
 
 def test_all_mirrors_fail(tmp_path: Path, www: Path, serve) -> None:
@@ -362,7 +428,7 @@ def test_md5_mismatch_removes_file(tmp_path: Path, www: Path, serve) -> None:
     (www / "db.syldb").write_bytes(b"contents")
     base_url = serve(www)
     destination = tmp_path / "db.syldb"
-    with pytest.raises(ValueError, match="checksum mismatch"):
+    with pytest.raises(DownloadError, match="checksum mismatch"):
         download_urls(
             [base_url + "db.syldb"], destination, expected_md5="0" * 32
         )
@@ -501,6 +567,21 @@ def test_aria2c_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         download_urls(["http://a/x"], tmp_path / "x", use_aria2c=True)
 
 
+def test_aria2c_failure_keeps_control_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_run(command: list[str], check: bool = False) -> _FakeCompleted:
+        (tmp_path / "x.part").write_bytes(b"holes")
+        (tmp_path / "x.part.aria2").write_bytes(b"control")
+        return _FakeCompleted(7)
+
+    monkeypatch.setattr(download.subprocess, "run", fake_run)
+    with pytest.raises(DownloadError):
+        download_urls(["http://a/x"], tmp_path / "x", use_aria2c=True)
+    assert (tmp_path / "x.part").exists()
+    assert (tmp_path / "x.part.aria2").exists()
+
+
 # ---------------------------------------------------------------------------
 # command line
 # ---------------------------------------------------------------------------
@@ -577,6 +658,30 @@ def test_cli_downloads_several_urls(tmp_path: Path, www: Path, serve) -> None:
     )
     assert (tmp_path / "a.syldb").read_bytes() == b"aaa"
     assert (tmp_path / "b.syldb").read_bytes() == b"bb"
+
+
+def test_cli_rejects_urls_with_the_same_file_name(tmp_path: Path) -> None:
+    result = _run(
+        "download",
+        "--url",
+        "http://a.example/db.syldb",
+        "--url",
+        "http://b.example/db.syldb",
+        "--outdir",
+        str(tmp_path),
+    )
+    assert result.returncode == 1
+    assert "same file: db.syldb" in result.stderr
+    assert not list(tmp_path.iterdir())
+
+
+def test_cli_release_network_error_is_a_cli_error(tmp_path: Path) -> None:
+    result = _run(
+        "download", "--base-url", "http://127.0.0.1:9/", "--outdir", str(tmp_path)
+    )
+    assert result.returncode == 1
+    assert "error:" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_cli_unknown_database(tmp_path: Path) -> None:

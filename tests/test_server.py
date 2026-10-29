@@ -16,6 +16,7 @@ import dnaio
 import httpx
 import pysylph
 import pytest
+import uvicorn
 from starlette.testclient import TestClient
 
 from sylphd import cli
@@ -29,6 +30,7 @@ from sylphd.server import (
     bind_unix_socket,
     create_app,
     prepare_unix_socket,
+    serve,
 )
 
 from conftest import ECOLI_TWO_STAGE, K12_R1, MIX_SKETCH, O157_SKETCH
@@ -52,26 +54,6 @@ def client():
         yield test_client
 
 
-class TestTerms:
-    def test_terms_url_is_reported(self) -> None:
-        terms = "https://abrinca.github.io/sylphd/terms.html"
-        app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, terms_url=terms))
-        with TestClient(app) as test_client:
-            assert test_client.get("/info").json()["terms_url"] == terms
-
-    def test_serve_accepts_terms_url(self) -> None:
-        args = cli.build_parser().parse_args(
-            [
-                "serve",
-                "--db",
-                "db.syl2db",
-                "--terms-url",
-                "https://example.org/terms",
-            ]
-        )
-        assert args.terms_url == "https://example.org/terms"
-
-
 class TestBasics:
     def test_health(self, client: TestClient) -> None:
         response = client.get("/health")
@@ -93,7 +75,6 @@ class TestBasics:
         assert info["database"]["two_stage"] is True
         assert info["database"]["size"] > 0
         assert info["metadata"] is None
-        assert info["terms_url"] is None
         assert info["limits"]["max_jobs"] == 2
         assert info["pysylph_version"]
         assert info["python_version"].startswith("3.")
@@ -226,6 +207,17 @@ class TestErrors:
         assert response.status_code == 400
         assert "entries" in response.json()["error"]
 
+    @pytest.mark.parametrize("name", ["a\tb", "a\nb", "a\x00b", "x" * 1025])
+    def test_bad_sample_name(self, client: TestClient, name: str) -> None:
+        response = _post(client, "query", [("x", b"x")], names=[name])
+        assert response.status_code == 400
+        assert "sample name" in response.json()["error"]
+
+    def test_filename_derived_name_is_capped(self, client: TestClient) -> None:
+        response = _post(client, "query", [("x" * 1025, b"x")])
+        assert response.status_code == 400
+        assert "sample name" in response.json()["error"]
+
     def test_invalid_sketch(self, client: TestClient) -> None:
         response = _post(client, "query", [("bad", b"not a sketch")])
         assert response.status_code == 400
@@ -278,6 +270,12 @@ class TestErrors:
             )
         assert response.status_code == 413
         assert "limit" in response.json()["error"]
+
+    def test_too_many_sketches_is_400(self, client: TestClient) -> None:
+        files = [("sketch", (f"s{i}", b"x")) for i in range(4097)]
+        response = client.post("/query", data={"params": "{}"}, files=files)
+        assert response.status_code == 400
+        assert "Too many files" in response.json()["error"]
 
     def test_non_file_sketch_part(self, client: TestClient) -> None:
         response = client.post(
@@ -453,6 +451,14 @@ class TestUnixSocketCleanup:
         sock.close()
         prepare_unix_socket(path)
         assert not path.exists()
+
+
+class TestServe:
+    def test_uvicorn_does_not_rewrite_client_from_proxy_headers(self, monkeypatch) -> None:
+        calls = []
+        monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: calls.append(kwargs))
+        serve(ServerConfig(db_path=ECOLI_TWO_STAGE), tcp=("127.0.0.1", 0), app=object())
+        assert calls[0]["proxy_headers"] is False
 
 
 class TestConcurrency:

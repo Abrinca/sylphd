@@ -16,8 +16,13 @@ from sylphd.server import ServerConfig, create_app
 from conftest import ECOLI_TWO_STAGE
 
 
+def _app(name: str | None = None, about_path: Path | None = None):
+    config = ServerConfig(db_path=ECOLI_TWO_STAGE, name=check_name(name), about=About(about_path))
+    return create_app(config)
+
+
 def _info(**config) -> dict:
-    app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, **config))
+    app = _app(**config)
     with TestClient(app) as client:
         return client.get("/info").json()
 
@@ -83,8 +88,6 @@ def test_bad_files_fail_at_startup(tmp_path: Path) -> None:
 def test_bad_names(name: str) -> None:
     with pytest.raises(AboutError):
         check_name(name)
-    with pytest.raises(AboutError):
-        create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, name=name))
 
 
 def test_name_limits() -> None:
@@ -95,7 +98,7 @@ def test_name_limits() -> None:
 def test_reload_on_change_and_keep_last_good(tmp_path: Path, caplog) -> None:
     about = tmp_path / "about.md"
     about.write_text("first", encoding="utf-8")
-    app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, about_path=about))
+    app = _app(about_path=about)
     with TestClient(app) as client:
         assert client.get("/info").json()["about"]["text"] == "first"
         about.write_text("second, longer", encoding="utf-8")

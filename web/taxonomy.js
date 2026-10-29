@@ -99,7 +99,9 @@
         depth, isStrain: clade.slice(clade.lastIndexOf('|') + 1).startsWith('t__'),
       });
     }
-    out.sort((a, b) => a.depth - b.depth || b.relative - a.relative); // stable
+    // Strains (t__) are the last rank, however short their lineage was.
+    const rank = (c) => (c.isStrain ? RANKS.length + 1 : c.depth);
+    out.sort((a, b) => rank(a) - rank(b) || b.relative - a.relative); // stable
     return out;
   }
 

@@ -22,7 +22,7 @@ import stat
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -38,7 +38,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import __version__
-from .about import About, check_name
+from .about import About
 from .assembly import (
     DECOMPRESSION_FACTOR,
     INTERPRETATION_THRESHOLDS,
@@ -60,7 +60,7 @@ from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
 from .paths import SOCKET_MODE, parse_tcp
 from .protocol import ProfileParams, ProtocolError, result_row
 from .sketchcheck import SketchFormatError, parse_sketch_header
-from .sketching import sample_name_from_path
+from .sketching import InputError, check_sample_name, sample_name_from_path
 
 #: Maximum number of sketches accepted in one request.
 MAX_SKETCHES = 4096
@@ -113,12 +113,12 @@ class ServerConfig:
     trusted_proxies: tuple[str, ...] = ()
     #: Allowed CORS origins; none by default.
     cors_origins: tuple[str, ...] = ()
-    #: Optional URL of a terms-of-use page, reported by ``/info``.
-    terms_url: str | None = None
-    #: Display name of the instance, reported by ``/info``.
+    #: Display name of the instance, reported by ``/info``; as returned by
+    #: :func:`sylphd.about.check_name`.
     name: str | None = None
-    #: UTF-8 Markdown file describing the instance (``/info`` ``about``).
-    about_path: Path | None = None
+    #: The operator's about text (``/info`` ``about``); the caller builds it,
+    #: so a bad file fails before the database is loaded.
+    about: About = field(default_factory=lambda: About(None))
     #: Set when serving on a Unix socket, so the app can adjust its mode.
     socket_path: Path | None = None
 
@@ -267,7 +267,6 @@ async def _info(request: Request) -> JSONResponse:
             "python_version": ".".join(str(part) for part in sys.version_info[:3]),
             "database": state.database.info(),
             "metadata": metadata.summary() if metadata is not None else None,
-            "terms_url": state.terms_url,
             "limits": {
                 "max_jobs": state.max_jobs,
                 "max_upload_mb": state.max_upload_mb,
@@ -599,7 +598,7 @@ def _assembly_hits(
         contained, total = (int(value) for value in result.containment)
         row: dict[str, Any] = {
             "rank": rank,
-            "ani": round(float(result.ani), 2),
+            "ani": float(result.ani),
             "containment": [contained, total],
             "containment_fraction": round(contained / total, 3) if total else 0.0,
             "genome_file": genome.name,
@@ -658,8 +657,6 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
     sketches = form.getlist("sketch")
     if not sketches:
         return _error("no 'sketch' part in the request", 400)
-    if len(sketches) > MAX_SKETCHES:
-        return _error(f"more than {MAX_SKETCHES} sketches in one request", 413)
     for part in sketches:
         if not isinstance(part, UploadFile):
             return _error("'sketch' parts must be file uploads", 400)
@@ -794,16 +791,18 @@ def _resolve_names(value: Any, sketches: Sequence[Any]) -> list[str] | JSONRespo
             filename = getattr(part, "filename", None)
             name = sample_name_from_path(filename) if filename else ""
             names.append(name or f"sample-{index + 1}")
-        return names
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+    elif not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         return _error("'params.names' must be a list of strings", 400)
-    if len(value) != len(sketches):
+    elif len(value) != len(sketches):
         return _error(
             f"'params.names' has {len(value)} entries for {len(sketches)} sketches", 400
         )
-    if any(len(name) > 1024 for name in value):
-        return _error("sample name too long (max 1024 characters)", 400)
-    return list(value)
+    else:
+        names = value
+    try:
+        return [check_sample_name(name) for name in names]
+    except InputError as error:
+        return _error(str(error), 400)
 
 
 async def _json_http_error(request: Request, exc: Exception) -> JSONResponse:
@@ -871,9 +870,8 @@ def create_app(
     app.state.max_sequence_mb = config.max_sequence_mb
     app.state.rate_limit = config.rate_limit
     app.state.max_queue = config.max_queue
-    app.state.terms_url = config.terms_url
-    app.state.name = check_name(config.name)
-    app.state.about = About(config.about_path)
+    app.state.name = config.name
+    app.state.about = config.about
     app.state.jobs = JobSlots(config.max_jobs, config.max_queue)
     # Starlette middleware: the last added is the outermost, so CORS wraps
     # rate-limit and body-limit errors too.
@@ -1004,6 +1002,9 @@ def serve(
     kwargs: dict[str, Any] = {
         "log_level": log_level,
         "access_log": log_level != "warning",
+        # limits.client_identity() decides whom to trust; uvicorn must not
+        # rewrite scope["client"] from X-Forwarded-For first.
+        "proxy_headers": False,
     }
     sock: socket.socket | None = None
     socket_identity: tuple[int, int] | None = None

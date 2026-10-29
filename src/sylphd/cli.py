@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
+import sqlite3
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import urlparse
+
+import httpx
 
 from . import __version__
 from .client import ClientError, connect
@@ -24,6 +28,7 @@ from .download import (
     database_table,
     download_database,
     download_release,
+    format_size,
 )
 from .about import About, check_name
 from .limits import parse_rate_limit
@@ -55,15 +60,6 @@ PROG = "sylphd"
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
-
-
-def _format_size(size: int) -> str:
-    value = float(size)
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if value < 1024 or unit == "TiB":
-            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
-        value /= 1024
-    return f"{size} B"
 
 
 def _print_error(message: str) -> None:
@@ -122,6 +118,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
         _print_error("--socket and --tcp are mutually exclusive")
         return 2
 
+    # Check --name/--about first (cheap): a bad one must fail before the
+    # database is loaded.
+    name = check_name(args.name)
+    about = About(Path(args.about) if args.about else None)
     config = ServerConfig(
         db_path=Path(args.db),
         meta_path=Path(args.meta) if args.meta else None,
@@ -134,9 +134,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
         max_queue=args.max_queue,
         trusted_proxies=tuple(args.trusted_proxy or ()),
         cors_origins=tuple(args.cors_origin or ()),
-        terms_url=args.terms_url,
-        name=args.name,
-        about_path=Path(args.about) if args.about else None,
+        name=name,
+        about=about,
     )
     socket_path = None
     tcp = None
@@ -154,11 +153,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
             return 2
         config.socket_path = socket_path
 
-    # Check --name/--about first (cheap), then load the database before binding,
-    # so that bad paths fail loudly.
-    check_name(args.name)
-    if args.about:
-        About(Path(args.about))
     database = LoadedDatabase(config.db_path, compute_hash=config.compute_hash)
     app = create_app(config, database=database)
     _log_startup(database, config, socket_path, tcp)
@@ -197,10 +191,8 @@ def _log_startup(
         extras.append(f"rate-limit={count}/{int(window)}s")
     if config.cors_origins:
         extras.append(f"cors={','.join(config.cors_origins)}")
-    if config.terms_url:
-        extras.append(f"terms={config.terms_url}")
-    if config.about_path:
-        extras.append(f"about={config.about_path}")
+    if config.about.path:
+        extras.append(f"about={config.about.path}")
     print(
         f"{PROG}: {database.name} ({kind}, c={database.c}, k={database.k}, "
         f"{database.genomes} genomes) listening on {address} "
@@ -226,7 +218,7 @@ def cmd_info(args: argparse.Namespace) -> int:
     database = info.get("database", {})
     print(f"database: {database.get('name')}")
     print(f"  path: {database.get('path')}")
-    print(f"  size: {_format_size(int(database.get('size') or 0))}")
+    print(f"  size: {format_size(int(database.get('size') or 0))}")
     print(f"  genomes: {database.get('genomes')}")
     print(
         "  c: {c}  k: {k}  screen_c: {screen_c}  two-stage: {two_stage}".format(
@@ -301,7 +293,11 @@ def cmd_contain(args: argparse.Namespace, mode: str) -> int:
         if len(samples) != 1:
             _print_error("--sample-name requires exactly one input sample")
             return 2
-        samples = [replace(samples[0], name=args.sample_name)]
+        try:
+            samples = [replace(samples[0], name=args.sample_name)]
+        except InputError as error:
+            _print_error(str(error))
+            return 2
 
     params = ProfileParams(
         minimum_ani=args.minimum_ani,
@@ -347,13 +343,13 @@ def cmd_contain(args: argparse.Namespace, mode: str) -> int:
             total = sum(len(payload) for _, payload in sketches)
             if total > limit:
                 raise ClientError(
-                    f"sketches total {_format_size(total)}, above the server's "
-                    f"{_format_size(limit)} upload limit; send fewer samples per request"
+                    f"sketches total {format_size(total)}, above the server's "
+                    f"{format_size(limit)} upload limit; send fewer samples per request"
                 )
             if args.verbose:
                 print(
                     f"{PROG}: sending {len(sketches)} sketch(es), "
-                    f"{_format_size(total)}",
+                    f"{format_size(total)}",
                     file=sys.stderr,
                 )
             if mode == "profile":
@@ -449,7 +445,7 @@ def _sketch_all(
         if verbose:
             print(
                 f"{PROG}: {sample.name}: sketch c={sketch.c} k={sketch.k} "
-                f"({_format_size(len(payload))})",
+                f"({format_size(len(payload))})",
                 file=sys.stderr,
             )
         return sample.name, payload
@@ -638,6 +634,11 @@ def cmd_download(args: argparse.Namespace) -> int:
                     _print_error(f"could not derive a file name from --url {url}")
                     return 1
                 jobs.append((name, (url,)))
+        names = [name for name, _ in jobs]
+        if len(set(names)) != len(names):
+            duplicate = next(name for name in names if names.count(name) > 1)
+            _print_error(f"several downloads would write the same file: {duplicate}")
+            return 1
         try:
             for name, sources in jobs:
                 paths.append(
@@ -666,7 +667,7 @@ def cmd_download(args: argparse.Namespace) -> int:
                 force=args.force,
                 progress=progress,
             )
-        except Exception as error:  # httpx errors, checksum errors, ...
+        except (DownloadError, ValueError, OSError, httpx.HTTPError) as error:
             _print_error(str(error))
             return 1
 
@@ -704,7 +705,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print(file=sys.stderr)
     suffix = ", species representatives only" if args.reps_only else ""
     print(
-        f"wrote {stats['path']} ({_format_size(int(stats['size']))}, "
+        f"wrote {stats['path']} ({format_size(int(stats['size']))}, "
         f"{stats['rows']:,} genomes{suffix})",
         file=sys.stderr,
     )
@@ -818,15 +819,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "allowed CORS origin; repeatable (none by default). 'local' allows "
             "localhost, 127.0.0.1, 0.0.0.0 and [::1] on any port"
-        ),
-    )
-    serve_parser.add_argument(
-        "--terms-url",
-        metavar="URL",
-        default=None,
-        help=(
-            "terms-of-use page URL reported by /info and linked from the web "
-            "page (none by default)"
         ),
     )
     serve_parser.add_argument(
@@ -1220,7 +1212,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(args.func(args))
     except KeyboardInterrupt:
         return 130
-    except (ClientError, InputError, ProtocolError, OSError, ValueError, RuntimeError) as error:
+    except (
+        ClientError,
+        InputError,
+        ProtocolError,
+        OSError,
+        ValueError,
+        RuntimeError,
+        sqlite3.Error,
+        csv.Error,
+    ) as error:
         _print_error(str(error))
         return 1
 

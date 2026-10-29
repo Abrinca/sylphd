@@ -1,12 +1,21 @@
 // Browser check of the demo pipeline (Firefox or Chromium) with playwright-core.
+//   ./build.sh && cargo test --release && python3 tests/make_fixtures.py   (in sketch-wasm/ and the repo root)
 //   python3 -m http.server -d demo 8799 &
 //   PLAYWRIGHT_DIR=/path/to/node_modules node tests/browser_check.mjs [firefox|chromium] [--big | --only-big]
-// Prints per-case stats and the SHA-256 of the k-mer entries (compare with the
-// native sketches: the sim_* / k12 / FAM20866 values in the README).
-// Needs the test fixtures in scratch/wasm (see README) and a browser binary:
-// BROWSER_EXE overrides playwright's default location.
+// Compares the SHA-256 of the k-mer entries of every sketch with the native sketch that
+// `cargo test` wrote to target/equality, and expects the corrupt gzip fixtures to fail.
+// Exits non-zero on a mismatch, an error or a timeout. Needs the fixtures in scratch/wasm,
+// a browser binary (BROWSER_EXE overrides playwright's default location) and, for --big /
+// --only-big, a large ONT FASTQ at scratch/big/ont.fastq.gz (also used by node_check.mjs --big).
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+
 const require = createRequire((process.env.PLAYWRIGHT_DIR || '.') + '/');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const R = (f) => path.join(root, f);
 const kind = process.argv.includes('chromium') ? 'chromium' : 'firefox';
 const { [kind]: browserType } = require('playwright-core');
 const browser = await browserType.launch({ headless: true, executablePath: process.env.BROWSER_EXE });
@@ -16,31 +25,55 @@ page.on('pageerror', (e) => console.log('pageerror', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('console.error', m.text()); });
 await page.goto('http://127.0.0.1:8799/index.html');
 await page.evaluate(() => { document.getElementById('send').checked = false; });
-const D = '/home/thomas/Projects/sylphd/';
-const runs = process.argv.includes('--only-big') ? [] : [
-  ['k12_single', [D + 'tests/data/k12.R1.fq.gz'], false],
-  ['k12_twice', [D + 'scratch/wasm/k12_twice.fq.gz'], false],
-  ['k12_paired', [D + 'tests/data/k12.R1.fq.gz', D + 'tests/data/k12.R2.fq.gz'], true],
-  ['sim_bgzf', [D + 'scratch/wasm/sim_R1.bgzf.fq.gz'], false],
-  ['sim_cat3', [D + 'scratch/wasm/sim_R1.cat3.fq.gz'], false],
-  ['bad_crc', [D + 'scratch/wasm/bad_crc.fq.gz'], false],
-  ['truncated', [D + 'scratch/wasm/truncated.fq.gz'], false],
+
+// [name, input files, paired, native sketch in target/equality (null: must fail)]
+const small = [
+  ['k12_single', ['tests/data/k12.R1.fq.gz'], false, 'k12_single'],
+  ['k12_twice', ['scratch/wasm/k12_twice.fq.gz'], false, 'k12_twice_multimember_rawgz'],
+  ['k12_paired', ['tests/data/k12.R1.fq.gz', 'tests/data/k12.R2.fq.gz'], true, 'k12_paired'],
+  ['sim_bgzf', ['scratch/wasm/sim_R1.bgzf.fq.gz'], false, 'sim_single'],
+  ['sim_cat3', ['scratch/wasm/sim_R1.cat3.fq.gz'], false, 'sim_single'],
+  ['bad_crc', ['scratch/wasm/bad_crc.fq.gz'], false, null],
+  ['truncated', ['scratch/wasm/truncated.fq.gz'], false, null],
 ];
-if (process.argv.includes('--big')) runs.push(['FAM20866', ['/home/thomas/Projects/mindtherest/data/ont/FAM20866/reads.fastq.gz'], false]);
-for (const [name, files, paired] of runs) {
+const big = [['FAM20866', ['scratch/big/ont.fastq.gz'], false, 'fam20866_ont']];
+const only = process.argv.includes('--only-big');
+const runs = [...(only ? [] : small), ...(only || process.argv.includes('--big') ? big : [])];
+
+// SHA-256 (12 hex digits) of the header and k-mer entries of a .sylsp, like the page computes it
+const digest = (buf) => {
+  const n = Number(new DataView(buf.buffer, buf.byteOffset).getBigUint64(0, true));
+  return createHash('sha256').update(buf.subarray(0, 8 + 12 * n)).digest('hex').slice(0, 12);
+};
+
+let failed = 0;
+for (const [name, files, paired, native] of runs) {
+  const fail = (why) => { failed++; console.log('FAIL', name, why); };
   await page.evaluate((p) => { document.getElementById('paired').checked = p; }, paired);
-  await page.setInputFiles('#file', files);
+  await page.setInputFiles('#file', files.map(R));
   try {
     await page.waitForFunction(() => window.__lastStats || window.__lastError, null, { timeout: 120000 });
-  } catch (e) { console.log(name, 'TIMEOUT'); continue; }
+  } catch { fail('timeout'); continue; }
   const r = await page.evaluate(async () => {
     const s = window.__lastStats;
     if (!s) return { error: window.__lastError };
     const buf = new Uint8Array(await window.__lastSketch.arrayBuffer());
     const n = Number(new DataView(buf.buffer).getBigUint64(0, true));
     const h = await crypto.subtle.digest('SHA-256', buf.subarray(0, 8 + 12 * n));
-    return { reads: s.reads, kmers: s.kmers, sha: [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12), wall: Math.round(s.wallMs), read: Math.round(s.readMs), gunzip: Math.round(s.gunzipMs), sketch: Math.round(s.sketchMs), crc: Math.round(s.crcMs), idle: Math.round(s.idleMs) };
+    return { sha: [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12), reads: s.reads, kmers: s.kmers, wall: Math.round(s.wallMs), read: Math.round(s.readMs), gunzip: Math.round(s.gunzipMs), sketch: Math.round(s.sketchMs), crc: Math.round(s.crcMs), idle: Math.round(s.idleMs) };
   });
-  console.log(name, JSON.stringify(r));
+  if (native === null) {
+    if (r.error) console.log('OK  ', name, 'failed as expected:', r.error);
+    else fail('should have failed');
+    continue;
+  }
+  if (r.error) { fail(r.error); continue; }
+  const want = digest(readFileSync(R(`sketch-wasm/target/equality/${native}.sylsp`)));
+  console.log(r.sha === want ? 'OK  ' : 'FAIL', name, JSON.stringify(r));
+  if (r.sha !== want) { failed++; console.log('     expected', want, `(${native})`); }
 }
 await browser.close();
+if (failed) {
+  console.log(`${failed} failed`);
+  process.exit(1);
+}

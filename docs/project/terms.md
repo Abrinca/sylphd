@@ -51,4 +51,4 @@ Operator: [Abrinca Genomics](https://abrinca.com). Questions about these terms o
 ## Running your own server
 
 Nothing here applies to a server you run yourself. To tell users of your instance about your own
-terms, start it with [`--terms-url`](../commands/serve.md#public-facing-options).
+terms, put them into the plain text of its [`--about`](../guides/public-server.md#describing-your-instance) file.

@@ -204,6 +204,16 @@ class TestAggregateRows:
             clades[-1].clade,
         ]
 
+    def test_strains_below_a_truncated_lineage_come_last(self) -> None:
+        # The first strain hangs below the genus, at the depth of a species row.
+        rows = [
+            _row(ncbi="d__Bacteria;p__P;c__C;o__O;f__F;g__G;s__", relative=90.0, accession="A"),
+            _row(ncbi="d__Bacteria;p__P;c__C;o__O;f__F;g__G;s__S", relative=10.0, accession="B"),
+        ]
+        clades = aggregate_rows(rows, "ncbi")
+        assert [item.is_strain for item in clades] == [False] * 7 + [True] * 2
+        assert clades[-2].clade.endswith("|t__A")  # strains by abundance
+
     def test_no_renormalisation(self) -> None:
         # --estimate-unknown leaves abundance below 100; keep it as reported.
         clades = aggregate_rows([_row(gtdb=GTDB_SPECIES, relative=37.5)], "gtdb")
@@ -441,6 +451,31 @@ class TestWriteOutputs:
             samples, taxonomies=("gtdb",), taxprof_prefix=str(tmp_path / "p-")
         )
         assert written[0].name == "p-a_b.gtdb.sylphmpa"
+
+    def test_existing_directory_prefix_needs_no_slash(self, tmp_path: Path) -> None:
+        samples = [{"name": "one", "rows": []}]
+        written = write_outputs(
+            samples,
+            taxonomies=("gtdb",),
+            taxprof_prefix=str(tmp_path),
+            taxmatrix_prefix=str(tmp_path / "m-"),  # not a directory: a prefix
+        )
+        assert {path.parent for path in written} == {tmp_path}
+        assert {path.name for path in written} == {"one.gtdb.sylphmpa", "m-gtdb.tsv"}
+
+    def test_colliding_sample_names_write_nothing(self, tmp_path: Path) -> None:
+        samples = [
+            {"name": "a/b", "rows": [_row(gtdb=GTDB_SPECIES, accession="A")]},
+            {"name": "a_b", "rows": [_row(gtdb=GTDB_SPECIES, accession="B")]},
+        ]
+        with pytest.raises(TaxonomyError, match="'a/b' and 'a_b'"):
+            write_outputs(
+                samples,
+                taxonomies=("gtdb", "ncbi"),
+                taxprof_prefix=str(tmp_path / "p-"),
+                taxmatrix_prefix=str(tmp_path / "m-"),
+            )
+        assert not list(tmp_path.iterdir())
 
     def test_no_prefixes(self) -> None:
         assert write_outputs([], taxonomies=("gtdb",)) == []

@@ -5,12 +5,12 @@ the [web app](https://abrinca.github.io/sylphd/): both **sketch the assembly loc
 database's `c` and `k` and send only the sketch to
 [`POST /assembly`](../reference/http-api.md#post-assembly), where the server runs sylph and
 classifies the hits. The sequence never leaves your machine (the command line sketches with
-pysylph, the web app in the browser with WebAssembly), and there is no size limit on the assembly.
+pysylph, the web app in the browser with WebAssembly), and the command line has no size limit on the assembly (the web app takes up to 2 GiB).
 A sketch of a bacterial genome is 100–500 kB.
 
 That works on every server. The public instance runs without `--allow-sequences`, so it **never
 receives a sequence**, which is what you want when the assembly is confidential. A server started
-with `--allow-sequences` also takes raw FASTA, for scripts and local use: `--no-local-sketch` uploads
+with the optional `--allow-sequences` also takes raw FASTA, for scripts and local use: `--no-local-sketch` uploads
 the file as it is (limited by `--max-sequence-mb`, 20 MB by default) and gives the same hits.
 
 ```bash
@@ -19,7 +19,7 @@ sylphd assembly assembly.fasta --top 20 --min-ani 85 --json
 ```
 
 The input is one assembly in FASTA or FASTQ, plain or gzip. All records of the file form one
-sample, so a multi-contig draft is fine. Only the bases `A C G T N` (in either case) are accepted; anything else is a 400.
+sample, so a multi-contig draft is fine. With `--no-local-sketch` the server accepts only the bases `A C G T N` (in either case) and answers anything else with a 400.
 
 ## Output
 
@@ -53,7 +53,7 @@ metadata database. The JSON response carries every metadata column; see the
 
 In the [web app](https://abrinca.github.io/sylphd/#assembly) the sketching happens in your browser
 (WebAssembly, the same code as for [reads](profiling-in-browser.md)). Paste FASTA or drop a file of
-any size (gzip is fine); only the sketch is sent, and the result shows a *sketched locally* badge.
+up to 2 GiB (gzip is fine); only the sketch is sent, and the result shows a *sketched locally* badge.
 You can also upload a sketch you made earlier (`.sylsp`, for example from `sylph sketch` or
 pysylph, or downloaded from the [Reads tab](profiling-in-browser.md#reupload)): it is sent as it
 is, after the page has checked its `c` and `k` against the server. Records, length and GC are
@@ -125,6 +125,8 @@ Without metadata (ANI only), a hit is `same species` for `ani >= 95` and `relate
 
 ## Limits
 
-The upload limit is `--max-sequence-mb` (default 20, before decompression), and gzip bodies may
-decompress to at most five times that. The server logs sizes, timings and outcomes, never the
+A sketch upload is limited by `--max-upload-mb` (default 512 MB; the sketch of a bacterial genome
+is 100–500 kB). Only a raw upload (`--no-local-sketch`, which needs `--allow-sequences`) is limited
+by `--max-sequence-mb` (default 20, before decompression), and gzip bodies may decompress to at most
+five times that. The server logs sizes, timings and outcomes, never the
 sequence. See [Running a public server](public-server.md#limits).

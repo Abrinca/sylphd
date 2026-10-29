@@ -287,16 +287,22 @@ def _iter_rows(path: Path) -> Iterator[tuple[str, list[object]]]:
                 f"{path}: not a GTDB metadata file, missing column(s): "
                 + ", ".join(missing)
             )
-        for line_number, row in enumerate(reader, start=2):
-            if not row or (len(row) == 1 and not row[0].strip()):
-                continue
-            if len(row) < len(header):
-                row = row + [""] * (len(header) - len(row))
-            accession = normalize_accession(row[index["accession"]])
-            if not accession:
-                continue
-            values = [_parse_value(row[index[column.name]], column.kind) for column in COLUMNS]
-            yield accession, values
+        try:
+            for row in reader:
+                if not row or (len(row) == 1 and not row[0].strip()):
+                    continue
+                if len(row) < len(header):
+                    row = row + [""] * (len(header) - len(row))
+                accession = normalize_accession(row[index["accession"]])
+                if not accession:
+                    continue
+                values = [
+                    _parse_value(row[index[column.name]], column.kind)
+                    for column in COLUMNS
+                ]
+                yield accession, values
+        except csv.Error as error:
+            raise ValueError(f"{path}: line {reader.line_num}: {error}") from error
 
 
 def build_metadata_db(
@@ -323,9 +329,12 @@ def build_metadata_db(
             raise FileExistsError(
                 f"{output} already exists (pass --force to overwrite it)"
             )
-        output.unlink()
     if not output.parent.exists():
         raise FileNotFoundError(f"output directory does not exist: {output.parent}")
+    # Build next to the target and replace it only on success, so a failure
+    # leaves an existing database untouched.
+    temporary = output.with_name(output.name + ".tmp")
+    temporary.unlink(missing_ok=True)
 
     placeholders = ", ".join("?" * (1 + len(COLUMNS)))
     sources: list[dict[str, object]] = []
@@ -356,7 +365,7 @@ def build_metadata_db(
             values[position] = identifier
         return (accession, *values)
 
-    connection = sqlite3.connect(str(output))
+    connection = sqlite3.connect(str(temporary))
     try:
         connection.execute(f"PRAGMA page_size = {METADATA_PAGE_SIZE}")
         connection.execute("PRAGMA journal_mode = OFF")
@@ -412,13 +421,11 @@ def build_metadata_db(
         connection.commit()
     except BaseException:
         connection.close()
-        try:
-            output.unlink()
-        except FileNotFoundError:
-            pass
+        temporary.unlink(missing_ok=True)
         raise
     else:
         connection.close()
+        temporary.replace(output)
 
     return {
         "path": str(output),
@@ -432,8 +439,11 @@ def build_metadata_db(
 def _insert_batch(
     connection: sqlite3.Connection, placeholders: str, batch: list[tuple[object, ...]]
 ) -> int:
+    # Identifiers come from the COLUMNS constants, never from input; values are bound.
+    names = ", ".join(["accession", *(column.name for column in COLUMNS)])
     cursor = connection.executemany(
-        f"INSERT OR REPLACE INTO metadata_data VALUES ({placeholders})", batch
+        f"INSERT OR REPLACE INTO metadata_data ({names}) VALUES ({placeholders})",
+        batch,
     )
     return cursor.rowcount
 
@@ -445,7 +455,7 @@ class MetadataDB:
         self.path = Path(path)
         if not self.path.is_file():
             raise FileNotFoundError(f"metadata database not found: {self.path}")
-        uri = f"file:{self.path.resolve().as_posix()}?mode=ro"
+        uri = f"{self.path.resolve().as_uri()}?mode=ro"
         self._connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = threading.Lock()

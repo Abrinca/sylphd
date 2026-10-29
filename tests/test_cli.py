@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import socket
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -406,6 +408,17 @@ class TestLocalCLI:
         )
         assert result.returncode == 1
         assert "cannot talk to sylphd" in result.stderr
+
+    @pytest.mark.parametrize("error", [sqlite3.DatabaseError("not a database"), csv.Error("bad field")])
+    def test_storage_and_parser_errors_are_cli_errors(
+        self, error: Exception, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def fail(args: object) -> int:
+            raise error
+
+        monkeypatch.setattr(cli, "cmd_setup", fail)
+        assert cli.main(["setup", "-m", "x.tsv", "-o", "x.sqlite"]) == 1
+        assert f"error: {error}" in capsys.readouterr().err
 
     def test_sample_name_requires_one_sample(self) -> None:
         result = _run(

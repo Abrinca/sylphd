@@ -434,13 +434,17 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     refreshInput();
   }
 
-  function clearInput() {
+  function clearFile() {
     input.file = null; input.gz = false; input.size = 0; input.sylsp = false; input.header = null;
-    ui.fasta.value = '';
     ui.file.value = '';
     ui.chip.hidden = true;
     ui.drop.classList.remove('has-file');
     refreshInput();
+  }
+
+  function clearInput() {
+    ui.fasta.value = '';
+    clearFile();
   }
 
   function textBytes() {
@@ -483,7 +487,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
         ? `${ui.chipMeta.dataset.size || fmtBytes(size)} · ready-made sketch${h ? `, ${fmtInt(h.kmers)} k-mers, c=${h.c}, k=${h.k}` : ''}`
         : `${ui.chipMeta.dataset.size || fmtBytes(size)} · ${input.gz ? 'gzip' : 'plain text'}`;
     }
-    ui.size.textContent = !size ? '' : input.sylsp ? `${fmtBytes(size)} · uploaded as it is, nothing is sketched` : `${fmtBytes(size)} · sketched in your browser, no size limit`;
+    ui.size.textContent = !size ? '' : input.sylsp ? `${fmtBytes(size)} · uploaded as it is, nothing is sketched` : `${fmtBytes(size)} · sketched in your browser`;
     ui.size.classList.toggle('over', over || (!!sp && sp !== 'pending'));
     if (over) {
       ui.msg.textContent = `Too large: ${fmtBytes(size)} exceeds the ${fmtBytes(LOCAL_INPUT_CAP)} the browser sketcher accepts. Use the sylphd command line for this one.`;
@@ -534,8 +538,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
 
   ui.fasta.addEventListener('input', () => {
-    if (input.file) clearInput();
-    refreshInput();
+    if (input.file) clearFile();
+    else refreshInput();
   });
   ui.top.addEventListener('input', updateSubmit);
   ui.minAni.addEventListener('input', updateSubmit);
@@ -657,14 +661,14 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       }
       const type = 'application/vnd.sylph.sketch';
       const body = localRun ? new Blob([localRun.sketch], { type }) : input.file;
-      const name = input.file ? input.file.name.replace(/\.sylsp$/i, '') : '';
+      // the file name is only a label for the results card; it is never sent
+      const label = input.file ? input.file.name.replace(/\.sylsp$/i, '') : '';
       if (localRun) {
         url.searchParams.set('records', String(localRun.stats.records));
         url.searchParams.set('length', String(localRun.stats.length));
         if (isNum(localRun.stats.gc)) url.searchParams.set('gc', String(localRun.stats.gc));
       }
       phase.text = `Sending the sketch (${fmtBytes(body.size)}) and searching…`;
-      if (name) url.searchParams.set('name', name.slice(0, 200));
       let res;
       try {
         res = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': type }, signal: controller.signal });
@@ -686,7 +690,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       // the server never saw the sequence: fill in what this browser counted (unknown for an uploaded sketch)
       const q = data.query = data.query || {};
       if (localRun) for (const k of ['records', 'length', 'gc']) if (q[k] == null) q[k] = localRun.stats[k];
-      renderResults(data, performance.now() - runStart, localRun ? { sketchBytes: body.size, sketchMs: localRun.ms } : { sketchBytes: body.size, uploaded: true });
+      renderResults(data, performance.now() - runStart, localRun ? { label, sketchBytes: body.size, sketchMs: localRun.ms } : { label, sketchBytes: body.size, uploaded: true });
     } catch (e) {
       if (e.name === 'AbortError') {
         ui.results.replaceChildren(notice('warn', 'Cancelled', 'Sketching or the request was cancelled. Nothing was kept.'));
@@ -812,7 +816,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     const item = (label, value, small) => el('div', null, el('dt', { text: label }), el('dd', null, value, small ? el('small', { text: small }) : null));
     return el('section', { class: 'card', 'aria-label': 'Query summary' },
       el('div', { class: 'card-head' }, el('h2', { text: 'Query' }),
-        el('span', { class: 'muted' }, q.name ? `“${q.name}” ` : '',
+        el('span', { class: 'muted' }, local.label ? `“${local.label}” ` : '',
           local.uploaded
             ? el('span', { class: 'badge badge-plain', title: 'You uploaded a ready-made sketch (k-mer hashes and counts); nothing was sketched here, so records, length and GC are unknown.' }, 'uploaded sketch')
             : el('span', { class: 'badge badge-rel rel-species', title: `The sequence never left your computer: your browser sketched it in ${fmtDur(local.sketchMs)} and only the ${fmtBytes(local.sketchBytes)} sketch (k-mer hashes and counts) was sent.` }, '✓ sketched locally'))),

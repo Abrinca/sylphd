@@ -9,10 +9,9 @@ An example deployment behind a reverse proxy:
 
 ```bash
 sylphd serve --db gtdb-r232-c200-dbv2.syl2db --meta gtdb-r232.sqlite \
-    --tcp 127.0.0.1:8765 --allow-sequences --max-jobs 4 --max-queue 16 \
+    --tcp 127.0.0.1:8765 --max-jobs 4 --max-queue 16 \
     --rate-limit 10/min --trusted-proxy 127.0.0.1 \
-    --cors-origin https://abrinca.github.io \
-    --terms-url https://abrinca.github.io/sylphd/terms.html
+    --cors-origin https://abrinca.github.io
 ```
 
 ## Listening on TCP and reaching it with `--url`
@@ -46,7 +45,7 @@ which the [web app](https://abrinca.github.io/sylphd/) (in the browser, WebAssem
 `--allow-sequences` **never receives a sequence**: reads (`/profile`) and assemblies both arrive as
 sketches, which hold k-mer hashes and counts only. That is the setup for confidential data.
 
-`--allow-sequences` additionally accepts a raw FASTA or FASTQ on `/assembly` and sketches it on the
+The optional `--allow-sequences` additionally accepts a raw FASTA or FASTQ on `/assembly` and sketches it on the
 server, for scripts (`curl`, `sylphd assembly --no-local-sketch`) and local use. The public instance
 runs **without** it. Uploads are never logged: only sizes, timings and request outcomes appear in the
 server log.
@@ -108,12 +107,6 @@ A browser page on another origin may only call the API if the server allows its 
 `'*'` is safe for a public instance because the API uses no credentials or cookies. CORS is a
 browser rule, not access control: see the [security notes](../reference/security.md#cors-is-not-access-control).
 
-## Terms: `--terms-url`
-
-`--terms-url URL` advertises a terms-of-use page. The URL appears as `terms_url` in `/info` and
-the web app links it. Nothing is shown by default. The [terms of the Abrinca web service](../project/terms.md)
-are one example.
-
 ## Describing your instance { #describing-your-instance }
 
 `--name TEXT` and `--about FILE` let you tell visitors what this server is, for example which
@@ -135,6 +128,9 @@ gtdb-r232-c200-dbv2.syl2db database. It contains 199,923 prokaryotic species fro
 eukaryotes (fungi, human, etc.).
 ```
 
+- **Terms of use:** if your instance has any, put them into the about text (the
+  [terms of the Abrinca web service](../project/terms.md) are one example). There is no separate
+  setting.
 - **Editing without a restart:** the server looks at the file's modification time and size on every
   `/info` request and re-reads it when they change. If the new file cannot be read (too large, not
   UTF-8, removed) the last good text stays and a warning is logged once. A bad file at startup is an
@@ -176,8 +172,7 @@ mode, but the docs links then return 404, and Reads mode needs `web/wasm/`
 For local development start the server with `--cors-origin local`. The browser must be allowed by
 the server's CORS origins, and an HTTPS page can only call an HTTPS API (or localhost).
 
-When the page cannot use its server (none configured, unreachable, or one started without
-`--allow-sequences`) it shows a banner above the form, and the submit button is disabled. The
+When the page cannot use its server (none configured or unreachable) it shows a banner above the form, and the submit button is disabled. The
 banner has a **Use another server** form: enter the API URL of your own server (for example
 `http://127.0.0.1:8765`) and press *Connect*; the page reloads with `?api=<url>`. The header
 then shows the active URL with a *reset* link that removes `?api=`. The server must allow the

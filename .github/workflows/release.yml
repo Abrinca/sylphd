@@ -41,13 +41,9 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          version=$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
-          init=$(python3 -c 'import pathlib, re; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("src/sylphd/__init__.py").read_text()).group(1))')
-          echo "pyproject.toml: $version, src/sylphd/__init__.py: $init"
-          if [ "$version" != "$init" ]; then
-            echo "::error::pyproject.toml says $version but src/sylphd/__init__.py says $init"
-            exit 1
-          fi
+          # The package version lives only in src/sylphd/__init__.py (hatch reads it).
+          version=$(python3 -c 'import pathlib, re; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("src/sylphd/__init__.py").read_text()).group(1))')
+          echo "src/sylphd/__init__.py: $version"
           if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
             echo "::error::tag ${GITHUB_REF_NAME} does not match version $version (expected v$version)"
             exit 1

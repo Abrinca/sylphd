@@ -15,6 +15,7 @@ import collections
 import itertools
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
@@ -40,9 +41,25 @@ _PAIR_SUFFIX_RE = re.compile(r"(_R[12]|\.R[12]|_[12])$", re.IGNORECASE)
 
 SKETCH_SUFFIX = ".sylsp"
 
+#: Longest sample name, in characters.
+MAX_SAMPLE_NAME_CHARS = 1024
+
 
 class InputError(ValueError):
     """Raised for invalid input specifications."""
+
+
+def check_sample_name(name: str) -> str:
+    """Return ``name`` if it is a usable sample name, else raise :class:`InputError`.
+
+    Names end up in tab-separated output, so tabs, newlines and other control
+    characters are errors, not something to escape.
+    """
+    if len(name) > MAX_SAMPLE_NAME_CHARS:
+        raise InputError(f"sample name too long (max {MAX_SAMPLE_NAME_CHARS} characters)")
+    if any(unicodedata.category(char) == "Cc" for char in name):
+        raise InputError(f"sample name {name!r} contains a tab, newline or other control character")
+    return name
 
 
 def sample_name_from_path(path: str | os.PathLike[str], *, paired: bool = False) -> str:
@@ -80,6 +97,9 @@ class SampleInput:
     name: str
     inputs: tuple[tuple[str, ...], ...]
     interleaved: bool = False
+
+    def __post_init__(self) -> None:
+        check_sample_name(self.name)
 
     @property
     def paired(self) -> bool:

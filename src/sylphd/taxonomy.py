@@ -8,8 +8,8 @@ into the clade tables that ``sylph-tax`` writes, without any server support:
   ``Sequence_abundance`` up every lineage, so each ancestor clade gets the sum
   of its descendants;
 * :func:`taxprof_lines` renders one ``*.sylphmpa`` file per sample, in
-  ``sylph-tax taxprof``'s format (header comment, five columns, t__ rows last
-  within a rank and abundances sorted descending);
+  ``sylph-tax taxprof``'s format (header comment, five columns, rows ordered
+  rank by rank with t__ last, abundances sorted descending within a rank);
 * :func:`clade_matrix_lines` renders the wide table of ``sylph-tax merge``:
   one row per clade, one column per sample, missing clades filled with ``0.0``.
 
@@ -307,7 +307,10 @@ def aggregate_rows(
         )
         for clade, value in relative.items()
     ]
-    clades.sort(key=lambda item: (item.depth, -item.relative))
+    # Strains (t__) are the last rank, however short their lineage was.
+    clades.sort(
+        key=lambda item: (len(RANKS) + 1 if item.is_strain else item.depth, -item.relative)
+    )
     return clades
 
 
@@ -442,11 +445,31 @@ def write_outputs(
 
     Files are named ``{taxprof_prefix}{sample}.{taxonomy}.sylphmpa`` and
     ``{taxmatrix_prefix}{taxonomy}.tsv``; a ``None`` prefix skips that output.
+    A prefix that is an existing directory is treated as ``directory/``.
     Returns the paths written, taxonomy by taxonomy (each taxonomy writes its
     per-sample files first, then its matrix).
     """
     if taxprof_prefix is None and taxmatrix_prefix is None:
         return []
+
+    # A prefix naming an existing directory writes into it, like one ending in "/".
+    if taxprof_prefix is not None and os.path.isdir(taxprof_prefix):
+        taxprof_prefix += "/"
+    if taxmatrix_prefix is not None and os.path.isdir(taxmatrix_prefix):
+        taxmatrix_prefix += "/"
+
+    if taxprof_prefix is not None:
+        # Sanitising can map different names to one file; check before writing.
+        owners: dict[Path, str] = {}
+        for sample in samples:
+            name = sample_name(sample)
+            path = taxprof_path(taxprof_prefix, name, taxonomies[0])
+            if path in owners:
+                raise TaxonomyError(
+                    f"sample names {owners[path]!r} and {name!r} would write the "
+                    f"same file {path.name}"
+                )
+            owners[path] = name
 
     written: list[Path] = []
     for taxonomy in taxonomies:

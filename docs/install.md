@@ -25,22 +25,26 @@ compiler. Download them with `gh`, point `uv` at the asset list, and install:
 
 ```bash
 uv venv --python 3.14
-uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/v0.1.0 \
-               "sylphd==0.1.0"
+uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z \
+               "sylphd==X.Y.Z"
 sylphd --version
 ```
 
+`vX.Y.Z` is a placeholder: replace `vX.Y.Z` and `X.Y.Z` with the tag and version of the release you
+want. The [releases page](https://github.com/Abrinca/sylphd/releases) lists them; the newest one is
+marked *Latest*.
+
 `--find-links` accepts the release's asset list; `uv` fetches the wheels from GitHub's release
 download URLs. The same command works into an existing environment (`uv pip install` without the
-`uv venv` line), and for another release version, replace `v0.1.0` and `0.1.0` with the tag and the
-version it names.
+`uv venv` line).
 
-For an offline machine, or to keep the wheels around, download them first:
+For an offline machine, or to keep the wheels around, download them first (without a tag, `gh`
+takes the latest release):
 
 ```bash
 mkdir -p sylphd-wheels && cd sylphd-wheels
-gh release download v0.1.0 --pattern '*.whl'
-uv pip install --find-links . "sylphd==0.1.0"
+gh release download --repo Abrinca/sylphd --pattern '*.whl'
+uv pip install --find-links . sylphd
 ```
 
 A release contains:

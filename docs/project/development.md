@@ -45,7 +45,7 @@ with two equal modes selected by the address: the landing page (no hash), `#asse
 - **Assembly** talks to a `sylphd serve` instance through `GET /info` and `POST /assembly`. It
   takes a pasted or uploaded FASTA (plain or gzip), sketches it in the browser with the same
   WebAssembly module as the Reads mode (`sketching.js`) and sends the sketch
-  (`application/vnd.sylph.sketch`; no size limit, no `--allow-sequences` needed). A browser that
+  (`application/vnd.sylph.sketch`; input up to 2 GiB, no `--allow-sequences` needed). A browser that
   cannot run the sketcher gets a notice and a disabled submit button; the page has no raw-upload
   path. It shows the species assignment, or the closest
   relative, with an ANI gauge, and lists the closest GTDB genomes in a sortable table that can be

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -13,7 +14,12 @@ from sylphd.taxonomy import aggregate_rows, parse_lineage, taxprof_lines
 
 WEB_JS = Path(__file__).resolve().parents[1] / "web" / "taxonomy.js"
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+
+@pytest.fixture(autouse=True)
+def _require_node() -> None:
+    if shutil.which("node") is None:
+        (pytest.fail if os.environ.get("CI") else pytest.skip)("node is not installed")
+
 
 GTDB = (
     "d__Bacteria;p__Bacillota;c__Clostridia;o__Clostridiales;"

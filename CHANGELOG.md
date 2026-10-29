@@ -4,6 +4,45 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Removed `--terms-url` and the `terms_url` field of `GET /info`.** Put terms of use into the
+  `--about` text instead (plain text is fine).
+- `sylphd serve`: `--name` and `--about` are checked once, before the database is loaded. The
+  deployment scripts take the display name from `SYLPH_NAME` in `site.env`, so it can contain spaces.
+- Sample names (explicit or derived from a file name) must not contain tabs, newlines or other
+  control characters and are limited to 1024 characters; the server answers `400`, the client
+  stops with an error.
+- `sylphd taxprof`/`--taxmatrix`: an existing directory works as an output prefix without a trailing
+  `/`; strain rows (`t__`) are always listed after the species rows (also in the web app).
+- The package version lives only in `src/sylphd/__init__.py`.
+- The browser tests (XSS check of the operator text, `.sylsp` header parser, taxonomy parity) run in
+  GitHub Actions (`web-tests.yml`) and fail there instead of being skipped.
+
+### Fixed
+
+- **uvicorn no longer rewrites the client address from `X-Forwarded-For`**, so `--trusted-proxy`
+  decides whom to believe. Before, a local client could pick its own rate-limit identity.
+- **Species assignment uses the unrounded ANI**: 94.996 is no longer called a species-level hit.
+- `/query` and `/profile`: more than 4096 sketches is answered `400` (as documented now), not `413`.
+- Downloads: a failed or interrupted `aria2c` transfer keeps its control file and is never resumed
+  by length; an HTTP resume needs a `206` with a matching `Content-Range`; the MD5 is checked per
+  mirror and a corrupt copy falls back to the next mirror; two downloads that would write the same
+  file are rejected.
+- `sylphd setup --force` builds the new database next to the old one and replaces it only on
+  success; metadata paths containing `#` or `?` work; malformed TSV rows report their line number.
+- Taxonomic profiles: sample names that sanitise to the same file name are rejected before
+  anything is written. `sylphd download` reports `httpx` errors as ordinary errors.
+- Web page: pasting text after choosing a file keeps the text; the file name is no longer sent to
+  the server (it is only a label in the results); the Reads tab warns when the first read names of
+  R1 and R2 differ; "no size limit" now says 2 GiB; the new logo is used and the stale
+  `apple-touch-icon` link is gone.
+- Docs: `--allow-sequences` is optional (the web page and the shipped unit do not need it), the
+  containment denominator is the reference genome's k-mer count, and several other statements that no
+  longer matched the code were corrected.
+
 ## [0.1.3] - 2026-10-29
 
 ### Added

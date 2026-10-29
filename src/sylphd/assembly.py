@@ -1,8 +1,8 @@
 """Parse one uploaded assembly (FASTA/FASTQ, optionally gzip) for ``POST /assembly``.
 
-The web page sends raw sequences instead of a sketch, so the server has to
-parse and sketch them itself.  Everything here is defensive: uploads are
-bounded before decompression (gzip bombs), after decompression (another bomb),
+Clients normally send a sketch.  A raw sequence is only accepted with
+``--allow-sequences``; then the server has to parse and sketch it itself.
+Everything here is defensive: raw uploads are bounded before decompression (gzip bombs), after decompression (another bomb),
 and every record is checked to be nucleotide sequence.  Error messages never
 repeat sequence data or record headers.
 """
@@ -192,9 +192,11 @@ def classify_hits(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Add ``relation``, ``shared_rank`` and ``ani_species_level`` to every hit.
 
-    ``hits`` must be sorted by ANI, best first, and carry ``ani`` (percent),
-    ``accession`` and ``gtdb_taxonomy`` (``None`` without metadata); they are
-    modified in place.  Returns ``(assignment, closest)``.
+    ``hits`` must be sorted by ANI, best first, and carry ``ani`` (percent, full
+    precision: the 95 threshold is applied to it unrounded), ``accession`` and
+    ``gtdb_taxonomy`` (``None`` without metadata); they are modified in place,
+    and their ``ani`` is rounded to two decimals for display.  Returns
+    ``(assignment, closest)``.
 
     * Best hit ANI >= 95 and a known lineage: the query is assigned to that
       hit's GTDB species (``assignment``).  Every hit's ``relation`` is the
@@ -228,7 +230,7 @@ def classify_hits(
             "taxon": lineage.get("s"),
             "gtdb_taxonomy": hit.get("gtdb_taxonomy") if lineage else None,
             "accession": hit.get("accession"),
-            "ani": hit["ani"],
+            "ani": round(float(hit["ani"]), 2),
         }
 
     closest = summary(best)
@@ -236,6 +238,7 @@ def classify_hits(
 
     for index, hit in enumerate(hits):
         ani = float(hit["ani"])
+        hit["ani"] = round(ani, 2)
         hit["ani_species_level"] = ani >= SPECIES_ANI
         if not best_lineage:
             hit["shared_rank"] = "species" if ani >= SPECIES_ANI else None

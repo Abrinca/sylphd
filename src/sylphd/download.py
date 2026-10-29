@@ -430,8 +430,9 @@ def _download_httpx(
 ) -> None:
     """Stream ``url`` into ``partial``, resuming from what is already there.
 
-    A server that ignores ``Range`` sends ``200`` instead of ``206``; the
-    partial file is then truncated and the transfer starts over.
+    A resume that does not get a ``206`` with a ``Content-Range`` starting at
+    the offset (a server that ignores ``Range`` sends ``200``) starts over
+    from zero.
     """
     timeout = httpx.Timeout(None, connect=30.0)
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
@@ -458,12 +459,12 @@ def _download_httpx(
                     start = _content_range_start(
                         response.headers.get("Content-Range", "")
                     )
-                    if start is not None and start != offset:
+                    if start != offset:
                         partial.unlink(missing_ok=True)
                         if attempt == 0:
                             continue
                         raise DownloadError(
-                            f"{name}: server resumed at byte {start}, not {offset}"
+                            f"{name}: server did not resume at byte {offset}"
                         )
                     mode = "ab"
                 else:
@@ -505,6 +506,19 @@ def _download_aria2c(
         raise DownloadError(f"aria2c failed with exit status {result.returncode}")
 
 
+def _checksum_mismatch(
+    partial: Path, expected_md5: str | None, progress: VerifyCallback | None
+) -> str | None:
+    """Return an error message (and drop ``partial``) if its MD5 is wrong."""
+    if expected_md5 is None:
+        return None
+    actual = md5_file(partial, progress=progress)
+    if actual == expected_md5:
+        return None
+    partial.unlink()
+    return f"checksum mismatch: expected {expected_md5}, got {actual}"
+
+
 def download_urls(
     urls: Sequence[str],
     destination: Path,
@@ -524,6 +538,7 @@ def download_urls(
     if not urls:
         raise ValueError("no download URLs given")
     partial = _partial_path(destination)
+    control = partial.with_name(partial.name + ".aria2")
     partial.parent.mkdir(parents=True, exist_ok=True)
     name = destination.name
 
@@ -531,17 +546,24 @@ def download_urls(
         executable = aria2c_path()
         if executable is None:
             raise DownloadError("aria2c is not on PATH")
-        try:
-            _download_aria2c(executable, urls, partial)
-        finally:
-            partial.with_name(partial.name + ".aria2").unlink(missing_ok=True)
+        # aria2c deletes its control file itself on success; on failure or
+        # interrupt it must stay, because the partial file may have holes.
+        _download_aria2c(executable, urls, partial)
         size = partial.stat().st_size if partial.exists() else 0
         if expected_size is not None and size != expected_size:
             partial.unlink(missing_ok=True)
+            control.unlink(missing_ok=True)
             raise DownloadError(
                 f"{name}: expected {expected_size} bytes, aria2c left {size}"
             )
+        mismatch = _checksum_mismatch(partial, expected_md5, verify_progress)
+        if mismatch is not None:
+            raise DownloadError(f"{name}: {mismatch}")
     else:
+        if control.exists():
+            # An unfinished aria2c transfer can have holes: never resume it by length.
+            partial.unlink(missing_ok=True)
+            control.unlink()
         errors: list[str] = []
         for url in urls:
             try:
@@ -560,20 +582,16 @@ def download_urls(
                 partial.unlink(missing_ok=True)
                 errors.append(f"{url}: expected {expected_size} bytes, got {size}")
                 continue
+            mismatch = _checksum_mismatch(partial, expected_md5, verify_progress)
+            if mismatch is not None:
+                errors.append(f"{url}: {mismatch}")
+                continue
             break
         else:
             raise DownloadError(
                 f"could not download {name}:" + "".join(f"\n  {e}" for e in errors)
             )
 
-    if expected_md5 is not None:
-        assert partial.exists()
-        actual = md5_file(partial, progress=verify_progress)
-        if actual != expected_md5:
-            partial.unlink()
-            raise ValueError(
-                f"checksum mismatch for {name}: expected {expected_md5}, got {actual}"
-            )
     partial.replace(destination)
     return destination
 

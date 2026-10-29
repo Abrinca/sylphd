@@ -14,7 +14,7 @@ reference.
 | `-o, --output PATH` | required | SQLite file to write |
 | `--release N` | none | GTDB release to record in the file |
 | `--reps-only` | off | store only species representatives (`gtdb_representative` true) |
-| `--force` | off | overwrite the output file |
+| `--force` | off | replace the output file (only once the new one is built; a failure keeps the old one) |
 | `-q, --quiet` | off | no progress output |
 
 ```bash

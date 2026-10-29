@@ -135,7 +135,7 @@
   "big": true,
   "raw_gz": true,
   "files": [
-   "/home/thomas/Projects/mindtherest/data/ont/FAM20866/reads.fastq.gz"
+   "scratch/big/ont.fastq.gz"
   ]
  },
  {
@@ -143,7 +143,7 @@
   "kind": "single",
   "big": true,
   "files": [
-   "/home/thomas/Projects/mindtherest/data/ont/FAM20866/reads.fastq.gz"
+   "scratch/big/ont.fastq.gz"
   ]
  }
 ]

@@ -6,8 +6,9 @@ the metadata database.
 
 !!! note
     The server must run with `--meta`: the profiles are built from the `gtdb_taxonomy` and
-    `ncbi_taxonomy` metadata columns. The client always requests those two columns, even when
-    `--fields` hides them from the main TSV. Only `profile` has these flags.
+    `ncbi_taxonomy` metadata columns. The client requests the column of each selected taxonomy
+    (`--taxonomy`, both by default), even when `--fields` hides it from the main TSV. Only `profile`
+    has these flags.
 
 ```bash
 sylphd profile -r sample.fq.gz \
@@ -24,8 +25,9 @@ sylphd profile -r sample.fq.gz \
 | `--taxmatrix-value relative\|sequence` | `relative` | abundance used by `--taxmatrix` |
 
 Both flags combine with the normal TSV or JSON output (`-o`, `--format`). The prefix is used
-verbatim: end it with `/` (or give an existing directory) to write into a directory. The directory
-is **not** created.
+verbatim, except that a prefix naming an existing directory (`results`) works like `results/`. To
+write into a directory, end the prefix with `/` or give the directory's name. The directory is
+**not** created.
 
 ## `--taxprof`: one file per sample and taxonomy
 
@@ -45,8 +47,9 @@ d__Bacteria|p__Bacillota|c__Clostridia|...|s__Clostridium difficile|t__GCA_00000
 ```
 
 Each row is a **cumulative lineage**: a clade's abundances are the sums of all genomes below it, so
-`d__Bacteria` is the sum of every hit of that sample. Rows are ordered rank by rank, and within a
-rank by decreasing relative abundance (ties keep the order the server returned). Only `t__` rows
+`d__Bacteria` is the sum of every hit of that sample. Rows are ordered rank by rank (`t__` rows
+last), and within a rank by decreasing relative abundance (ties keep the order the server
+returned). Only `t__` rows
 carry `Adjusted_ANI` and `Eff_cov` (or `True_cov`); the other rows have `NA` there.
 `sylph-tax merge` can read these files directly.
 

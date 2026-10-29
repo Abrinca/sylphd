@@ -3,7 +3,8 @@
 //!
 //! Inputs are read from the repository's `tests/data` (paths in
 //! `tests/cases.json` are relative to the repository root). The ONT case is
-//! large and only runs with `SKETCH_WASM_BIG=1`.
+//! large and only runs with `SKETCH_WASM_BIG=1` (put a big ONT FASTQ at
+//! `scratch/big/ont.fastq.gz`; it is skipped when the file is missing).
 //!
 //! The Python side is skipped (with a message) if no interpreter with pysylph
 //! is found: set `SYLPHD_PYTHON`, or create `../.venv` with `uv sync`.

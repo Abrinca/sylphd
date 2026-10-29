@@ -31,7 +31,7 @@ k-mer entries:
    and validated;
 3. only then is the sketch decoded.
 
-Malformed sketches are rejected with a `400` before any allocation can happen. The same header
+Malformed sketches are rejected with a `400` before native allocation from unchecked length prefixes. (Validation itself allocates strings, and an accepted sketch allocates in proportion to its payload size.) The same header
 check yields the `c` and `k` for the mismatch errors. The layout is tied to the pinned sylph
 version, and the test suite compares the parsed header against a decoded sketch to catch drift when
 sylph changes.
@@ -41,11 +41,11 @@ sylph changes.
 | Limit | Default | Notes |
 |---|---|---|
 | request body (`--max-upload-mb`) | 512 MB | rejected with `413`, also from the declared `Content-Length` |
-| sketches per request | 4096 | `413` above it |
+| sketches per request | 4096 | `400` above it |
 | raw-sequence `/assembly` body (`--max-sequence-mb`) | 20 MB | before decompression; sketch bodies use `--max-upload-mb` |
 | decompressed `/assembly` body | 5 × `--max-sequence-mb` | bounded gunzip, `413` above it |
 | concurrent jobs (`--max-jobs`) | 2 | other requests wait |
-| waiting requests (`--max-queue`) | unlimited | `503` with `Retry-After: 1` when set and full |
+| waiting jobs (`--max-queue`) | unlimited | slots are per sample (`/query`, `/profile`) or per assembly, not per HTTP request; `503` with `Retry-After: 1` when set and full |
 | request rate (`--rate-limit`) | off | `429` with `Retry-After`; checked before the body is read |
 
 Sketches uploaded to `/assembly` go through the same structural header check as those of `/profile`

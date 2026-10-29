@@ -54,7 +54,7 @@ invalid_link_anchors = true
 
 [project.theme]
 language = "en"
-# Icons: canonical copies live in web/img/; docs/img/ holds copies for the docs build.
+# Icons: docs/img/ holds symlinks to web/img/ (zensical copies the files, but not a symlinked directory).
 logo = "img/sylphd-icon-tile.svg"
 favicon = "img/sylphd-icon-tile.svg"
 features = [

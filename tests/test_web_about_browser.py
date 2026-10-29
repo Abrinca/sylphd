@@ -1,7 +1,8 @@
 """web/about.js (marked + DOMPurify) renders the operator text from /info: correct and inert.
 
-Runs in headless Chromium through playwright-core from node; skipped when node, playwright-core or a
-Chromium binary is missing (PLAYWRIGHT_DIR, BROWSER_EXE override the search).
+Runs in headless Chromium through playwright-core from node (`npm ci` in tests/ installs the pinned
+version). Skipped when node, playwright-core or a Chromium binary is missing (PLAYWRIGHT_DIR,
+BROWSER_EXE override the search), but a failure when the environment variable CI is set.
 """
 
 from __future__ import annotations
@@ -42,30 +43,30 @@ PAYLOADS = [
 
 
 def _playwright_dir() -> str | None:
-    home = Path.home()
-    candidates = [os.environ.get("PLAYWRIGHT_DIR"), "/tmp/bunx-1000-@playwright/mcp@latest/node_modules",
-                  "/home/thomas/Projects/animated-video/render/node_modules",
-                  *glob.glob(str(home / ".bun/install/cache/playwright-core*/..")), str(home / "node_modules")]
-    for candidate in candidates:
+    for candidate in (os.environ.get("PLAYWRIGHT_DIR"), str(Path(__file__).parent / "node_modules")):
         if candidate and (Path(candidate) / "playwright-core" / "package.json").exists():
             return candidate
-    for found in glob.glob(str(home / ".bun/install/cache/playwright-core@*")):
-        if (Path(found) / "package.json").exists():
-            return str(Path(found).parent)
     return None
 
 
 def _chromium() -> str | None:
     candidates = [os.environ.get("BROWSER_EXE"), "/usr/bin/chromium-browser", "/usr/bin/chromium",
-                  *glob.glob(str(Path.home() / ".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))]
+                  *glob.glob(str(Path.home() / ".cache/ms-playwright/chromium-*/chrome-linux*/chrome"))]
     return next((c for c in candidates if c and Path(c).exists()), None)
 
 
 PLAYWRIGHT, CHROMIUM = _playwright_dir(), _chromium()
-pytestmark = pytest.mark.skipif(
-    shutil.which("node") is None or PLAYWRIGHT is None or CHROMIUM is None,
-    reason="needs node, playwright-core (PLAYWRIGHT_DIR) and Chromium (BROWSER_EXE)",
-)
+MISSING = None if (shutil.which("node") and PLAYWRIGHT and CHROMIUM) else (
+    "needs node, playwright-core (`npm ci` in tests/, or PLAYWRIGHT_DIR) and Chromium "
+    "(`tests/node_modules/.bin/playwright-core install chromium`, or BROWSER_EXE)")
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _require_browser() -> None:
+    # a skipped XSS test must not pass unnoticed in CI
+    if MISSING:
+        (pytest.fail if os.environ.get("CI") else pytest.skip)(MISSING)
+
 
 NODE = r"""
 const pw = require('node:module').createRequire(process.env.PLAYWRIGHT_DIR + '/')('playwright-core');

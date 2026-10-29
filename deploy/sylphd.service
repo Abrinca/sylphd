@@ -16,7 +16,7 @@
 #
 #   /etc/systemd/system/sylphd.service.d/10-site.conf
 #   [Service]
-#   Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 4 ..."  (quotes required: Environment= splits on spaces)
+#   Environment="SYLPH_SERVE_ARGS=--max-jobs 4 ..."  (quotes required: Environment= splits on spaces)
 #
 # Values are split on whitespace, so no quoting inside them.
 [Unit]
@@ -38,23 +38,29 @@ Environment=PATH=/srv/sylphd/current/bin:/usr/local/bin:/usr/bin:/bin
 Environment=SYLPH_DB=gtdb-r232-c200-dbv2.syl2db
 Environment=SYLPH_META=meta-r232-reps.sqlite
 
-# Example public-instance policy, not a requirement:
-#   --allow-sequences        enable POST /assembly (needed by the web app)
+# Example public-instance policy, not a requirement. The server only ever
+# receives sketches; add --allow-sequences only if you want it to accept raw
+# FASTA/FASTQ on POST /assembly too.
 #   --max-jobs 2             profiling jobs running at once
 #   --max-queue 16           requests allowed to wait for a job slot
 #   --rate-limit 10/min      per-client limit on the three POST endpoints
 #   --trusted-proxy unix     believe X-Forwarded-For from the local socket
 #   --cors-origin *          any origin may call the API from a browser
-#   --terms-url URL          advertise a terms-of-use page in /info
 # Drop any of them, raise the limits, or narrow CORS to your own page.
 # `--cors-origin *` is written unquoted: systemd splits the value on
 # whitespace and passes the asterisk through literally.
-Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin * --terms-url https://example.org/terms"
+Environment="SYLPH_SERVE_ARGS=--max-jobs 2 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin *"
+
+# The display name has its own variable: SYLPH_SERVE_ARGS is split on
+# whitespace, but ${SYLPH_NAME} stays one argument even with spaces. Unset, it
+# is empty and no name is shown.  Example, normally set from site.env:
+#   Environment="SYLPH_NAME=GTDB r232"
 
 ExecStart=/srv/sylphd/current/bin/sylphd serve \
     --db /srv/sylphd/db/${SYLPH_DB} \
     --meta /srv/sylphd/db/${SYLPH_META} \
     --socket /srv/sylphd/run/sylphd.sock \
+    --name=${SYLPH_NAME} \
     $SYLPH_SERVE_ARGS
 
 # Loading a multi-GB database takes a few seconds; uvicorn then serves.

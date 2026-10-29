@@ -39,7 +39,7 @@ correct for. Therefore:
   another tool or paper.
 - Below about 85 % the k-mer ANI becomes imprecise. The gauge marks this region
   and it never changes an assignment.
-- The **containment** column (shared k-mers / query k-mers) is a separate
+- The **containment** column (shared k-mers / k-mers of the genome sketch) is a separate
   signal from ANI. How much of the genome can be matched varies between
   methods and between genome pairs,[^6]
   so read it as a hint about completeness and

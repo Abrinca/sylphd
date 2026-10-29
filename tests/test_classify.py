@@ -28,6 +28,14 @@ def relations(hits: list[dict[str, Any]]) -> list[str]:
     return [h["relation"] for h in hits]
 
 
+def test_threshold_uses_unrounded_ani() -> None:
+    hits = [hit(94.996, LACTIS)]
+    assignment, closest = classify_hits(hits)
+    assert assignment is None
+    assert hits[0]["ani_species_level"] is False
+    assert hits[0]["ani"] == closest["ani"] == 95.0
+
+
 def test_parse_gtdb_taxonomy() -> None:
     assert parse_gtdb_taxonomy("d__Bacteria; p__Bacillota ;g__;s__") == {
         "d": "Bacteria",

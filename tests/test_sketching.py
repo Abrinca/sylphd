@@ -39,6 +39,14 @@ class TestSampleNames:
         assert sample_name_from_path(path, paired=paired) == expected
 
 
+    @pytest.mark.parametrize("name", ["a\tb", "a\nb", "x" * 1025])
+    def test_bad_name_is_an_input_error(self, name: str) -> None:
+        with pytest.raises(InputError, match="sample name"):
+            SampleInput(name, (("reads.fq",),))
+        with pytest.raises(InputError, match="sample name"):
+            parse_multi_file_spec(f"{name}:reads.fq")
+
+
 class TestMultiFileSpecs:
     def test_single_files(self) -> None:
         sample = parse_multi_file_spec("s1:a.fq,b.fq")

@@ -1,0 +1,56 @@
+name: Web tests
+
+# The browser and node tests of the web page (XSS check of the rendered operator text in headless
+# Chromium, JS ports against the Python code). They need no Rust build: the Python side is stdlib
+# only, so pytest runs with --noconftest (tests/conftest.py imports pysylph). With CI set, a
+# skipped test fails.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "web/**"
+      - "tests/test_web_about_browser.py"
+      - "tests/test_web_taxonomy_js.py"
+      - "tests/test_web_sylsp_js.py"
+      - "tests/package*.json"
+      - "tests/data/*.sylsp"
+      - "src/sylphd/taxonomy.py"
+      - "src/sylphd/sketchcheck.py"
+      - ".github/workflows/web-tests.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "tests/test_web_about_browser.py"
+      - "tests/test_web_taxonomy_js.py"
+      - "tests/test_web_sylsp_js.py"
+      - "tests/package*.json"
+      - "tests/data/*.sylsp"
+      - "src/sylphd/taxonomy.py"
+      - "src/sylphd/sketchcheck.py"
+      - ".github/workflows/web-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      # playwright-core is pinned in tests/package.json and package-lock.json.
+      - run: npm ci --prefix tests
+      - run: tests/node_modules/.bin/playwright-core install --with-deps chromium
+      - name: Run the browser and node tests
+        run: >
+          PYTHONPATH=src uv run --no-project --python 3.14 --with pytest==9.2.0
+          pytest --noconftest -q -rs
+          tests/test_web_about_browser.py tests/test_web_taxonomy_js.py tests/test_web_sylsp_js.py

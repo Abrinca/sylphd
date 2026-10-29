@@ -11,8 +11,8 @@ Prints what the server reports about itself:
 - the metadata database (path, GTDB release, row count, build date, number of columns) or
   `metadata: none`;
 - versions of sylphd, pysylph and Python;
-- limits: jobs, upload size, sketch count, and, if `--allow-sequences`, a rate limit or a queue cap
-  is set, a `web:` line with the assembly, rate-limit and queue settings.
+- limits: jobs, upload size, sketch count, and a `web:` line with the raw-sequence assembly
+  (`--allow-sequences`), rate-limit and queue settings.
 
 `--json` prints the raw `/info` payload instead. See [`GET /info`](../reference/http-api.md#get-info).
 The [server address](address.md) options select the server.

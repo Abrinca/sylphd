@@ -31,3 +31,6 @@ db/
 
 # WebAssembly sketcher, built by sketch-wasm/build.sh (preview script, Pages workflow)
 /web/wasm/
+
+# npm dependencies of the browser tests
+node_modules/
