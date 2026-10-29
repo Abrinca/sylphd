@@ -648,3 +648,5 @@ details.adv .options { margin-top: 10px; }
   .seg span { padding: 6px 9px; }
   .stack { height: 28px; }
 }
+
+.mode-unsupported { margin: 0; color: var(--distant); font-weight: 600; font-size: .92rem; }

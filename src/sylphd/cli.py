@@ -251,24 +251,21 @@ def cmd_info(args: argparse.Namespace) -> int:
         f"max-sketches {limits.get('max_sketches')}"
     )
     rate_limit = limits.get("rate_limit")
-    assembly = info.get("assembly") or {}
-    if assembly or limits.get("allow_sequences") or rate_limit or limits.get("max_queue") is not None:
-        rate = (
-            "off"
-            if not rate_limit
-            else f"{rate_limit['count']}/{int(rate_limit['window_seconds'])}s"
-        )
-        sequences = (
-            f"on (max {limits.get('max_sequence_mb')} MB)"
-            if limits.get("allow_sequences")
-            else "off"
-        )
-        print(
-            f"web: assembly sketches {'on' if assembly.get('sketch') else 'off'}, "
-            f"assembly sequences {sequences}, "
-            f"rate-limit {rate}, "
-            f"max-queue {limits.get('max_queue') if limits.get('max_queue') is not None else 'unlimited'}"
-        )
+    rate = (
+        "off"
+        if not rate_limit
+        else f"{rate_limit['count']}/{int(rate_limit['window_seconds'])}s"
+    )
+    sequences = (
+        f"on (max {limits.get('max_sequence_mb')} MB)"
+        if limits.get("allow_sequences")
+        else "off"
+    )
+    print(
+        f"web: raw-sequence assembly {sequences}, "
+        f"rate-limit {rate}, "
+        f"max-queue {limits.get('max_queue') if limits.get('max_queue') is not None else 'unlimited'}"
+    )
     return 0
 
 
@@ -497,23 +494,10 @@ def cmd_assembly(args: argparse.Namespace) -> int:
     path = Path(args.file)
     name = args.name or sample_name_from_path(path.name)
     with _client_from_args(args) as client:
-        use_sketch = args.local_sketch
-        info: dict[str, Any] = {}
-        if use_sketch is None or use_sketch:
-            # Sketch locally whenever the server can take a sketch: the assembly
-            # then never leaves this machine, there is no 20 MB limit, and
-            # pysylph (which this client needs anyway) does the work.  Servers
-            # from before sketch uploads fall back to the raw upload.
+        if args.local_sketch:
+            # The assembly is sketched here and only the sketch is uploaded: the sequence
+            # never leaves this machine and has no size limit.
             info = client.info()
-            can_sketch = bool((info.get("assembly") or {}).get("sketch"))
-            if use_sketch is None:
-                use_sketch = can_sketch
-            elif not can_sketch:
-                raise ClientError(
-                    "this server does not accept assembly sketches (it predates "
-                    "that feature); drop --local-sketch to upload the sequence"
-                )
-        if use_sketch:
             database = info["database"]
             sketch, stats = sketch_assembly(
                 path, name, c=int(database["c"]), k=int(database["k"])
@@ -535,6 +519,7 @@ def cmd_assembly(args: argparse.Namespace) -> int:
                 gc=stats.gc,
             )
         else:
+            # --no-local-sketch: raw upload, which only servers with --allow-sequences take
             try:
                 payload = path.read_bytes()
             except OSError as error:
@@ -885,13 +870,12 @@ def build_parser() -> argparse.ArgumentParser:
     assembly_parser.add_argument(
         "--local-sketch",
         action=argparse.BooleanOptionalAction,
-        default=None,
+        default=True,
         help=(
-            "sketch the assembly on this machine and upload only the sketch "
-            "(the sequence never leaves it; no size limit). Default: on if the "
-            "server accepts assembly sketches, else the raw sequence is "
-            "uploaded (needs --allow-sequences on the server). --no-local-sketch "
-            "forces the raw upload"
+            "sketch the assembly on this machine and upload only the sketch, so the "
+            "sequence never leaves it and has no size limit [default]. "
+            "--no-local-sketch uploads the raw sequence instead, which only servers "
+            "started with --allow-sequences accept"
         ),
     )
     assembly_parser.add_argument(

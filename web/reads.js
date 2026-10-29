@@ -274,7 +274,7 @@
     const problem = S.problem();
     const profileOk = !info || !Array.isArray(info.endpoints) || info.endpoints.includes('/profile');
     if (unsupported()) hint = 'Not supported by this browser';
-    else if (problem && problem !== 'noassembly' && problem !== 'nosketcher') hint = PROBLEM_HINT[problem] || 'Server unavailable';
+    else if (problem) hint = PROBLEM_HINT[problem] || 'Server unavailable';
     else if (!info) hint = 'Waiting for the server…';
     else if (!profileOk) hint = 'This server has no /profile endpoint';
     else if (!dbParams()) hint = 'The server did not report its sketch parameters';
@@ -295,7 +295,6 @@
   S.onInfo(refresh);
 
   const why = unsupported();
-  if (why) ui.support.replaceChildren(notice('error', 'Reads cannot be profiled in this browser', why));
   // the module is fetched when the mode is first opened (not for visitors of the assembly mode)
   S.onMode((m) => { if (m === 'reads' && !why) loadModule().catch((e) => showModuleError(e)); });
   if (S.mode() === 'reads' && !why) loadModule().catch((e) => showModuleError(e));

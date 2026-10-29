@@ -20,13 +20,13 @@ All notable changes to `sylphd` are documented here. The format follows
   (`Content-Type: application/vnd.sylph.sketch`, the bytes of a `.sylsp`), validated like
   `/profile` sketches and bounded by `--max-upload-mb`, with optional informational `records`,
   `length` and `gc` query parameters. It always works, so a server started without
-  `--allow-sequences` can never receive a sequence. `GET /info` reports `assembly.sketch` and
-  `assembly.sequences`. The response gains `query.input` (`sketch` or `sequence`).
+  `--allow-sequences` can never receive a sequence (the public instance runs that way). The
+  response gains `query.input` (`sketch` or `sequence`).
 - **Web page, Assembly mode**: sketches in the browser (any size, no 20 MB limit) and sends only the
-  sketch, with a *sketched locally* badge on the result; falls back to the raw upload for servers
-  without sketch support and browsers that cannot run the sketcher.
-- **`sylphd assembly`** sketches locally by default when the server takes sketches
-  (`--local-sketch` / `--no-local-sketch`).
+  sketch, with a *sketched locally* badge on the result. There is no raw-upload path in the page:
+  a browser that cannot run the sketcher gets a notice (the public instance is sketch-only).
+- **`sylphd assembly`** sketches locally by default; `--no-local-sketch` uploads the raw sequence
+  to servers started with `--allow-sequences`.
 
 ### Changed
 

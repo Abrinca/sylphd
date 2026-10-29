@@ -11,9 +11,7 @@
     || location.protocol === 'file:';
   const configured = pageIsLocal ? (cfg.devApiBase || cfg.apiBase) : cfg.apiBase;
   const API = (apiOverride || configured || '').trim().replace(/\/+$/, '');
-  const DEFAULT_LIMIT_MB = 20;
   const LOCAL_INPUT_CAP = 2 * 1024 ** 3; // sanity cap on the input of the in-browser sketcher
-  const COMPRESS_OVER = 1 << 20; // compress pasted text above 1 MiB
   const EXAMPLE_URL = 'example/mycoplasma_genitalium_G37.fna.gz';
   const EXAMPLE_NAME = 'mycoplasma_genitalium_G37.fna.gz';
 
@@ -24,7 +22,6 @@
     chip: $('file-chip'), chipName: $('file-name'), chipMeta: $('file-meta'), chipRemove: $('file-remove'),
     top: $('top'), minAni: $('min-ani'), submit: $('submit'), cancel: $('cancel'),
     progress: $('progress'), progressText: $('progress-text'), results: $('results'),
-    localToggle: $('local-toggle'), localSketch: $('local-sketch'),
     status: $('status'), statusText: document.querySelector('#status .status-text'),
     statusDetail: $('status-detail'), banner: $('server-banner'), submitHint: $('submit-hint'),
   };
@@ -92,10 +89,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
 
   // Show what belongs to the current mode (elements list theirs in data-modes).
   function applyMode() {
-    const cap = useLocal() ? 'local' : 'raw'; // text that depends on how an assembly is sent
-    for (const n of document.querySelectorAll('[data-modes], [data-cap]')) {
-      const { modes, cap: wanted } = n.dataset;
-      n.hidden = !!((modes && !modes.split(' ').includes(mode)) || (wanted && wanted !== cap));
+    for (const n of document.querySelectorAll('[data-modes]')) {
+      n.hidden = !n.dataset.modes.split(' ').includes(mode);
     }
     document.body.dataset.mode = mode;
     for (const a of document.querySelectorAll('.tab')) {
@@ -133,13 +128,12 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
 
   // Why the server cannot be used right now: null (usable or not yet known),
-  // 'none' | 'invalid' | 'offline' | 'noassembly'. A running re-check keeps the
+  // 'none' | 'invalid' | 'offline'. A running re-check keeps the
   // previous value, so the banner never flashes during "Checking…".
   let serverProblem = null;
   let bannerKey = '';
   const PROBLEM_HINT = {
     none: 'Public server offline', invalid: 'Invalid API URL', offline: 'Server offline',
-    noassembly: 'Server does not accept assemblies', nosketcher: 'This browser cannot sketch',
   };
 
   // Same page with ?api=<url> (nothing else preserved); no argument removes it.
@@ -184,8 +178,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     return form;
   }
 
-  // 'noassembly' only concerns the assembly mode; everything else (offline, invalid URL) is shared.
-  const shownProblem = () => ((serverProblem === 'noassembly' || serverProblem === 'nosketcher') && mode !== 'assembly' ? null : serverProblem);
+  const shownProblem = () => serverProblem;
 
   function renderBanner() {
     const key = `${shownProblem()}|${API}`;
@@ -210,17 +203,6 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     } else if (problem === 'invalid') {
       title = 'Invalid API URL';
       body = [el('p', null, 'The API base URL ', el('code', { text: API || '(empty)' }), ' is not a valid URL.')];
-    } else if (problem === 'nosketcher') {
-      cls = 'warn';
-      title = 'This browser cannot sketch the assembly';
-      body = [el('p', null, 'The server at ', el('code', { text: API }), ' only accepts sketches (it never receives sequences), but this browser cannot make them. ',
-        window.SylphdSketch ? window.SylphdSketch.unsupported() : 'The sketcher is not available.', ' Use a current Chrome, Edge, Firefox or Safari, or the ',
-        el('code', { text: 'sylphd assembly' }), ' command.')];
-    } else if (problem === 'noassembly') {
-      cls = 'warn';
-      title = 'This server does not accept assemblies';
-      body = [el('p', null, 'The server at ', el('code', { text: API }), ' is online, but its ',
-        el('code', { text: '/assembly' }), ' endpoint is disabled (it was started without ', el('code', { text: '--allow-sequences' }), '), so this page cannot submit sequences to it.')];
     } else {
       title = 'Could not reach the server';
       const items = [
@@ -288,13 +270,12 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       const meta = info.metadata || {};
       setStatus('online', 'Server online');
       const lim = info.limits || {};
-      const fact = (label, value, title, modes, cap) => el('span', { class: 'fact', title: title || null, 'data-modes': modes || null, 'data-cap': cap || null },
+      const fact = (label, value, title) => el('span', { class: 'fact', title: title || null },
         el('span', { class: 'fact-label', text: label }), el('span', { class: 'fact-value', text: value }));
       const facts = [];
       facts.push(fact('Database', meta.release ? `GTDB r${meta.release}` : (db.name || '?'), db.name || null));
       if (isNum(db.genomes)) facts.push(fact('Genomes', fmtInt(db.genomes)));
       if (isNum(db.c) && isNum(db.k)) facts.push(fact('Sketch', `c=${db.c} · k=${db.k}`, 'sylph subsampling rate c and k-mer size k'));
-      if (isNum(lim.max_sequence_mb)) facts.push(fact('Upload', `≤ ${lim.max_sequence_mb} MB`, 'maximum size of an assembly uploaded as sequence', 'landing assembly', 'raw'));
       if (lim.rate_limit && isNum(lim.rate_limit.count)) {
         const w = Math.round(lim.rate_limit.window_seconds);
         facts.push(fact('Rate', `${lim.rate_limit.count} / ${w === 60 ? 'min' : `${w} s`}`, 'requests per client'));
@@ -304,16 +285,9 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
           el('code', { class: 'fact-value', text: API }), ' ', resetLink()));
       }
       const frag = [el('span', { class: 'facts' }, ...facts)];
-      const caps = assemblyCaps(info);
-      if (!caps.sketch && !caps.sequences) {
-        frag.push(' · ', el('span', { class: 'warn', text: 'this server does not accept assemblies (/assembly disabled)' }));
-      }
       ui.statusDetail.replaceChildren(...frag);
-      applyMode(); // facts carry data-modes
       infoTimer = setTimeout(loadInfo, 60000);
-      for (const s of document.querySelectorAll('[data-limit-mb]')) s.textContent = String(limitMb());
-      setProblem(assemblyProblem(caps));
-      applyCapability();
+      setProblem(null);
       refreshInput();
       notifyInfo();
     } catch (e) {
@@ -335,44 +309,24 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     return c.signal;
   }
 
-  const limitMb = () => (serverInfo && serverInfo.limits && serverInfo.limits.max_sequence_mb) || DEFAULT_LIMIT_MB;
-  // Raw upload: the server's sequence limit. Sketched in the browser: only a sanity cap on the input
-  // (the sketch itself is checked against the server's upload limit before it is sent).
-  const limitBytes = () => (useLocal() ? LOCAL_INPUT_CAP : limitMb() * 1024 * 1024);
+  // The sketch is checked against the server's upload limit before it is sent.
   const sketchLimitBytes = () => ((serverInfo && serverInfo.limits && serverInfo.limits.max_upload_mb) || 0) * 1024 * 1024;
 
-  /* ------------------------------------------------- how an assembly is sent */
-  // The server takes an assembly as a sketch (new servers: info.assembly.sketch) and/or as raw sequence
-  // (info.assembly.sequences, --allow-sequences). Older servers only know limits.allow_sequences.
-  function assemblyCaps(info) {
-    const lim = (info && info.limits) || {};
-    if (info && info.assembly) return { sketch: !!info.assembly.sketch, sequences: !!info.assembly.sequences };
-    return { sketch: false, sequences: lim.allow_sequences !== false && info && info.allow_sequences !== false };
-  }
-  const browserCanSketch = () => !!(window.SylphdSketch && !window.SylphdSketch.unsupported());
-  function assemblyProblem(caps) {
-    if (!caps.sketch && !caps.sequences) return 'noassembly';
-    if (!caps.sequences && !browserCanSketch()) return 'nosketcher';
-    return null;
-  }
-  // Sketch in the browser? Before /info is known the browser's ability decides (it is also what the
-  // privacy text promises); afterwards the server must take sketches, and the visitor may opt out
-  // when the server also takes sequences.
-  function useLocal() {
-    if (!browserCanSketch()) return false;
-    if (!serverInfo) return true;
-    const caps = assemblyCaps(serverInfo);
-    if (!caps.sketch) return false;
-    return !caps.sequences || ui.localSketch.checked;
-  }
-  // Text, facts and the toggle that depend on how the assembly will be sent.
-  function applyCapability() {
-    applyMode();
-    const caps = serverInfo ? assemblyCaps(serverInfo) : null;
-    ui.localToggle.hidden = !(caps && caps.sketch && caps.sequences && browserCanSketch());
-    for (const s of document.querySelectorAll('[data-limit-mb]')) s.textContent = String(limitMb());
-    refreshInput();
-  }
+  // null when this browser can run the sketcher (assemblies and reads are always sketched in the browser), else why not.
+  const sketcherProblem = () => (window.SylphdSketch ? window.SylphdSketch.unsupported() : 'The sketcher script did not load.');
+
+  // Assemblies and reads are both sketched in the browser: without WebAssembly SIMD and workers
+  // there is nothing to fall back to. Say so on every page and card; submit buttons stay disabled.
+  (() => {
+    const why = sketcherProblem();
+    if (!why) return;
+    $('browser-notice').hidden = false;
+    $('browser-notice').replaceChildren(el('div', { class: 'notice warn', role: 'alert' },
+      el('h3', { text: 'This browser cannot sketch your sequences' }),
+      el('p', null, why, ' Assemblies and reads are sketched in your browser so that they never leave your computer. Use a current Chrome, Edge, Firefox or Safari, or the ',
+        el('code', { text: 'sylphd' }), ' command line.')));
+    for (const n of document.querySelectorAll('.mode-unsupported')) n.hidden = false;
+  })();
 
   /* -------------------------------------------------------------- input */
   const input = { file: null, gz: false, size: 0 };
@@ -423,18 +377,14 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   function refreshInput() {
     const size = input.file ? input.size : textBytes();
     input.size = size;
-    const over = size > limitBytes();
-    const local = useLocal();
+    const over = size > LOCAL_INPUT_CAP;
     if (input.file) {
-      ui.chipMeta.textContent = `${ui.chipMeta.dataset.size || fmtBytes(size)} · ${input.gz ? 'gzip' : 'plain text'}, ${local ? 'sketched in your browser' : input.gz ? 'sent as-is' : 'sent as text'}`;
+      ui.chipMeta.textContent = `${ui.chipMeta.dataset.size || fmtBytes(size)} · ${input.gz ? 'gzip' : 'plain text'}`;
     }
-    ui.size.textContent = !size ? '' : local ? `${fmtBytes(size)} · sketched in your browser, no size limit` : `${fmtBytes(size)} of ${limitMb()} MB max`;
+    ui.size.textContent = size ? `${fmtBytes(size)} · sketched in your browser, no size limit` : '';
     ui.size.classList.toggle('over', over);
     if (over) {
-      ui.msg.textContent = local
-        ? `Too large: ${fmtBytes(size)} exceeds the ${fmtBytes(LOCAL_INPUT_CAP)} the browser sketcher accepts. Use the sylphd command line for this one.`
-        : `Too large: ${fmtBytes(size)} exceeds the ${limitMb()} MB limit. ` +
-          'Reduce the assembly (e.g. drop tiny contigs) or upload a gzip-compressed file.';
+      ui.msg.textContent = `Too large: ${fmtBytes(size)} exceeds the ${fmtBytes(LOCAL_INPUT_CAP)} the browser sketcher accepts. Use the sylphd command line for this one.`;
       ui.msg.hidden = false;
     } else {
       ui.msg.hidden = true;
@@ -445,11 +395,12 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   function updateSubmit() {
     const now = Date.now();
     const cooling = cooldownUntil > now;
-    const ready = input.size > 0 && input.size <= limitBytes() && validateOptions().ok;
+    const ready = input.size > 0 && input.size <= LOCAL_INPUT_CAP && validateOptions().ok;
     const problem = API ? shownProblem() : 'none';
-    ui.submit.disabled = busy || cooling || !ready || !!problem;
-    ui.submitHint.textContent = problem ? PROBLEM_HINT[problem] : '';
-    ui.submitHint.hidden = !problem;
+    const noSketcher = !!sketcherProblem();
+    ui.submit.disabled = busy || cooling || !ready || !!problem || noSketcher;
+    ui.submitHint.textContent = problem ? PROBLEM_HINT[problem] : noSketcher ? 'This browser cannot sketch' : '';
+    ui.submitHint.hidden = !problem && !noSketcher;
     ui.clear.disabled = busy;
     ui.pick.disabled = busy;
     ui.example.disabled = busy;
@@ -488,7 +439,6 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   ui.clear.addEventListener('click', () => { clearInput(); ui.results.replaceChildren(); });
   ui.chipRemove.addEventListener('click', clearInput);
   ui.status.addEventListener('click', loadInfo);
-  ui.localSketch.addEventListener('change', applyCapability);
 
   ui.example.addEventListener('click', async () => {
     ui.example.disabled = true;
@@ -550,18 +500,6 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     updateSubmit();
   }
 
-  async function buildBody() {
-    if (input.file) {
-      return { body: input.file, type: input.gz ? 'application/gzip' : 'text/plain', name: input.file.name };
-    }
-    const blob = new Blob([ui.fasta.value], { type: 'text/plain' });
-    if (blob.size > COMPRESS_OVER && typeof CompressionStream !== 'undefined') {
-      const gz = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
-      return { body: gz, type: 'application/gzip', name: '' };
-    }
-    return { body: blob, type: 'text/plain', name: '' };
-  }
-
   // Sketch the input in this browser (WebAssembly workers); resolves { sketch, stats, ms }.
   async function sketchLocally(sketchPhase) {
     const info = serverInfo || {};
@@ -597,37 +535,26 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     const opts = validateOptions();
     if (!opts.ok) return;
     ui.results.replaceChildren();
-    const local = useLocal();
-    const phase = { text: local ? 'Preparing…' : 'Preparing…' };
+    const phase = { text: 'Preparing…' };
     controller = new AbortController();
     setBusy(true, () => phase.text);
     try {
-      let body;
-      let type;
-      let name;
-      let localRun = null;
       const url = new URL(`${API}/assembly`);
       url.searchParams.set('top', String(opts.top));
       url.searchParams.set('min_ani', String(opts.ani));
-      if (local) {
-        // sketch here, send only the sketch
-        localRun = await sketchLocally(phase);
-        if (!localRun.stats.records) throw new Error('No sequences found in the input.');
-        const limit = sketchLimitBytes();
-        if (limit && localRun.sketch.byteLength > limit) {
-          throw new Error(`The sketch (${fmtBytes(localRun.sketch.byteLength)}) is over the server's upload limit of ${fmtBytes(limit)}. This input is too large or diverse for this server; use the sylphd command line.`);
-        }
-        body = new Blob([localRun.sketch], { type: 'application/vnd.sylph.sketch' });
-        type = 'application/vnd.sylph.sketch';
-        name = input.file ? input.file.name : '';
-        url.searchParams.set('records', String(localRun.stats.records));
-        url.searchParams.set('length', String(localRun.stats.length));
-        if (isNum(localRun.stats.gc)) url.searchParams.set('gc', String(localRun.stats.gc));
-        phase.text = `Sending the sketch (${fmtBytes(body.size)}) and searching…`;
-      } else {
-        ({ body, type, name } = await buildBody());
-        phase.text = `Uploading ${fmtBytes(body.size)} and searching…`;
+      const localRun = await sketchLocally(phase);
+      if (!localRun.stats.records) throw new Error('No sequences found in the input.');
+      const limit = sketchLimitBytes();
+      if (limit && localRun.sketch.byteLength > limit) {
+        throw new Error(`The sketch (${fmtBytes(localRun.sketch.byteLength)}) is over the server's upload limit of ${fmtBytes(limit)}. This input is too large or diverse for this server; use the sylphd command line.`);
       }
+      const body = new Blob([localRun.sketch], { type: 'application/vnd.sylph.sketch' });
+      const type = 'application/vnd.sylph.sketch';
+      const name = input.file ? input.file.name : '';
+      url.searchParams.set('records', String(localRun.stats.records));
+      url.searchParams.set('length', String(localRun.stats.length));
+      if (isNum(localRun.stats.gc)) url.searchParams.set('gc', String(localRun.stats.gc));
+      phase.text = `Sending the sketch (${fmtBytes(body.size)}) and searching…`;
       if (name) url.searchParams.set('name', name.slice(0, 200));
       let res;
       try {
@@ -643,23 +570,21 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       try { data = JSON.parse(raw); } catch { /* not JSON */ }
       if (!res.ok) {
         const retry = parseInt(res.headers.get('Retry-After'), 10);
-        showHttpError(res.status, data && data.error, Number.isFinite(retry) ? retry : null, raw, local);
+        showHttpError(res.status, data && data.error, Number.isFinite(retry) ? retry : null, raw);
         return;
       }
       if (!data || !Array.isArray(data.hits)) throw new Error('Unexpected response from the server.');
-      if (localRun) {
-        // the server never saw the sequence: fill in what this browser counted
-        const q = data.query = data.query || {};
-        for (const k of ['records', 'length', 'gc']) if (q[k] == null) q[k] = localRun.stats[k];
-      }
-      renderResults(data, performance.now() - runStart, localRun ? { sketchBytes: body.size, sketchMs: localRun.ms } : null);
+      // the server never saw the sequence: fill in what this browser counted
+      const q = data.query = data.query || {};
+      for (const k of ['records', 'length', 'gc']) if (q[k] == null) q[k] = localRun.stats[k];
+      renderResults(data, performance.now() - runStart, { sketchBytes: body.size, sketchMs: localRun.ms });
     } catch (e) {
       if (e.name === 'AbortError') {
-        ui.results.replaceChildren(notice('warn', 'Cancelled', local ? 'Sketching or the request was cancelled. Nothing was kept.' : 'The request was cancelled.'));
+        ui.results.replaceChildren(notice('warn', 'Cancelled', 'Sketching or the request was cancelled. Nothing was kept.'));
       } else if (e.network) {
         showNetworkError();
       } else {
-        ui.results.replaceChildren(notice('error', local ? 'Could not sketch or search' : 'Something went wrong', e.message || String(e)));
+        ui.results.replaceChildren(notice('error', 'Could not sketch or search', e.message || String(e)));
       }
     } finally {
       setBusy(false);
@@ -680,14 +605,12 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       el('h3', { text: title }), ...body.map((b) => (b instanceof Node ? b : el('p', { text: b }))));
   }
 
-  function showHttpError(status, serverMsg, retry, raw, local = false) {
+  function showHttpError(status, serverMsg, retry, raw) {
     let node;
     const msg = serverMsg || (raw && raw.length < 300 && !raw.trim().startsWith('<') ? raw.trim() : '');
     if (status === 413) {
       node = notice('error', 'Upload too large (413)',
-        local
-          ? 'The server rejected the sketch because it is over its upload limit (or that of its proxy). This input is too large or diverse for this server; use the sylphd command line.'
-          : `The server rejected the upload because it is over its size limit (${limitMb()} MB, or five times that once decompressed).`,
+        'The server rejected the sketch because it is over its upload limit (or that of its proxy). This input is too large or diverse for this server; use the sylphd command line.',
         msg && el('p', { class: 'detail', text: `Server message: ${msg}` }));
     } else if (status === 429) {
       const secs = retry != null ? retry : 60;
@@ -703,7 +626,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       startCooldown(secs);
     } else if (status === 404) {
       node = notice('error', 'Endpoint not available (404)',
-        local ? 'This server does not provide POST /assembly.' : 'This server does not accept raw sequences (it must be started with --allow-sequences, or use a browser that can sketch).',
+        'This server does not provide POST /assembly.',
         msg && el('p', { class: 'detail', text: `Server message: ${msg}` }));
     } else {
       node = notice('error', `Request failed (HTTP ${status})`, msg || 'The server returned an error without a message.');
@@ -781,15 +704,13 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     return el('section', { class: 'card', 'aria-label': 'Query summary' },
       el('div', { class: 'card-head' }, el('h2', { text: 'Query' }),
         el('span', { class: 'muted' }, q.name ? `“${q.name}” ` : '',
-          local
-            ? el('span', { class: 'badge badge-rel rel-species', title: `The sequence never left your computer: your browser sketched it in ${fmtDur(local.sketchMs)} and only the ${fmtBytes(local.sketchBytes)} sketch (k-mer hashes and counts) was sent.` }, '✓ sketched locally')
-            : el('span', { class: 'badge badge-plain', title: 'The sequence was uploaded to the server for sketching (not stored or logged).' }, 'sequence uploaded'))),
+          el('span', { class: 'badge badge-rel rel-species', title: `The sequence never left your computer: your browser sketched it in ${fmtDur(local.sketchMs)} and only the ${fmtBytes(local.sketchBytes)} sketch (k-mer hashes and counts) was sent.` }, '✓ sketched locally'))),
       el('dl', { class: 'summary' },
         item('Records', fmtInt(q.records)),
         item('Length', fmtBp(q.length), isNum(q.length) ? `${fmtInt(q.length)} bp` : ''),
         item('GC', isNum(q.gc) ? `${q.gc.toFixed(1)} %` : '–'),
-        item('Sketch k-mers', fmtInt(q.sketch_kmers), local ? `${fmtBytes(local.sketchBytes)} sketch, made in ${fmtDur(local.sketchMs)}` : ''),
-        item('Search time', isNum(data.elapsed_ms) ? `${Math.round(data.elapsed_ms)} ms` : '–', local ? `${fmtDur(clientMs)} incl. sketching` : `${fmtDur(clientMs)} incl. upload`),
+        item('Sketch k-mers', fmtInt(q.sketch_kmers), `${fmtBytes(local.sketchBytes)} sketch, made in ${fmtDur(local.sketchMs)}`),
+        item('Search time', isNum(data.elapsed_ms) ? `${Math.round(data.elapsed_ms)} ms` : '–', `${fmtDur(clientMs)} incl. sketching`),
         item('Database', fmtInt(db.genomes), 'genomes searched')));
   }
 

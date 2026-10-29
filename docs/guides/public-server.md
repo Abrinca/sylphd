@@ -47,9 +47,9 @@ which the [web app](https://abrinca.github.io/sylphd/) (in the browser, WebAssem
 sketches, which hold k-mer hashes and counts only. That is the setup for confidential data.
 
 `--allow-sequences` additionally accepts a raw FASTA or FASTQ on `/assembly` and sketches it on the
-server. It is only needed for clients that cannot sketch: older versions of the web page or
-`sylphd assembly`, browsers without WebAssembly SIMD, scripts with `curl`. Uploads are never
-logged: only sizes, timings and request outcomes appear in the server log.
+server, for scripts (`curl`, `sylphd assembly --no-local-sketch`) and local use. The public instance
+runs **without** it. Uploads are never logged: only sizes, timings and request outcomes appear in the
+server log.
 
 ## Limits { #limits }
 
@@ -100,7 +100,7 @@ are one example.
 ## Using the web app against your server
 
 The web app is a static page in `web/` that calls `GET /info` and `POST /assembly` of a server
-(Assembly mode: it sketches in the browser and sends the sketch; only a page opened in a browser without WebAssembly SIMD, or a server from before sketch uploads, needs `--allow-sequences`), and `POST /profile` (Reads mode, see
+(Assembly mode: it sketches in the browser and sends the sketch, so no `--allow-sequences` is needed), and `POST /profile` (Reads mode, see
 [Profiling reads in the browser](profiling-in-browser.md); it works on any server, with a
 metadata database for the taxonomy). `web/config.js` holds two addresses: `apiBase`, the public
 server used by the published page (the public instance), and `devApiBase`

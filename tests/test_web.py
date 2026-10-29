@@ -75,8 +75,6 @@ class TestAssemblyDisabled:
             assert info["limits"]["allow_sequences"] is False
             assert info["limits"]["max_sequence_mb"] is None
             # the endpoint exists for sketches (see tests/test_assembly_sketch.py)
-            assert info["assembly"]["sketch"] is True
-            assert info["assembly"]["sequences"] is False
             assert "/assembly" in info["endpoints"]
             assert "/assembly" in test_client.get("/").json()["endpoints"]
 

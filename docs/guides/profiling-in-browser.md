@@ -81,11 +81,8 @@ The Assembly tab uses the same WebAssembly sketcher: a pasted FASTA goes straigh
 The page counts the records, length and GC content while sketching, sends only the sketch to
 [`POST /assembly`](../reference/http-api.md#post-assembly) (`Content-Type:
 application/vnd.sylph.sketch`) and marks the result *sketched locally*. A 2.8 Mb assembly takes
-about half a second, a 120 Mb pool of corrected reads about 2.5 s including the search. Results are
-identical to uploading the sequence: the page checks `GET /info` for `assembly.sketch`, and falls
-back to the raw upload (limited by `--max-sequence-mb`, 20 MB by default) only for servers that do not
-take sketches yet, or when the browser cannot run the sketcher and the server allows sequences.
-If the server accepts both, a checkbox *Sketch in my browser* (on by default) lets you choose.
+about half a second, a 120 Mb pool of corrected reads about 2.5 s including the search. The hits are
+identical to those of a server-side sketch of the same assembly.
 
 ## Building the sketcher
 

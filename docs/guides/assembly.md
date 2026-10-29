@@ -8,16 +8,10 @@ classifies the hits. The sequence never leaves your machine (the command line sk
 pysylph, the web app in the browser with WebAssembly), and there is no size limit on the assembly.
 A sketch of a bacterial genome is 100–500 kB.
 
-That works on every server, whether or not it runs with `--allow-sequences`. That flag only
-decides whether the server also accepts *raw* sequences, which an older client or a browser
-without WebAssembly SIMD needs. A server without it never sees a sequence, which is what you
-want when the assembly is confidential.
-
-`sylphd assembly` asks `GET /info` what the server accepts and sketches locally whenever it takes
-sketches. Servers from before that feature get the raw upload instead (`--allow-sequences` needed).
-`--local-sketch` insists on the local sketch (an error if the server cannot take it) and
-`--no-local-sketch` forces the raw upload (limited by `--max-sequence-mb`, 20 MB by default).
-Both ways give the same hits.
+That works on every server. The public instance runs without `--allow-sequences`, so it **never
+receives a sequence**, which is what you want when the assembly is confidential. A server started
+with `--allow-sequences` also takes raw FASTA, for scripts and local use: `--no-local-sketch` uploads
+the file as it is (limited by `--max-sequence-mb`, 20 MB by default) and gives the same hits.
 
 ```bash
 sylphd assembly assembly.fasta
@@ -47,7 +41,7 @@ no species-level match (< 95 % ANI); closest relative ... (...)
 | `--top N` | `10` | number of hits, 1-50 |
 | `--min-ani ANI` | `80` | minimum ANI in percent, 70-100 |
 | `--name NAME` | file base name | query name |
-| `--local-sketch` / `--no-local-sketch` | automatic | sketch on this machine and upload only the sketch (the default when the server accepts sketches), or upload the raw sequence |
+| `--local-sketch` / `--no-local-sketch` | `--local-sketch` | sketch on this machine and upload only the sketch, or upload the raw sequence (needs `--allow-sequences` on the server) |
 | `--json` | off | print the raw response instead of the table |
 | `-o FILE` | stdout | write the table to a file |
 
@@ -60,8 +54,9 @@ metadata database. The JSON response carries every metadata column; see the
 In the [web app](https://abrinca.github.io/sylphd/#assembly) the sketching happens in your browser
 (WebAssembly, the same code as for [reads](profiling-in-browser.md)). Paste FASTA or drop a file of
 any size (gzip is fine); only the sketch is sent, and the result shows a *sketched locally* badge.
-The 20 MB limit applies only to the raw upload that older servers and browsers without WebAssembly
-SIMD fall back to. See [Running a public server](public-server.md#sketches-only-or-raw-sequences-too-allow-sequences).
+A browser without WebAssembly SIMD and workers (Chrome 91, Firefox 89, Safari 16.4 or newer have
+them) cannot use the page and says so; use `sylphd assembly` there. See
+[Running a public server](public-server.md#sketches-only-or-raw-sequences-too-allow-sequences).
 
 ## Why the ANI is not adjusted { #why-the-ani-is-not-adjusted }
 

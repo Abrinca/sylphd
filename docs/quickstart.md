@@ -77,7 +77,7 @@ the sketch of an assembly, which both make locally, so a plain server is enough:
 sylphd serve --db data/gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite
 ```
 
-(`--allow-sequences` is only needed if raw FASTA uploads from older clients should work too.)
+(`--allow-sequences` additionally accepts raw FASTA, for `curl` and `sylphd assembly --no-local-sketch`.)
 
 ```bash
 sylphd assembly assembly.fasta --top 5

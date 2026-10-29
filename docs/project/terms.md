@@ -27,12 +27,10 @@ In the **Assembly** and **Reads** modes of the web page, your sequences stay on 
 are sketched in your browser and only the sketch (k-mer hashes and counts, no sequences) is sent to
 the server, processed in memory and not stored or logged.
 
-Only if your browser cannot make the sketch (or the server is an older one), the Assembly mode can
-send the assembly itself, where the server allows that. It is then processed in memory to compute
-the result; it is not stored and its contents are not logged. The page says which of the two
-happens (the privacy line at the top, and *sketched locally* or *sequence uploaded* on the result).
+The public server runs sketch-only: it does not accept raw sequences at all. A browser that cannot
+make the sketch cannot use the page.
 
-In all cases only sizes, timings and request outcomes may be recorded, to run and monitor the
+Only sizes, timings and request outcomes may be recorded, to run and monitor the
 service.
 
 ## No warranty, availability

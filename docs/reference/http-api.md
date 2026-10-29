@@ -39,9 +39,6 @@ Reports:
 - `limits`: `max_jobs`, `max_upload_mb`, `max_sketches`, `allow_sequences`, `max_sequence_mb`
   (`null` unless sequences are allowed), `rate_limit` (`{"count", "window_seconds"}` or `null`) and
   `max_queue` (`null` means unlimited);
-- `assembly`: what `POST /assembly` accepts: `sketch` (always `true`), `sequences` (`true` with
-  `--allow-sequences`) and `sketch_content_type` (`application/vnd.sylph.sketch`). Servers from
-  before sketch uploads have no `assembly` key; read `limits.allow_sequences` there;
 - `endpoints`: the endpoint paths this server serves.
 
 ## `POST /query` and `POST /profile` { #post-query-and-post-profile }
@@ -118,9 +115,8 @@ Finds the closest database genomes of **one assembly**. The body is either
     (a missing `Content-Type` is accepted). All records of the body form one sample. Only the bases
     `A C G T N` are allowed.
 
-Any other `Content-Type` is a `415`. `GET /info` tells a client what to send:
-`assembly.sketch` (always `true` on servers that have this feature; absent on older ones) and
-`assembly.sequences` (`true` with `--allow-sequences`).
+Any other `Content-Type` is a `415`. `limits.allow_sequences` in `GET /info` says whether raw
+sequences are accepted.
 
 | Query parameter | Meaning |
 |---|---|

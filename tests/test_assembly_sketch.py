@@ -133,15 +133,12 @@ class TestSketchUpload:
         assert a["hits"] == b["hits"] and a["hits"]
         assert a["closest"] == b["closest"]
 
-    def test_info_advertises_the_capability(self, sketch_only_client, sequences_client) -> None:
+    def test_info_reports_sequence_support(self, sketch_only_client, sequences_client) -> None:
         info = sketch_only_client.get("/info").json()
-        assert info["assembly"] == {
-            "sketch": True,
-            "sequences": False,
-            "sketch_content_type": SKETCH_CONTENT_TYPE,
-        }
-        assert sequences_client.get("/info").json()["assembly"]["sequences"] is True
+        assert info["limits"]["allow_sequences"] is False
+        assert sequences_client.get("/info").json()["limits"]["allow_sequences"] is True
         assert "/assembly" in info["endpoints"]
+        assert "assembly" not in info
 
     def test_content_type_parameters_are_ignored(self, sketch_only_client, tmp_path) -> None:
         sketch, _ = _sketch(tmp_path, _fasta())
@@ -321,10 +318,10 @@ class TestCLI:
         assert local["query"]["gc"] == raw["query"]["gc"]
         assert local["query"]["length"] == raw["query"]["length"]
 
-    def test_no_local_sketch_needs_a_server_with_sequences(self, cli_sketch_only_server) -> None:
+    def test_no_local_sketch_is_refused_by_a_sketch_only_server(self, cli_sketch_only_server) -> None:
         result = _assembly(cli_sketch_only_server, "--no-local-sketch")
         assert result.returncode != 0
-        assert "--allow-sequences" in result.stderr
+        assert "--allow-sequences" in result.stderr  # the server's own message
 
     def test_table_output_with_local_sketch(self, cli_sketch_only_server) -> None:
         result = subprocess.run(
@@ -333,11 +330,3 @@ class TestCLI:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.splitlines()[1].split("\t")[:3] == ["1", "100.00", "same species"]
-
-    def test_info_reports_the_capability(self, cli_sketch_only_server) -> None:
-        result = subprocess.run(
-            [sys.executable, "-m", "sylphd", "info", "--socket", str(cli_sketch_only_server)],
-            capture_output=True, text=True, timeout=600,
-        )
-        assert result.returncode == 0, result.stderr
-        assert "assembly sketches on, assembly sequences off" in result.stdout

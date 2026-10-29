@@ -28,12 +28,12 @@ flowchart LR
     DB[("sylph database<br/>.syl2db")] --> S
     MD[("metadata<br/>SQLite")] --> S
     B["web app<br/>(sketched in the browser)"] -->|"sketch"| S
-    W["old clients, curl"] -.->|"raw FASTA<br/>(--allow-sequences)"| S
+    W["curl, scripts"] -.->|"raw FASTA<br/>(--allow-sequences)"| S
 ```
 
 Assemblies are sketched locally too (`sylphd assembly`, and the web app in the browser), so a server
-started without `--allow-sequences` never receives a sequence. The flag only adds support for raw
-FASTA uploads by clients that cannot sketch.
+started without `--allow-sequences` (like the public instance) never receives a sequence. The flag
+only adds raw FASTA uploads for scripts.
 
 ## What it does
 

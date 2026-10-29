@@ -265,11 +265,6 @@ async def _info(request: Request) -> JSONResponse:
                 "rate_limit": _rate_limit_dict(state.rate_limit),
                 "max_queue": state.max_queue,
             },
-            "assembly": {
-                "sketch": True,
-                "sequences": state.allow_sequences,
-                "sketch_content_type": SKETCH_CONTENT_TYPE,
-            },
             "endpoints": _endpoints(state),
         }
     )

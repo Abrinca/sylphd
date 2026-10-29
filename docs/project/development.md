@@ -20,7 +20,7 @@ only needed for manual runs.
 |---|---|
 | `test_server.py` | the Starlette app: endpoints, errors, metadata join, socket cleanup, concurrency |
 | `test_web.py` | the public-web features: raw-sequence `/assembly`, rate limit, client identity, queue limit, CORS |
-| `test_assembly_sketch.py` | `/assembly` with a sketch: same results as the raw path, works without `--allow-sequences`, malformed sketches, `/info` capability, `sylphd assembly --local-sketch` |
+| `test_assembly_sketch.py` | `/assembly` with a sketch: same results as the raw path, works without `--allow-sequences`, malformed sketches, `sylphd assembly` with and without `--local-sketch` |
 | `test_classify.py` | species assignment and hit relations for `/assembly` |
 | `test_sketchcheck.py` | structural validation of uploaded sketches, including drift against a decoded sketch |
 | `test_client.py` | client base URLs, address precedence, path prefixes |
@@ -45,9 +45,9 @@ with two equal modes selected by the address: the landing page (no hash), `#asse
 - **Assembly** talks to a `sylphd serve` instance through `GET /info` and `POST /assembly`. It
   takes a pasted or uploaded FASTA (plain or gzip), sketches it in the browser with the same
   WebAssembly module as the Reads mode (`sketching.js`) and sends the sketch
-  (`application/vnd.sylph.sketch`; no size limit, no `--allow-sequences` needed). Servers that do not
-  advertise `assembly.sketch` in `/info`, and browsers that cannot sketch, get the raw upload
-  (`--allow-sequences`, up to `--max-sequence-mb`). It shows the species assignment, or the closest
+  (`application/vnd.sylph.sketch`; no size limit, no `--allow-sequences` needed). A browser that
+  cannot run the sketcher gets a notice and a disabled submit button; the page has no raw-upload
+  path. It shows the species assignment, or the closest
   relative, with an ANI gauge, and lists the closest GTDB genomes in a sortable table that can be
   downloaded as TSV or JSON.
 - **Reads** sketches reads in the browser (`reads.js`, the two workers `decompress-worker.js` and

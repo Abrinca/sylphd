@@ -9,8 +9,7 @@ sylphd assembly FILE [--top N] [--min-ani ANI] [--name NAME] [--local-sketch | -
 Sketches one assembly (FASTA or FASTQ, plain or gzip) on this machine, sends the sketch to
 [`POST /assembly`](../reference/http-api.md#post-assembly) and prints a compact table of its closest
 database genomes. The sequence never leaves your machine and has no size limit; this works on any
-server, with or without `--allow-sequences`. A server from before sketch uploads gets the raw
-sequence instead (it needs `--allow-sequences`).
+server, with or without `--allow-sequences`.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -18,7 +17,7 @@ sequence instead (it needs `--allow-sequences`).
 | `--top N` | `10` | number of hits to print, 1-50 |
 | `--min-ani ANI` | `80` | minimum ANI in percent, 70-100 |
 | `--name NAME` | file base name | query name |
-| `--local-sketch`, `--no-local-sketch` | automatic | `--local-sketch`: sketch locally and upload only the sketch; an error if the server cannot take sketches. `--no-local-sketch`: upload the raw sequence. By default the sketch is used whenever `GET /info` says the server takes sketches |
+| `--local-sketch`, `--no-local-sketch` | `--local-sketch` | sketch locally and upload only the sketch, or (`--no-local-sketch`) upload the raw sequence, which only a server started with `--allow-sequences` accepts |
 | `--json` | off | print the raw JSON response |
 | `-o, --output FILE` | stdout | write the table here |
 
