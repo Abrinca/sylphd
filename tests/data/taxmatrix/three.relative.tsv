@@ -1,0 +1,32 @@
+clade_name	gut-1	gut-2	soil-1
+d__Bacteria	116.66666666666667	100.0	100.0
+d__Bacteria|p__Actinomycetota	0.0	0.0	100.0
+d__Bacteria|p__Actinomycetota|c__Actinomycetes	0.0	0.0	100.0
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Actinomycetales	0.0	0.0	100.0
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Actinomycetales|f__Actinomycetaceae	0.0	0.0	100.0
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Actinomycetales|f__Actinomycetaceae|g__Actinomyces	0.0	0.0	100.0
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Actinomycetales|f__Actinomycetaceae|g__Actinomyces|s__Actinomyces naeslundii	0.0	0.0	100.0
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Actinomycetales|f__Actinomycetaceae|g__Actinomyces|s__Actinomyces naeslundii|t__GCA_000000005.1	0.0	0.0	100.0
+d__Bacteria|p__Bacillota	70.0	100.0	0.0
+d__Bacteria|p__Bacillota|c__Bacilli	20.0	30.0	0.0
+d__Bacteria|p__Bacillota|c__Bacilli|o__Lactobacillales	20.0	30.0	0.0
+d__Bacteria|p__Bacillota|c__Bacilli|o__Lactobacillales|f__Lactobacillaceae	20.0	30.0	0.0
+d__Bacteria|p__Bacillota|c__Bacilli|o__Lactobacillales|f__Lactobacillaceae|g__Lactobacillus	20.0	30.0	0.0
+d__Bacteria|p__Bacillota|c__Bacilli|o__Lactobacillales|f__Lactobacillaceae|g__Lactobacillus|s__Lactobacillus crispatus	20.0	30.0	0.0
+d__Bacteria|p__Bacillota|c__Bacilli|o__Lactobacillales|f__Lactobacillaceae|g__Lactobacillus|s__Lactobacillus crispatus|t__GCA_000000003.1	20.0	30.0	0.0
+d__Bacteria|p__Bacillota|c__Clostridia	50.0	70.0	0.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales	50.0	70.0	0.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae	50.0	70.0	0.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae|g__Clostridium	50.0	70.0	0.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae|g__Clostridium|s__Clostridium difficile	50.0	70.0	0.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae|g__Clostridium|s__Clostridium difficile|t__GCA_000000001.1	50.0	70.0	0.0
+d__Bacteria|p__Bacteroidota	16.666666666666668	0.0	0.0
+d__Bacteria|p__Bacteroidota|c__Bacteroidia	16.666666666666668	0.0	0.0
+d__Bacteria|p__Bacteroidota|c__Bacteroidia|t__GCA_000000004.1	16.666666666666668	0.0	0.0
+d__Bacteria|p__Pseudomonadota	30.0	0.0	0.0
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria	30.0	0.0	0.0
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales	30.0	0.0	0.0
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales|f__Enterobacteriaceae	30.0	0.0	0.0
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales|f__Enterobacteriaceae|g__Escherichia	30.0	0.0	0.0
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales|f__Enterobacteriaceae|g__Escherichia|s__Escherichia coli	30.0	0.0	0.0
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales|f__Enterobacteriaceae|g__Escherichia|s__Escherichia coli|t__GCA_000000002.1	30.0	0.0	0.0

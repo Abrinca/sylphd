@@ -75,6 +75,7 @@ The defaults are sylph's.
 | `--minimum-ani` | `90` (`query`), `95` (`profile`) | minimum adjusted ANI, 0-100 |
 | `--seq-id` | none | read sequence identity in percent, only used with `--estimate-unknown` |
 | `--estimate-unknown` | off | estimate true coverage and scale sequence abundance of unknowns |
+| `--estimate-read-counts` | off | `profile` only: put the estimated number of reads per genome in `Sequence_abundance` instead of a relative abundance (experimental in sylph); implies `--estimate-unknown` |
 | `--min-number-kmers` | `10` | discard genomes with fewer sampled k-mers |
 | `--min-contain` | `7` | minimum contained k-mers for a hit |
 | `--screen-ani` | `85` | two-stage screen threshold, 0-100 |
@@ -101,13 +102,13 @@ profile:  Sample_file Genome_file Taxonomic_abundance Sequence_abundance
 | `Sample_file` | sample name |
 | `Genome_file` | database genome file name, as stored in the database |
 | `Adjusted_ANI` | coverage-adjusted ANI in percent (the naive ANI with `--no-adjust`) |
-| `Eff_cov` | effective coverage; labelled `True_cov` with `--estimate-unknown`, as in sylph |
+| `Eff_cov` | effective coverage; labelled `True_cov` with `--estimate-unknown` (or `--estimate-read-counts`, which implies it), as in sylph |
 | `ANI_5-95_percentile` | confidence interval of the adjusted ANI, `low-high` |
 | `Eff_lambda`, `Lambda_5-95_percentile` | sylph's effective lambda (its coverage model parameter) and its interval |
 | `Median_cov`, `Mean_cov_geq1` | median coverage and mean coverage of k-mers seen at least once |
 | `Containment_ind` | contained k-mers over total genome k-mers, `7096/10826` |
 | `Naive_ANI` | containment ANI without the coverage adjustment |
-| `Taxonomic_abundance`, `Sequence_abundance` | `profile` only: relative taxonomic and sequence abundance |
+| `Taxonomic_abundance`, `Sequence_abundance` | `profile` only: relative taxonomic and sequence abundance (`Sequence_abundance` holds estimated read counts with `--estimate-read-counts`) |
 | `kmers_reassigned` | `profile` only: number of k-mers reassigned during profiling, as in sylph |
 | `Contig_name` | contig name and description recorded for the genome in the database |
 | `accession` | genome accession (`GCA_...`/`GCF_...`) derived from `Genome_file`; empty when there is none |

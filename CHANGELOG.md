@@ -8,6 +8,16 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **`sylphd profile --estimate-read-counts`** (sylph's experimental `--estimate-read-counts`):
+  `Sequence_abundance` then holds the estimated number of reads per genome instead of a relative
+  abundance. It implies `--estimate-unknown`, so the coverage column is labelled `True_cov` as
+  with `-u`. The `estimate_read_counts` key is also accepted in the `/profile` `params` (and, like
+  `estimate_unknown`, forwarded unchanged by `/query`). Needs pysylph `f8f45a1` (the `uv.lock` pin
+  moved from `f32d840`).
+- **`sylphd profile --taxmatrix-value ani|coverage`** writes the strain-level `ANI (if
+  strain-level)` and `Coverage (if strain-level)` columns of the `.sylphmpa` as a matrix, like
+  `sylph-tax merge --column ANI|Coverage`: only clades with a value in at least one sample appear
+  (`dropna(how="all")`) and a clade missing from a sample gets `0`.
 - **`sylphd assembly --per-contig`** sketches every FASTA/FASTQ record as its own sample and
   reports the closest genomes per contig, for MAG contamination checks. Each contig gets a
   **contig-relative ANI**, `100 * (shared / contig_kmers) ** (1/k)` (`shared` from the server's
@@ -39,6 +49,12 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- `sylphd profile --taxmatrix` now follows `sylph-tax merge` row for row: with two or more
+  samples the clade names are sorted lexicographically (one sample keeps the `.sylphmpa` order,
+  which is rank by rank, then by abundance), and a missing value is `0`. Before, rows were in
+  first-seen order, which `docs/guides/taxonomic-profiles.md` wrongly described as sylph-tax's
+  order; the guide and `docs/commands/profile.md` are corrected. Verified byte for byte against
+  `sylph-tax merge` for all four `--column` values; a golden and a parity test now guard it.
 - Per-contig mode batches contig sketches into `POST /query` requests with `no_adjust`,
   `minimum_ani=0`, `screen_ani=0` and `min_contain=3`, chunked by the server's advertised limits
   (`max_sketches`, `max_jobs` + `max_queue`) and by the *measured* request size and JSON `params`
@@ -57,6 +73,13 @@ All notable changes to `sylphd` are documented here. The format follows
   in r232; `--fields ncbi_organism_name` gives the NCBI name), and how the consensus resolves
   99.9 vs 99.1 % to species and 89.9 vs 89.1 % to genus, with a resolution limit below ~90-92 %
   ANI. Chimeric contigs are not detected.
+
+### Fixed
+
+- A `ValueError` from pysylph while profiling (a bad `k`/`c`, for example a database genome denser
+  than the sample sketch, which sylph treats as fatal) now becomes an HTTP **400** with pysylph's
+  message instead of a 500. Only the `Profiler` constructor and the `profile`/`query` call are
+  translated, so unrelated internal errors still surface as a 500.
 
 ## [0.2.0] - 2026-10-29
 

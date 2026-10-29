@@ -168,6 +168,34 @@ def _decode_sketch(
     return sketch, header
 
 
+def _new_profiler(database: LoadedDatabase, **kwargs: Any) -> Any:
+    """Build a :class:`pysylph.Profiler`, rejecting bad parameters as a 400.
+
+    ``pysylph`` raises ``ValueError`` in the constructor for parameters or
+    databases it cannot use (``k`` differing between databases, a parameter
+    out of range).  Those are the client's request, not a server fault.
+    """
+    try:
+        return pysylph.Profiler(database.db, **kwargs)
+    except ValueError as error:
+        raise BadRequest(f"cannot profile against this database: {error}") from error
+
+
+def _run_profiler(profiler: Any, sketch: Any, mode: str) -> list[Any]:
+    """Run ``profiler`` on ``sketch``, turning its validation errors into 400s.
+
+    ``pysylph`` raises ``ValueError`` from ``profile``/``query`` when the
+    sample sketch does not fit the database (a ``k`` mismatch, or a database
+    genome denser than the sample sketch), which sylph cannot profile either.
+    The scope is deliberately narrow: only these two calls translate errors,
+    so an unrelated ``ValueError`` elsewhere stays a 500.
+    """
+    try:
+        return profiler.profile(sketch) if mode == "profile" else profiler.query(sketch)
+    except ValueError as error:
+        raise BadRequest(f"cannot profile this sample: {error}") from error
+
+
 def _assembly_hits(
     database: LoadedDatabase,
     metadata: MetadataDB | None,
@@ -176,13 +204,17 @@ def _assembly_hits(
     min_ani: float,
 ) -> dict[str, Any]:
     """Query ``sketch`` (naive ANI), join metadata and classify the hits."""
-    profiler = pysylph.Profiler(
-        database.db,
+    profiler = _new_profiler(
+        database,
         no_adjust=True,
         minimum_ani=min_ani,
         screen_ani=min(min_ani, 85.0),
     )
-    results = sorted(profiler.query(sketch), key=lambda result: float(result.ani), reverse=True)
+    results = sorted(
+        _run_profiler(profiler, sketch, "query"),
+        key=lambda result: float(result.ani),
+        reverse=True,
+    )
     results = results[:top]
 
     columns = tuple(metadata.columns) if metadata is not None else METADATA_COLUMNS
@@ -230,8 +262,8 @@ def run_sample(
     """Deserialize, validate and profile one sketch.  Runs in a worker thread."""
     sketch, _ = _decode_sketch(database, name, payload)
 
-    profiler = pysylph.Profiler(database.db, **params.profiler_kwargs())
-    results = profiler.profile(sketch) if mode == "profile" else profiler.query(sketch)
+    profiler = _new_profiler(database, **params.profiler_kwargs())
+    results = _run_profiler(profiler, sketch, mode)
 
     rows: list[dict[str, Any]] = []
     if metadata is None:

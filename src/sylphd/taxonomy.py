@@ -11,7 +11,9 @@ into the clade tables that ``sylph-tax`` writes, without any server support:
   ``sylph-tax taxprof``'s format (header comment, five columns, rows ordered
   rank by rank with t__ last, abundances sorted descending within a rank);
 * :func:`clade_matrix_lines` renders the wide table of ``sylph-tax merge``:
-  one row per clade, one column per sample, missing clades filled with ``0.0``.
+  one row per clade, one column per sample, missing clades filled with ``0.0``,
+  clades sorted as pandas sorts the outer join (textually, for two or more
+  samples).
 
 Everything here is pure: rows in, lines out.  File handling is limited to the
 two small ``write_*`` helpers.
@@ -69,8 +71,11 @@ TAXPROF_COLUMNS: tuple[str, ...] = (
     "Coverage (if strain-level)",
 )
 
-#: Values accepted by ``--taxmatrix-value``.
-MATRIX_VALUES: tuple[str, ...] = ("relative", "sequence")
+#: Values accepted by ``--taxmatrix-value``, as ``sylph-tax merge --column``.
+MATRIX_VALUES: tuple[str, ...] = ("relative", "sequence", "ani", "coverage")
+
+#: Values that only strain rows carry (``sylph-tax merge --column ANI|Coverage``).
+STRAIN_MATRIX_VALUES: tuple[str, ...] = ("ani", "coverage")
 
 
 class TaxonomyError(ValueError):
@@ -389,27 +394,39 @@ def clade_matrix_lines(
 ) -> Iterator[str]:
     """Yield the wide ``sylph-tax merge`` table for already aggregated samples.
 
-    Rows are all clades seen in any sample, in first-seen order across samples;
-    a clade missing from a sample is ``0.0``.
+    This reproduces ``merge_sylph_taxprof.merge_data`` exactly: rows are all
+    clades seen in any sample (outer join), a clade missing from a sample is
+    ``0.0``, and the clade names are sorted lexicographically as soon as there
+    are two or more samples (pandas sorts the index of an outer join; a single
+    file keeps the profile's order).  For ``ani`` and ``coverage`` only the
+    strain rows carry a value, so clades without one in *any* sample are
+    dropped (pandas' ``dropna(how="all")``) and a clade with a value in one
+    sample but not another gets ``0``, not ``NA``.
     """
     if value not in MATRIX_VALUES:
         raise TaxonomyError(
             f"unknown matrix value {value!r} (choose from: {', '.join(MATRIX_VALUES)})"
         )
-    attribute = "relative" if value == "relative" else "sequence"
 
     order: list[str] = []
-    cells: dict[str, list[float]] = {}
+    cells: dict[str, list[float | None]] = {}
     for index, (_, clades) in enumerate(samples):
         for item in clades:
             if item.clade not in cells:
-                cells[item.clade] = [0.0] * len(samples)
+                cells[item.clade] = [None] * len(samples)
                 order.append(item.clade)
-            cells[item.clade][index] = getattr(item, attribute)
+            cells[item.clade][index] = getattr(item, value)
+
+    if value in STRAIN_MATRIX_VALUES:
+        order = [clade for clade in order if any(c is not None for c in cells[clade])]
+    if len(samples) >= 2:
+        order.sort()
 
     yield "\t".join(["clade_name", *(name for name, _ in samples)])
     for clade in order:
-        yield "\t".join([clade, *(_cell(cell) for cell in cells[clade])])
+        yield "\t".join(
+            [clade, *(_cell(0.0 if cell is None else cell) for cell in cells[clade])]
+        )
 
 
 def write_taxmatrix(

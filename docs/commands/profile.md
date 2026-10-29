@@ -1,14 +1,16 @@
 # profile
 
 ```text
-sylphd profile [inputs] [options] [--taxonomy LIST] [--taxprof PREFIX]
-               [--taxmatrix PREFIX] [--taxmatrix-value {relative,sequence}]
+sylphd profile [inputs] [options] [--estimate-read-counts] [--taxonomy LIST]
+               [--taxprof PREFIX] [--taxmatrix PREFIX]
+               [--taxmatrix-value {relative,sequence,ani,coverage}]
 ```
 
 Taxonomic profile of one or more samples: the equivalent of `sylph profile`, with
 `Taxonomic_abundance`, `Sequence_abundance` and `kmers_reassigned` columns, joined with the
-metadata. The client sketches locally and sends the sketches to the server. For the ANI hits
-without abundances see [`query`](query.md). The guide
+metadata. With `--estimate-read-counts` the `Sequence_abundance` column holds the estimated number
+of reads per genome instead (sylph's experimental option). The client sketches locally and sends
+the sketches to the server. For the ANI hits without abundances see [`query`](query.md). The guide
 [Profiling reads](../guides/profiling-reads.md) explains inputs, names and output columns.
 
 ## Inputs
@@ -40,6 +42,7 @@ without abundances see [`query`](query.md). The guide
 | `--minimum-ani ANI` | `95` | minimum adjusted ANI, 0-100 |
 | `--seq-id PCT` | none | read sequence identity in percent, only used with `--estimate-unknown` |
 | `--estimate-unknown` | off | estimate true coverage and scale sequence abundance of unknowns (`Eff_cov` becomes `True_cov`) |
+| `--estimate-read-counts` | off | put the estimated number of reads per genome in `Sequence_abundance` instead of a relative abundance (sylph's experimental option); implies `--estimate-unknown`, so `Eff_cov` becomes `True_cov` |
 | `--min-number-kmers N` | `10` | discard genomes with fewer sampled k-mers |
 | `--min-contain N` | `7` | minimum contained k-mers for a hit |
 | `--screen-ani ANI` | `85` | two-stage screen threshold, 0-100 |
@@ -52,9 +55,11 @@ without abundances see [`query`](query.md). The guide
 | `--taxonomy LIST` | `gtdb,ncbi` | taxonomies to aggregate, comma-separated from `gtdb`, `ncbi` |
 | `--taxprof PREFIX` | none | write one sylph-tax-style `.sylphmpa` per sample and taxonomy as `PREFIX<sample>.<taxonomy>.sylphmpa` |
 | `--taxmatrix PREFIX` | none | write one clade × sample matrix per taxonomy as `PREFIX<taxonomy>.tsv` |
-| `--taxmatrix-value {relative,sequence}` | `relative` | abundance used in `--taxmatrix`: `relative` (`Taxonomic_abundance`) or `sequence` (`Sequence_abundance`) |
+| `--taxmatrix-value {relative,sequence,ani,coverage}` | `relative` | value used in `--taxmatrix`: `relative` (`Taxonomic_abundance`) or `sequence` (`Sequence_abundance`), or `ani`/`coverage` for the strain-level columns, as `sylph-tax merge --column ANI\|Coverage` |
 
-These need a server with `--meta`. See [Taxonomic profiles](../guides/taxonomic-profiles.md).
+These need a server with `--meta`. With two or more samples the matrix rows are sorted
+lexicographically, like `sylph-tax merge`. See
+[Taxonomic profiles](../guides/taxonomic-profiles.md).
 
 ## Server
 

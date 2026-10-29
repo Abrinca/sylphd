@@ -564,6 +564,15 @@ def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
     )
     if mode == "profile":
         parser.add_argument(
+            "--estimate-read-counts",
+            action="store_true",
+            help=(
+                "very roughly estimate the number of reads per genome in the "
+                "'Sequence_abundance' column instead of a relative abundance "
+                "(experimental in sylph); implies --estimate-unknown"
+            ),
+        )
+        parser.add_argument(
             "--taxonomy",
             default=",".join(TAXONOMIES),
             metavar="LIST",
@@ -593,8 +602,10 @@ def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
             choices=MATRIX_VALUES,
             default="relative",
             help=(
-                "abundance in --taxmatrix: 'relative' (Taxonomic_abundance) or "
-                "'sequence' (Sequence_abundance) [default: relative]"
+                "value in --taxmatrix: 'relative' (Taxonomic_abundance), "
+                "'sequence' (Sequence_abundance), 'ani' or 'coverage' (strain "
+                "rows only, like 'sylph-tax merge --column ANI|Coverage') "
+                "[default: relative]"
             ),
         )
     parser.add_argument(

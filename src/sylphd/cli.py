@@ -296,6 +296,8 @@ def cmd_contain(args: argparse.Namespace) -> int:
         minimum_ani=args.minimum_ani,
         seq_id=args.seq_id,
         estimate_unknown=args.estimate_unknown,
+        # ``profile`` only, like the taxonomy flags.
+        estimate_read_counts=getattr(args, "estimate_read_counts", False),
         min_number_kmers=args.min_number_kmers,
         min_contain=args.min_contain,
         screen_ani=args.screen_ani,

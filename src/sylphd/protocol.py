@@ -46,7 +46,8 @@ QUERY_COLUMNS: tuple[str, ...] = (
 )
 
 #: Columns of ``sylph profile`` output, in sylph's order.  ``Eff_cov`` becomes
-#: ``True_cov`` when ``estimate_unknown`` is set (as in sylph).
+#: ``True_cov`` when ``estimate_unknown`` (or ``estimate_read_counts``, which
+#: implies it) is set, as in sylph.
 PROFILE_COLUMNS: tuple[str, ...] = (
     "Sample_file",
     "Genome_file",
@@ -85,6 +86,10 @@ class ProfileParams:
     minimum_ani: float | None = None
     seq_id: float | None = None
     estimate_unknown: bool = False
+    #: Report estimated read counts in ``Sequence_abundance`` instead of a
+    #: relative abundance (sylph's experimental ``--estimate-read-counts``).
+    #: Implies :attr:`estimate_unknown`, as in sylph.
+    estimate_read_counts: bool = False
     min_number_kmers: int = 10
     min_contain: int = 7
     screen_ani: float = 85.0
@@ -103,6 +108,7 @@ class ProfileParams:
             "minimum_ani",
             "seq_id",
             "estimate_unknown",
+            "estimate_read_counts",
             "min_number_kmers",
             "min_contain",
             "screen_ani",
@@ -119,6 +125,7 @@ class ProfileParams:
             minimum_ani=_optional_float(data, "minimum_ani", 0.0, 100.0),
             seq_id=_optional_float(data, "seq_id", 0.0, 100.0),
             estimate_unknown=_optional_bool(data, "estimate_unknown", False),
+            estimate_read_counts=_optional_bool(data, "estimate_read_counts", False),
             min_number_kmers=_integer(data, "min_number_kmers", 10, minimum=0),
             min_contain=_integer(data, "min_contain", 7, minimum=0),
             screen_ani=_number(data, "screen_ani", 85.0, 0.0, 100.0),
@@ -130,6 +137,7 @@ class ProfileParams:
             "minimum_ani": self.minimum_ani,
             "seq_id": self.seq_id,
             "estimate_unknown": self.estimate_unknown,
+            "estimate_read_counts": self.estimate_read_counts,
             "min_number_kmers": self.min_number_kmers,
             "min_contain": self.min_contain,
             "screen_ani": self.screen_ani,
@@ -137,6 +145,12 @@ class ProfileParams:
         }
 
     def profiler_kwargs(self) -> dict[str, Any]:
+        """Keyword arguments for ``pysylph.Profiler``.
+
+        Every field is one of the constructor's keywords, including
+        ``estimate_read_counts``, which pysylph uses to put read counts in
+        ``Sequence_abundance`` (and to enable ``estimate_unknown``).
+        """
         return self.to_dict()
 
 
@@ -275,7 +289,8 @@ def columns_for_mode(mode: str, params: ProfileParams | None = None) -> tuple[st
         return QUERY_COLUMNS
     if mode == "profile":
         columns = list(PROFILE_COLUMNS)
-        if params is not None and params.estimate_unknown:
+        # ``estimate_read_counts`` implies ``estimate_unknown``, as in sylph.
+        if params is not None and (params.estimate_unknown or params.estimate_read_counts):
             columns[columns.index("Eff_cov")] = "True_cov"
         return tuple(columns)
     raise ValueError(f"unknown mode {mode!r}")

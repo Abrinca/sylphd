@@ -25,6 +25,11 @@ GTDB_SPECIES = (
     "f__Clostridiaceae;g__Clostridium;s__Clostridium difficile"
 )
 
+#: The clade path of :data:`GTDB_SPECIES`, then the strain level.
+GTDB_PATH = "|".join(GTDB_SPECIES.split(";"))
+GTDB_STRAIN_A = GTDB_PATH + "|t__A"
+GTDB_STRAIN_B = GTDB_PATH + "|t__B"
+
 
 def _row(
     *,
@@ -333,17 +338,81 @@ class TestMatrix:
         lines = list(clade_matrix_lines(self._table(samples), value="sequence"))
         assert lines[1] == "d__Bacteria\t80.0"
 
-    def test_row_union_order(self) -> None:
-        first = "d__Bacteria;p__Bacillota;c__C;o__O;f__F;g__G;s__S"
+    def test_rows_are_sorted_for_several_samples(self) -> None:
+        """Two or more samples: lexicographic clade order, like sylph-tax merge."""
         later = "d__Bacteria;p__Pseudomonadota;c__C;o__O;f__F;g__G;s__S2"
+        first = "d__Bacteria;p__Bacillota;c__C;o__O;f__F;g__G;s__S"
         samples = [
-            {"name": "one", "rows": [_row(gtdb=first, accession="A")]},
-            {"name": "two", "rows": [_row(gtdb=later, accession="B")]},
+            # First-seen order is Pseudomonadota then Bacillota; pandas sorts.
+            {"name": "one", "rows": [_row(gtdb=later, accession="B")]},
+            {"name": "two", "rows": [_row(gtdb=first, accession="A")]},
         ]
         clades = [line.split("\t")[0] for line in list(clade_matrix_lines(self._table(samples)))[1:]]
+        assert clades == sorted(clades)
         assert clades.index("d__Bacteria|p__Bacillota") < clades.index(
             "d__Bacteria|p__Pseudomonadota"
         )
+
+    def test_one_sample_keeps_the_profile_order(self) -> None:
+        """One file: pandas has nothing to join, so the profile order survives."""
+        botulinum = GTDB_SPECIES.replace("s__Clostridium difficile", "s__Clostridium botulinum")
+        samples = [
+            {
+                "name": "one",
+                "rows": [
+                    _row(gtdb=GTDB_SPECIES, relative=80.0, accession="Zed"),
+                    _row(gtdb=botulinum, relative=20.0, accession="Alpha"),
+                ],
+            }
+        ]
+        lines = list(clade_matrix_lines(self._table(samples)))
+        names = [line.split("\t")[0] for line in lines[1:]]
+        # Abundance order (the .sylphmpa order), not lexicographic order.
+        assert names != sorted(names)
+        assert names[0] == "d__Bacteria"
+        assert names[1] == "d__Bacteria|p__Bacillota"
+        assert names[-2:] == [
+            GTDB_PATH + "|t__Zed",
+            "|".join(botulinum.split(";")) + "|t__Alpha",
+        ]
+
+    def test_ani_and_coverage_keep_strain_rows_only(self) -> None:
+        """``ani``/``coverage`` behave like ``sylph-tax merge --column ANI``."""
+        samples = [
+            {
+                "name": "one",
+                "rows": [_row(gtdb=GTDB_SPECIES, ani=99.5, coverage=4.25, accession="A")],
+            },
+            {
+                "name": "two",
+                "rows": [_row(gtdb=GTDB_SPECIES, ani=98.0, coverage=2.5, accession="B")],
+            },
+        ]
+        for value, first, second in (
+            ("ani", "99.5", "98.0"),
+            ("coverage", "4.25", "2.5"),
+        ):
+            lines = list(clade_matrix_lines(self._table(samples), value=value))
+            assert lines[0] == "clade_name\tone\ttwo"
+            rows = {line.split("\t")[0]: line.split("\t")[1:] for line in lines[1:]}
+            # Every rank row is NA in both samples, so dropna(how="all") drops it.
+            assert [clade.rsplit("|", 1)[-1] for clade in rows] == ["t__A", "t__B"]
+            assert [clade for clade in rows] == sorted(rows)
+            assert rows[GTDB_STRAIN_A] == [first, "0.0"]
+            assert rows[GTDB_STRAIN_B] == ["0.0", second]
+
+    def test_ani_drops_a_strain_without_a_value(self) -> None:
+        """A strain row whose ANI is missing in its only sample is dropped too."""
+        samples = [
+            {"name": "one", "rows": [_row(gtdb=GTDB_SPECIES, ani=None, accession="A")]},
+        ]
+        assert list(clade_matrix_lines(self._table(samples), value="ani")) == [
+            "clade_name\tone"
+        ]
+
+    def test_unknown_matrix_value(self) -> None:
+        with pytest.raises(TaxonomyError, match="unknown matrix value"):
+            list(clade_matrix_lines([], value="bogus"))
 
 
 class TestFlags:

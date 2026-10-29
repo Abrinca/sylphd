@@ -12,8 +12,8 @@ ANI and coverage, joined with the metadata.
 [`profile`](profile.md), with two differences:
 
 - the default `--minimum-ani` is **90** (`profile`: 95);
-- there are no abundance columns and no `--taxonomy`, `--taxprof`, `--taxmatrix` or
-  `--taxmatrix-value` options.
+- there are no abundance columns and no `--taxonomy`, `--taxprof`, `--taxmatrix`,
+  `--taxmatrix-value` or `--estimate-read-counts` options.
 
 The output columns are:
 

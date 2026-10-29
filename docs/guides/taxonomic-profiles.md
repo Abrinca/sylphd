@@ -22,7 +22,7 @@ sylphd profile -r sample.fq.gz \
 | `--taxonomy LIST` | `gtdb,ncbi` | `gtdb`, `ncbi`, or both, comma-separated |
 | `--taxprof PREFIX` | none | one `.sylphmpa` file per sample and taxonomy |
 | `--taxmatrix PREFIX` | none | one clade × sample table per taxonomy |
-| `--taxmatrix-value relative\|sequence` | `relative` | abundance used by `--taxmatrix` |
+| `--taxmatrix-value relative\|sequence\|ani\|coverage` | `relative` | value used by `--taxmatrix` |
 
 Both flags combine with the normal TSV or JSON output (`-o`, `--format`). The prefix is used
 verbatim, except that a prefix naming an existing directory (`results`) works like `results/`. To
@@ -55,12 +55,25 @@ carry `Adjusted_ANI` and `Eff_cov` (or `True_cov`); the other rows have `NA` the
 
 ## `--taxmatrix`: one table per taxonomy
 
-`PREFIX<gtdb|ncbi>.tsv` has a `clade_name` column followed by one column per sample. The columns
-are in request order, and rows are all clades seen in any sample, in first-seen order (the order
-`sylph-tax merge` produces when joining its profiles in that order). A clade missing from a sample
-is `0.0`.
+`PREFIX<gtdb|ncbi>.tsv` has a `clade_name` column followed by one column per sample, in request
+order. Rows are all clades seen in any sample, and a clade missing from a sample is `0.0`. With
+two or more samples the rows are **sorted lexicographically** (what `sylph-tax merge` produces
+when pandas joins the profiles); with a single sample they keep the `.sylphmpa` order (rank by
+rank, then by decreasing abundance).
 
-`--taxmatrix-value relative` uses `Taxonomic_abundance`, `sequence` uses `Sequence_abundance`.
+`--taxmatrix-value` selects the column, matching `sylph-tax merge --column`:
+
+| Value | Column | `sylph-tax merge --column` |
+|---|---|---|
+| `relative` | `Taxonomic_abundance` | `relative_abundance` |
+| `sequence` | `Sequence_abundance` | `sequence_abundance` |
+| `ani` | `ANI (if strain-level)` | `ANI` |
+| `coverage` | `Coverage (if strain-level)` | `Coverage` |
+
+Only `t__` rows carry an ANI and a coverage, so the `ani` and `coverage` matrices contain the
+strain-level rows alone: a clade without a value in *any* sample is dropped (pandas'
+`dropna(how="all")`), and a strain found in one sample but not another gets `0`, not `NA`. These
+files are what `sylph-tax merge --column ANI|Coverage` writes, byte for byte.
 
 ## Lineage rules
 

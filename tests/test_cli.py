@@ -359,6 +359,34 @@ class TestUnixSocketRoundTrip:
         row = dict(zip(header, lines[1].split("\t")))
         assert row["True_cov"] != ""
 
+    def test_estimate_read_counts_tsv_value(self, server) -> None:
+        """``--estimate-read-counts`` puts read counts in ``Sequence_abundance``.
+
+        ``sylph profile --estimate-read-counts ecoli.syldb o157.sylsp`` reports
+        1149 reads for o157.  The option implies ``--estimate-unknown``, so the
+        coverage column is labelled ``True_cov``.
+        """
+        socket_path, _ = server
+        result = _run(
+            "profile",
+            str(O157_SKETCH),
+            "--socket",
+            str(socket_path),
+            "--estimate-read-counts",
+            "--fields",
+            "none",
+        )
+        lines = [line for line in result.stdout.splitlines() if line]
+        header = lines[0].split("\t")
+        assert "True_cov" in header
+        assert "Eff_cov" not in header
+        row = dict(zip(header, lines[1].split("\t")))
+        counts = float(row["Sequence_abundance"])
+        assert counts == pytest.approx(1149.0)
+        assert counts.is_integer()
+        # Taxonomic_abundance is still a relative abundance.
+        assert float(row["Taxonomic_abundance"]) == pytest.approx(100.0)
+
 
 class TestMetadataTSV:
     @pytest.mark.parametrize("fields", [[], ["--fields", "all"]])
@@ -569,6 +597,37 @@ class TestTaxonomyOutputs:
         assert [float(value) for value in rows["d__Bacteria"]] == pytest.approx(
             [100.0, 100.0], rel=0.01
         )
+
+    @pytest.mark.parametrize("value", ["ani", "coverage"])
+    def test_strain_level_matrices(self, taxonomy_server, value: str) -> None:
+        """``ani``/``coverage`` matrices hold strain rows only, sorted.
+
+        Same shape as ``sylph-tax merge --column ANI|Coverage``: the rank rows
+        (whose value is ``NA`` in every sample) are dropped, and a strain the
+        other sample does not contain is ``0``.
+        """
+        _, directory = taxonomy_server
+        result = self._profile(
+            taxonomy_server,
+            "--taxonomy",
+            "gtdb",
+            "--taxmatrix",
+            str(directory / f"{value}-"),
+            "--taxmatrix-value",
+            value,
+        )
+        assert result.returncode == 0, result.stderr
+        lines = (directory / f"{value}-gtdb.tsv").read_text().splitlines()
+        assert lines[0] == "clade_name\tone\ttwo"
+        rows = [line.split("\t") for line in lines[1:]]
+        assert rows
+        assert all("|t__" in row[0] for row in rows)
+        assert [row[0] for row in rows] == sorted(row[0] for row in rows)
+        values = [[float(cell) for cell in row[1:]] for row in rows]
+        assert all(len(cells) == 2 for cells in values)
+        # ``one`` only holds the first genome: the second strain is 0 there.
+        assert any(0.0 in cells for cells in values)
+        assert all(max(cells) > 0.0 for cells in values)
 
     def test_unknown_taxonomy(self, taxonomy_server) -> None:
         _, directory = taxonomy_server

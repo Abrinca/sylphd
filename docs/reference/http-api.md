@@ -64,6 +64,7 @@ At most 4096 sketches fit in one request. Non-file form fields such as `params` 
 | `minimum_ani` | minimum adjusted ANI, 0-100; `null` or omitted uses sylph's default |
 | `seq_id` | read sequence identity in percent, 0-100 |
 | `estimate_unknown` | boolean |
+| `estimate_read_counts` | boolean, `profile` only; `Sequence_abundance` then holds estimated read counts (sylph's experimental option) and implies `estimate_unknown` |
 | `min_number_kmers` | integer >= 0 (default `10`) |
 | `min_contain` | integer >= 0 (default `7`) |
 | `screen_ani` | 0-100 (default `85`) |
@@ -74,7 +75,9 @@ At most 4096 sketches fit in one request. Non-file form fields such as `params` 
 
 Unknown keys are rejected with a 400. The client sketches with the database's `c` and `k`. A
 sketch must match `k` exactly and must not be sparser than the database (`c <= db.c`); otherwise
-the request fails with a 400.
+the request fails with a 400. The same 400 covers a sketch that pysylph itself refuses to profile
+against the database, for example one denser than a genome of a database whose genomes have
+different `c`: the response carries pysylph's message, not a generic 500.
 
 The response is a JSON list with one object per sample, in request order:
 
@@ -89,10 +92,12 @@ The response is a JSON list with one object per sample, in request order:
 ```
 
 `kind` is `query` or `profile`. `Taxonomic_abundance`, `Sequence_abundance` and `kmers_reassigned`
-appear only for `profile`. Metadata columns follow `accession`. Rows keep sylph's column names; in
-JSON `Eff_cov` is never renamed to `True_cov` (that is a TSV header), and `Lambda_status` is an
-extra field not present in the TSV. With `no_adjust`, `Adjusted_ANI` is the naive containment ANI
-and `ANI_5-95_percentile` is `null`: the interval still describes the disabled adjustment.
+appear only for `profile`; with `estimate_read_counts`, `Sequence_abundance` holds the estimated
+number of reads per genome (a rounded float) instead of a relative abundance. Metadata columns
+follow `accession`. Rows keep sylph's column names; in JSON `Eff_cov` is never renamed to
+`True_cov` (that is a TSV header), and `Lambda_status` is an extra field not present in the TSV.
+With `no_adjust`, `Adjusted_ANI` is the naive containment ANI and `ANI_5-95_percentile` is `null`:
+the interval still describes the disabled adjustment.
 
 ## `POST /assembly` { #post-assembly }
 

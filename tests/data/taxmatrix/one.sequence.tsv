@@ -1,0 +1,11 @@
+clade_name	single
+d__Bacteria	100.0
+d__Bacteria|p__Bacillota	100.0
+d__Bacteria|p__Bacillota|c__Clostridia	100.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales	100.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae	100.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae|g__Clostridium	100.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae|g__Clostridium|s__Clostridium difficile	75.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae|g__Clostridium|s__Clostridium botulinum	25.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae|g__Clostridium|s__Clostridium difficile|t__GCA_000000009.1	75.0
+d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae|g__Clostridium|s__Clostridium botulinum|t__GCA_000000010.1	25.0

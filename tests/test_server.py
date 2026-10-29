@@ -17,7 +17,7 @@ from starlette.testclient import TestClient
 
 from sylphd import cli
 from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
-from sylphd.protocol import ProfileParams, format_row, format_value
+from sylphd.protocol import ProfileParams, columns_for_mode, format_row, format_value
 from sylphd.server import (
     LoadedDatabase,
     ServerConfig,
@@ -29,7 +29,7 @@ from sylphd.server import (
     serve,
 )
 
-from conftest import ECOLI_TWO_STAGE, K12_R1, MIX_SKETCH, O157_SKETCH
+from conftest import CLODF13_FASTA, ECOLI_TWO_STAGE, K12_R1, MIX_SKETCH, O157_SKETCH
 
 
 def _reads(path):
@@ -110,6 +110,32 @@ class TestProfileQuery:
         assert rows[0]["Sequence_abundance"] == pytest.approx(100.0)
         assert rows[0]["kmers_reassigned"] == 0
 
+    def test_estimate_read_counts(self, client: TestClient) -> None:
+        """``estimate_read_counts`` reports read counts and implies ``True_cov``.
+
+        ``sylph profile --estimate-read-counts ecoli.syldb o157.sylsp`` reports
+        1149 reads for o157; the same value as pysylph's direct call, and it is
+        integral (the library rounds it).
+        """
+        payload = O157_SKETCH.read_bytes()
+        response = _post(
+            client,
+            "profile",
+            [("o157", payload)],
+            names=["o157"],
+            estimate_read_counts=True,
+        )
+        assert response.status_code == 200
+        rows = response.json()[0]["rows"]
+        assert len(rows) == 1
+        assert rows[0]["Taxonomic_abundance"] == pytest.approx(100.0)
+        assert rows[0]["Sequence_abundance"] == pytest.approx(1149.0)
+        assert float(rows[0]["Sequence_abundance"]).is_integer()
+
+        params = ProfileParams(estimate_read_counts=True)
+        assert "True_cov" in columns_for_mode("profile", params)
+        assert "Eff_cov" not in columns_for_mode("profile", params)
+
     def test_parameters_are_forwarded(self, client: TestClient) -> None:
         payload = O157_SKETCH.read_bytes()
         response = _post(
@@ -174,6 +200,7 @@ class TestErrors:
             ({"min_contain": -1}, ">= 0"),
             ({"min_contain": 1.5}, "integer"),
             ({"estimate_unknown": "maybe"}, "boolean"),
+            ({"estimate_read_counts": "maybe"}, "boolean"),
         ],
     )
     def test_bad_parameter_values(self, client: TestClient, params, needle) -> None:
@@ -225,6 +252,53 @@ class TestErrors:
         response = _post(client, "query", [("sparse", sketch.to_bytes())])
         assert response.status_code == 400
         assert "sparser" in response.json()["error"]
+
+    def test_database_genome_denser_than_sketch_is_400(self, tmp_path: Path) -> None:
+        """pysylph's ``ValueError`` for an incompatible sketch becomes a 400.
+
+        ``/info`` reports the first genome's ``c`` (400), so a sketch at c=300
+        passes sylphd's header check, but the second genome was sketched at
+        c=200 and pysylph refuses to profile against it.  sylph terminates on
+        that condition, so it is the client's bad request, not a server fault.
+        """
+        with dnaio.open(CLODF13_FASTA) as reader:
+            sequences = [record.sequence for record in reader]
+        long_reads = sequences[0]
+        sketcher400 = pysylph.Sketcher(c=400, k=31)
+        sketcher200 = pysylph.Sketcher(c=200, k=31)
+        database = pysylph.Database(
+            [
+                sketcher400.sketch_genome("GCA_000000001.1_genomic.fna.gz", sequences),
+                sketcher200.sketch_genome(
+                    "GCA_000000002.1_genomic.fna.gz", [long_reads[: len(long_reads) // 2]]
+                ),
+            ]
+        )
+        db_path = tmp_path / "mixed-c.syldb"
+        database.dump(str(db_path))
+
+        app = create_app(ServerConfig(db_path=db_path))
+        sketch = pysylph.Sketcher(c=300, k=31).sketch_single("mixed", _reads(K12_R1))
+        with TestClient(app) as mixed:
+            response = _post(mixed, "profile", [("mixed", sketch.to_bytes())])
+            assert response.status_code == 400
+            error = response.json()["error"]
+            assert "c parameter for sample" in error
+            # Still a healthy server: the next request is answered normally.
+            assert mixed.get("/health").status_code == 200
+
+    def test_profiler_construction_error_is_400(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        """A ``ValueError`` from the ``Profiler`` constructor is also a 400."""
+
+        def refuse(*args, **kwargs):
+            raise ValueError("k parameter for sample (31) != k parameter for database (21)")
+
+        monkeypatch.setattr("sylphd.profiling.pysylph.Profiler", refuse)
+        response = _post(client, "profile", [("o157", O157_SKETCH.read_bytes())])
+        assert response.status_code == 400
+        assert "k parameter for sample" in response.json()["error"]
 
     def test_unknown_fields(self, client: TestClient) -> None:
         response = _post(client, "query", [("o157", O157_SKETCH.read_bytes())], fields=["nope"])
