@@ -35,6 +35,12 @@ The scripts are the mechanism; these are the knobs you choose:
   in `sylphd.service`. The shipped set is an example, not a requirement:
   `--allow-sequences` (needed by the web app), `--max-jobs`, `--max-queue`,
   `--rate-limit`, `--trusted-proxy unix`, `--cors-origin`, `--terms-url`.
+  `--about /etc/sylphd/about.md` publishes a Markdown description of your
+  instance (shown at the top of the web page, editable without a restart;
+  put the file somewhere the `sylphd` service account can read, for example
+  `/etc/sylphd/about.md`) and `--name` a display name. `SYLPH_SERVE_ARGS` is
+  split on whitespace, so use a one-word `--name` there and put anything longer
+  in the about file.
   Narrow `--cors-origin` to your page's origin if you run one; drop
   `--terms-url` unless you publish terms. See
   [Running a public server](../docs/guides/public-server.md) and the

@@ -38,6 +38,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import __version__
+from .about import About, check_name
 from .assembly import (
     DECOMPRESSION_FACTOR,
     INTERPRETATION_THRESHOLDS,
@@ -114,6 +115,10 @@ class ServerConfig:
     cors_origins: tuple[str, ...] = ()
     #: Optional URL of a terms-of-use page, reported by ``/info``.
     terms_url: str | None = None
+    #: Display name of the instance, reported by ``/info``.
+    name: str | None = None
+    #: UTF-8 Markdown file describing the instance (``/info`` ``about``).
+    about_path: Path | None = None
     #: Set when serving on a Unix socket, so the app can adjust its mode.
     socket_path: Path | None = None
 
@@ -247,10 +252,17 @@ async def _health(request: Request) -> JSONResponse:
 async def _info(request: Request) -> JSONResponse:
     state = request.app.state
     metadata = state.metadata
+    description: dict[str, Any] = {}
+    if state.name:
+        description["name"] = state.name
+    about = state.about.text
+    if about:
+        description["about"] = {"format": "markdown", "text": about}
     return JSONResponse(
         {
             "service": "sylphd",
             "version": __version__,
+            **description,
             "pysylph_version": pysylph.__version__,
             "python_version": ".".join(str(part) for part in sys.version_info[:3]),
             "database": state.database.info(),
@@ -860,6 +872,8 @@ def create_app(
     app.state.rate_limit = config.rate_limit
     app.state.max_queue = config.max_queue
     app.state.terms_url = config.terms_url
+    app.state.name = check_name(config.name)
+    app.state.about = About(config.about_path)
     app.state.jobs = JobSlots(config.max_jobs, config.max_queue)
     # Starlette middleware: the last added is the outermost, so CORS wraps
     # rate-limit and body-limit errors too.

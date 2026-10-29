@@ -25,6 +25,7 @@ from .download import (
     download_database,
     download_release,
 )
+from .about import About, check_name
 from .limits import parse_rate_limit
 from .metadata import build_metadata_db
 from .paths import check_socket_path, default_socket_path, parse_tcp
@@ -134,6 +135,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
         trusted_proxies=tuple(args.trusted_proxy or ()),
         cors_origins=tuple(args.cors_origin or ()),
         terms_url=args.terms_url,
+        name=args.name,
+        about_path=Path(args.about) if args.about else None,
     )
     socket_path = None
     tcp = None
@@ -151,7 +154,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
             return 2
         config.socket_path = socket_path
 
-    # Load the database before binding, so that bad paths fail loudly.
+    # Check --name/--about first (cheap), then load the database before binding,
+    # so that bad paths fail loudly.
+    check_name(args.name)
+    if args.about:
+        About(Path(args.about))
     database = LoadedDatabase(config.db_path, compute_hash=config.compute_hash)
     app = create_app(config, database=database)
     _log_startup(database, config, socket_path, tcp)
@@ -192,6 +199,8 @@ def _log_startup(
         extras.append(f"cors={','.join(config.cors_origins)}")
     if config.terms_url:
         extras.append(f"terms={config.terms_url}")
+    if config.about_path:
+        extras.append(f"about={config.about_path}")
     print(
         f"{PROG}: {database.name} ({kind}, c={database.c}, k={database.k}, "
         f"{database.genomes} genomes) listening on {address} "
@@ -818,6 +827,21 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "terms-of-use page URL reported by /info and linked from the web "
             "page (none by default)"
+        ),
+    )
+    serve_parser.add_argument(
+        "--name",
+        metavar="TEXT",
+        default=None,
+        help="display name of this server, up to 80 characters, reported by /info",
+    )
+    serve_parser.add_argument(
+        "--about",
+        metavar="FILE",
+        default=None,
+        help=(
+            "UTF-8 Markdown file (at most 16 KiB) describing this server, reported "
+            "by /info and shown on the web page; re-read when the file changes"
         ),
     )
     serve_parser.add_argument(
