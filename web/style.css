@@ -155,21 +155,23 @@ a:hover { text-decoration-thickness: 2px; }
 .fact-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .fact-value { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
 /* databases (when a server pools several) and taxonomy sources */
-.sp-catalog { display: grid; gap: 6px; margin: 8px 0 0; font-size: .86rem; }
-.sp-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.sp-catalog { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 8px 0 0; font-size: .86rem; }
+.sp-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
 .sp-group-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-.sp-dbs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.sp-dbs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 .sp-db {
-  display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 9px;
-  border: 1px solid var(--border); border-radius: 999px; background: var(--card); white-space: nowrap;
-}
-.sp-db-name { color: var(--fg); font-weight: 600; }
-.sp-db-kind { color: var(--muted); font-family: var(--mono); font-size: .94em; }
-.sp-db-num { color: var(--muted); font-variant-numeric: tabular-nums; }
-.sp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.sp-chip {
-  display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 9px; cursor: help;
+  display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 2px 9px;
   border: 1px solid var(--border); border-radius: 999px; background: var(--card);
+  max-width: 100%; overflow-wrap: anywhere;
+}
+.sp-db-name { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
+.sp-db-kind { color: var(--muted); font-family: var(--mono); font-size: .94em; overflow-wrap: anywhere; }
+.sp-db-num { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sp-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sp-chip {
+  display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 2px 9px; cursor: help;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--card);
+  max-width: 100%; overflow-wrap: anywhere;
 }
 .sp-chip-name { color: var(--fg); font-weight: 600; }
 .sp-chip-num { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -776,12 +778,13 @@ details.adv .options { margin-top: 10px; }
 }
 .pc-caveats { margin-top: 14px; }
 .pc-caveats p { margin: 4px 0; }
-.pc-contig-cell { display: flex; flex-direction: column; gap: 3px; }
+.pc-contig-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .pc-expand {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%;
   padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
   text-align: left;
 }
+.pc-expand .mono { min-width: 0; overflow-wrap: anywhere; }
 .pc-expand:hover { color: var(--accent); }
 .pc-caret { color: var(--muted); width: .8em; }
 table.pc-table td { vertical-align: top; }

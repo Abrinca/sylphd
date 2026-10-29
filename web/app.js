@@ -931,6 +931,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   // A hit whose lineage comes from a taxonomy source other than GTDB (UHGV, ICTV, fungi):
   // it has `taxonomy_source`/`taxonomy`, but no gtdb_taxonomy.
   const nonGtdb = (h) => !has(h.gtdb_taxonomy) && (has(h.taxonomy_source) || genericRanks(h).length > 0);
+  // The taxonomy source to name for a hit/link badge; GTDB when it has a GTDB lineage.
+  const hitSource = (h) => (nonGtdb(h) && has(h.taxonomy_source) ? String(h.taxonomy_source) : 'GTDB');
   const colLabel = (c) => (typeof c.label === 'function' ? c.label() : c.label);
   // The hit table's taxon column says "GTDB species" only while every hit is GTDB's.
   const speciesColumnLabel = () => (current && current.hits.some(nonGtdb) ? 'Taxon' : 'GTDB species');
@@ -1137,7 +1139,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     if (sub) notes.push(sub);
     // A hit without an NCBI accession (UHGV, ICTV, ...) is named by its genome_id: the
     // taxonomy key, or the first contig id, not the shared UHGV `votus_full.fna.gz`.
-    const hitName = has(h.accession) ? accessionLinks(h.accession)
+    const hitName = has(h.accession) ? accessionLinks(h.accession, hitSource(h))
       : has(h.genome_id) ? el('span', { class: 'mono', title: h.genome_file || h.genome_id, text: String(h.genome_id) })
         : has(h.genome_file) ? el('span', { class: 'mono', title: h.genome_file, text: String(h.genome_file).split('/').pop() })
           : el('span', { class: 'dash', text: '–' });
@@ -1197,13 +1199,18 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
 
   /* links */
-  function accessionLinks(acc) {
+  // The GTDB genome page only exists for a GTDB hit; a hit from another taxonomy
+  // source (FungiRefSeq-latest, UHGV, ...) keeps the NCBI link and names its source.
+  function accessionLinks(acc, source) {
     if (!has(acc)) return el('span', { class: 'dash', text: '–' });
     const e = encodeURIComponent(acc);
+    const gtdb = !has(source) || String(source) === 'GTDB';
     return el('span', null,
       el('a', { href: `https://www.ncbi.nlm.nih.gov/datasets/genome/${e}/`, rel: 'noopener', title: 'NCBI Datasets', class: 'mono', text: acc }),
       ' ',
-      el('a', { href: `https://gtdb.ecogenomic.org/genome?gid=${e}`, rel: 'noopener', title: 'View in GTDB', class: 'badge badge-plain', text: 'GTDB' }));
+      gtdb
+        ? el('a', { href: `https://gtdb.ecogenomic.org/genome?gid=${e}`, rel: 'noopener', title: 'View in GTDB', class: 'badge badge-plain', text: 'GTDB' })
+        : el('span', { class: 'badge badge-plain', title: `Taxonomy source: ${source}`, text: String(source) }));
   }
   function taxidLink(id) {
     const n = Number(id);
@@ -1329,12 +1336,21 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
 
   function relationBadge(h) {
     if (!has(h.relation)) return dash();
-    const title = h.shared_rank ? `Deepest GTDB rank shared: ${h.shared_rank}` : 'No shared GTDB rank';
-    return el('div', { class: 'rel' },
-      el('span', { class: `badge badge-rel rel-${h._rel}`, title, text: h.relation }),
-      h.ani_species_level && h.shared_rank !== 'species'
+    // A non-GTDB hit has its own rank family (UHGV levels, fungal ranks), so name its
+    // source in the tooltip instead of GTDB; GTDB hits keep the exact wording.
+    const gtdb = !nonGtdb(h);
+    const source = gtdb ? 'GTDB' : (has(h.taxonomy_source) ? String(h.taxonomy_source) : 'this source');
+    const title = gtdb
+      ? (h.shared_rank ? `Deepest GTDB rank shared: ${h.shared_rank}` : 'No shared GTDB rank')
+      : (h.shared_rank ? `Deepest rank shared in ${source}: ${h.shared_rank}` : `No shared rank in ${source}`);
+    let sub = null;
+    if (h.ani_species_level && h.shared_rank !== 'species') {
+      sub = gtdb
         ? el('div', { class: 'sub', title: 'The ANI reaches the species threshold, but GTDB places this genome in a different species', text: `ANI ≥ ${current.thr.species}, other species` })
-        : null);
+        : el('div', { class: 'sub', title: `The ANI reaches the species threshold, but ${source} places this genome in a different taxon`, text: `ANI ≥ ${current.thr.species}, other taxon` });
+    }
+    return el('div', { class: 'rel' },
+      el('span', { class: `badge badge-rel rel-${h._rel}`, title, text: h.relation }), sub);
   }
 
   function ncbiCell(h) {
@@ -1362,7 +1378,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   }
 
   function accessionCell(h) {
-    if (has(h.accession)) return accessionLinks(h.accession);
+    if (has(h.accession)) return accessionLinks(h.accession, hitSource(h));
     // UHGV/ICTV/genome hits have no NCBI accession: show the server's genome_id
     // (taxonomy key, or the first contig id) instead of an empty dash.
     if (has(h.genome_id)) return el('span', { class: 'mono', title: h.genome_file || h.genome_id, text: String(h.genome_id) });

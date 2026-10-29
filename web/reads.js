@@ -373,19 +373,24 @@
     return db && isNum(db.c) && isNum(db.k) ? { c: db.c, k: db.k } : null;
   }
 
-  // The server lists the params each endpoint accepts; an older server without that
-  // list keeps the option, and its 400 (handled in httpProblem) is the fallback.
-  function readCountsSupported(info) {
+  // Whether this server lists a /profile param. An older server (v0.2.0 and
+  // before) has no `params` in /info and rejects unknown keys with a 400, so
+  // an absent list means unsupported: never send the key, hide the option and
+  // fall back to the plain genome table instead.
+  function profileParamSupported(info, key) {
     const keys = info && info.params && info.params['/profile'];
-    return !Array.isArray(keys) || keys.includes('estimate_read_counts');
+    return Array.isArray(keys) && keys.includes(key);
+  }
+
+  function readCountsSupported(info) {
+    return profileParamSupported(info, 'estimate_read_counts');
   }
 
   // The taxonomies this server can aggregate: the columns its metadata file
   // has, plus its sylph-tax sources. An older server without the taxprof
   // param gets no request and the page shows the plain genome table.
   function taxprofSupported(info) {
-    const keys = info && info.params && info.params['/profile'];
-    return !Array.isArray(keys) || keys.includes('taxprof');
+    return profileParamSupported(info, 'taxprof');
   }
 
   function requestedTaxonomies() {
@@ -796,9 +801,13 @@
     if (!rows.length) out.push(emptyCard(run));
     else {
       if (!data_taxonomies.length) {
-        out.push(notice('warn', 'No taxonomic profile', Object.keys(run.result.taxprof).length
-          ? 'The server’s taxonomic profile has no classified clade for these hits. The table below lists the genomes with their own taxonomy.'
-          : 'This server did not return a taxonomic profile (it has no taxonomy metadata, or it is older than the taxprof option). The table below lists the genomes only.'));
+        const canTaxprof = taxprofSupported(S.info());
+        const body = !canTaxprof
+          ? 'This server is older than this page and cannot compute taxonomic profiles; the table and downloads still work. The server did not run the taxprof step, so the genome table below lists the hits with their own taxonomy only.'
+          : Object.keys(run.result.taxprof).length
+            ? 'The server’s taxonomic profile has no classified clade for these hits. The table below lists the genomes with their own taxonomy.'
+            : 'This server did not return a taxonomic profile (it has no taxonomy metadata). The table below lists the genomes only.';
+        out.push(notice('warn', 'No taxonomic profile', body));
       } else {
         out.push(abundanceCard(run));
       }
@@ -1168,7 +1177,7 @@
           ? el('div', null, has(r.ncbi_organism_name) ? r.ncbi_organism_name : dash(),
             has(r.ncbi_strain_identifiers) ? el('div', { class: 'sub', text: `strain ${r.ncbi_strain_identifiers}` }) : null,
             has(r.ncbi_taxid) ? el('div', { class: 'sub' }, 'taxid ', S.taxidLink(r.ncbi_taxid)) : null) : dash()),
-        td('Accession', null, S.accessionLinks(r.accession)));
+        td('Accession', null, S.accessionLinks(r.accession, lin.length ? 'GTDB' : (has(r.tax_source) ? r.tax_source : 'GTDB'))));
     }
 
     const card = el('section', { class: 'card', 'aria-label': 'Detected genomes' },
