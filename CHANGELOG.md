@@ -8,6 +8,12 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- Web page: the server panel lists the databases of a multi-database server and the taxonomy
+  sources (with a warning when sources overlap); the Reads tab has an "Estimate read counts"
+  option (reads in the table and the TSV, as `sylphd profile --estimate-read-counts`); non-GTDB
+  hits show their generic taxon under a "Taxon" column, and non-GTDB assignments show the
+  server's species-threshold note.
+
 - **Taxonomy sources in the metadata file (format version 3).** `sylphd setup --taxonomy SPEC`
   imports [sylph-tax](https://github.com/bluenote-1577/sylph-tax) files (`key<TAB>lineage[<TAB>host]`,
   gzip or plain, header rows allowed) next to the GTDB metadata, so a server can later give a

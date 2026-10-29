@@ -152,6 +152,30 @@ a:hover { text-decoration-thickness: 2px; }
 }
 .fact-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .fact-value { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* databases (when a server pools several) and taxonomy sources */
+.sp-catalog { display: grid; gap: 6px; margin: 8px 0 0; font-size: .86rem; }
+.sp-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.sp-group-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.sp-dbs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.sp-db {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 9px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--card); white-space: nowrap;
+}
+.sp-db-name { color: var(--fg); font-weight: 600; }
+.sp-db-kind { color: var(--muted); font-family: var(--mono); font-size: .94em; }
+.sp-db-num { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-chip {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 9px; cursor: help;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--card);
+}
+.sp-chip-name { color: var(--fg); font-weight: 600; }
+.sp-chip-num { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sp-chip-warn {
+  border-color: color-mix(in srgb, var(--distant) 55%, var(--border));
+  background: color-mix(in srgb, var(--distant) 10%, var(--card));
+  color: color-mix(in srgb, var(--distant) 80%, var(--fg)); font-weight: 600;
+}
 .privacy {
   display: flex; gap: 8px; align-items: flex-start;
   margin: 8px 0 0; font-size: .88rem; color: var(--muted);
@@ -543,6 +567,7 @@ details.lineage li span { min-width: 0; overflow-wrap: break-word; }
 .check { margin-top: 12px; display: flex; font-size: .92rem; color: var(--muted); }
 .check strong { color: var(--fg); }
 .check code { font-family: var(--mono); font-size: .9em; }
+.implied-note { color: var(--accent); font-weight: 600; }
 .field-name input { width: min(24em, 100%); }
 .field-name { max-width: 100%; }
 details.adv { margin-top: 14px; }

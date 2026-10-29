@@ -112,6 +112,8 @@
   ui.minAni = el('input', { type: 'number', id: 'r-min-ani', min: '0', max: '100', step: '0.1', value: String(DEFAULT_MIN_ANI), inputmode: 'decimal' });
   ui.minKmers = el('input', { type: 'number', id: 'r-min-kmers', min: '0', step: '1', value: String(DEFAULT_MIN_KMERS), inputmode: 'numeric' });
   ui.unknown = el('input', { type: 'checkbox', id: 'r-unknown' });
+  ui.unknownImplied = el('span', { class: 'implied-note', hidden: true, text: ' implied by “Estimate read counts”' });
+  ui.readCounts = el('input', { type: 'checkbox', id: 'r-read-counts' });
   ui.sketchOnly = el('input', { type: 'checkbox', id: 'r-sketch-only' });
   ui.start = el('button', { type: 'submit', class: 'btn btn-primary', id: 'r-start', text: 'Sketch and profile', disabled: true });
   ui.hint = el('span', { class: 'submit-hint', hidden: true });
@@ -130,7 +132,10 @@
         el('label', { class: 'field', for: 'r-min-kmers' }, el('span', { text: 'Minimum k-mers per genome' }), ui.minKmers)),
       el('label', { class: 'check' }, ui.unknown,
         el('span', null, el('strong', { text: 'Estimate unknown fraction' }), ' (sylph ', el('code', { text: '--estimate-unknown' }),
-          '): also reports how much of the sample the database does not cover.')),
+          '): also reports how much of the sample the database does not cover.', ui.unknownImplied)),
+      el('label', { class: 'check' }, ui.readCounts,
+        el('span', null, el('strong', { text: 'Estimate read counts' }), ' (sylph ', el('code', { text: '--estimate-read-counts' }),
+          ', experimental): report the estimated number of reads of each genome instead of its share of the sample. It implies “Estimate unknown fraction”.')),
       el('label', { class: 'check' }, ui.sketchOnly,
         el('span', null, el('strong', { text: 'Only sketch' }), ': do not upload; keep the sketch to download or to upload later.'))),
     el('div', { class: 'actions' }, ui.start, ui.hint));
@@ -331,7 +336,24 @@
     const kmers = kText === '' ? null : Number(kText);
     const ok = (ani === null || (Number.isFinite(ani) && ani >= 0 && ani <= 100))
       && (kmers === null || (Number.isInteger(kmers) && kmers >= 0));
-    return { ani, kmers, ok, unknown: ui.unknown.checked, sketchOnly: ui.sketchOnly.checked };
+    const readCounts = ui.readCounts.checked;
+    // sylph's --estimate-read-counts implies --estimate-unknown, so the unknown option is
+    // shown checked (and disabled) while it is on.
+    return { ani, kmers, ok, readCounts, unknown: ui.unknown.checked || readCounts, sketchOnly: ui.sketchOnly.checked };
+  }
+
+  // Keep the implied "Estimate unknown fraction" in step with "Estimate read counts";
+  // the box is disabled in refresh() so it cannot be turned off while read counts are on.
+  let unknownBeforeImplied = false;
+  function syncImpliedOptions() {
+    const on = ui.readCounts.checked;
+    if (on) {
+      unknownBeforeImplied = ui.unknown.checked;
+      ui.unknown.checked = true;
+    } else {
+      ui.unknown.checked = unknownBeforeImplied;
+    }
+    ui.unknownImplied.hidden = !on;
   }
 
   function dbParams() {
@@ -365,12 +387,14 @@
     ui.hint.hidden = !(st.files.length && hint);
     fileInput.disabled = st.busy;
     ui.name.disabled = st.busy;
-    for (const i of [ui.minAni, ui.minKmers, ui.unknown, ui.sketchOnly]) i.disabled = st.busy;
+    for (const i of [ui.minAni, ui.minKmers, ui.unknown, ui.readCounts, ui.sketchOnly]) i.disabled = st.busy;
+    if (ui.readCounts.checked) ui.unknown.disabled = true; // implied by estimated read counts
     ui.drop.classList.toggle('disabled', st.busy);
     ui.drop.setAttribute('aria-disabled', String(st.busy));
     ui.start.textContent = st.kind === 'sketch' ? 'Upload and profile' : o.sketchOnly ? 'Sketch' : 'Sketch and profile';
   }
   ui.unknown.addEventListener('change', refresh);
+  ui.readCounts.addEventListener('change', () => { syncImpliedOptions(); refresh(); });
   ui.sketchOnly.addEventListener('change', refresh);
   S.onInfo(refresh);
 
@@ -476,6 +500,8 @@
     const t = performance.now();
     const o = run.opts;
     const params = { names: [run.name], estimate_unknown: o.unknown };
+    // Only when asked: a server older than the option rejects the key with a 400.
+    if (o.readCounts) params.estimate_read_counts = true;
     if (o.ani !== null) params.minimum_ani = o.ani;
     if (o.kmers !== null) params.min_number_kmers = o.kmers;
     const form = new FormData();
@@ -525,8 +551,12 @@
       return { kind: 'error', title: 'Endpoint not available (404)', retry: null, body: [el('p', { text: 'This server does not provide POST /profile.' }), detail] };
     }
     if (status === 400) {
-      return { kind: 'error', title: 'The server rejected the request (400)', retry: null, body: [
-        el('p', { text: 'The server did not accept the sketch or the options. A sketch must use the database’s c and k; if the server was updated while you were on this page, reload it.' }), detail] };
+      const body = [
+        el('p', { text: 'The server did not accept the sketch or the options. A sketch must use the database’s c and k; if the server was updated while you were on this page, reload it.' })];
+      if (run.opts && run.opts.readCounts && /unknown parameter|estimate_read_counts/i.test(msg || '')) {
+        body.push(el('p', { text: '“Estimate read counts” is newer than this server, which does not know the option. Uncheck it under Options and run again (the sketch is kept).' }));
+      }
+      return { kind: 'error', title: 'The server rejected the request (400)', retry: null, body: [...body, detail] };
     }
     return { kind: 'error', title: `Request failed (HTTP ${status})`, retry: status >= 500 ? 10 : null,
       body: [el('p', { text: msg || 'The server returned an error without a message.' })] };
@@ -713,11 +743,14 @@
     const rows = sample.rows.slice().sort((x, y) => (y.Taxonomic_abundance || 0) - (x.Taxonomic_abundance || 0));
     run.result = { data, sample, rows, params };
     const noTax = !rows.length ? false : rows.every((r) => !has(r.gtdb_taxonomy) && !has(r.ncbi_taxonomy));
+    const anySourceTax = rows.some((r) => has(r.tax_lineage));
     const out = [summaryCard(run, run.result)];
     if (!rows.length) out.push(emptyCard(run));
     else {
       if (noTax) {
-        out.push(notice('warn', 'No taxonomy available', 'This server has no taxonomy metadata, so genomes cannot be grouped by taxon. The table below lists the genomes only.'));
+        out.push(anySourceTax
+          ? notice('warn', 'No GTDB or NCBI taxonomy', 'The hits carry the taxonomy of the server’s own sources (UHGV, ICTV, fungi, …), which this page cannot group into a taxonomic profile. The table below lists the genomes with their own taxonomy.')
+          : notice('warn', 'No taxonomy available', 'This server has no taxonomy metadata, so genomes cannot be grouped by taxon. The table below lists the genomes only.'));
       } else {
         out.push(abundanceCard(run));
       }
@@ -742,7 +775,10 @@
       if (result) {
         items.push(item('Genomes detected', fmtInt(result.rows.length)));
         items.push(item('Profiling', fmtTime(run.profileMs), 'upload and server'));
-        if (result.params.estimate_unknown) items.push(item('Unknown', fmtPct(unknownFraction(result.rows)), 'not covered by the database'));
+        // with estimated read counts the sum of Sequence_abundance is reads, not a share
+        if (result.params.estimate_unknown && !result.params.estimate_read_counts) {
+          items.push(item('Unknown', fmtPct(unknownFraction(result.rows)), 'not covered by the database'));
+        }
       }
       return el('section', { class: 'card', 'aria-label': 'Sample summary' },
         el('div', { class: 'card-head' }, el('h2', { text: 'Summary' }),
@@ -759,7 +795,7 @@
     if (result) {
       items.splice(3, 0, item('Genomes detected', fmtInt(result.rows.length)));
       items.push(item('Profiling', fmtTime(run.profileMs), 'upload and server'));
-      if (result.params.estimate_unknown) {
+      if (result.params.estimate_unknown && !result.params.estimate_read_counts) {
         items.push(item('Unknown', fmtPct(unknownFraction(result.rows)), 'not covered by the database'));
       }
     }
@@ -800,6 +836,7 @@
 
   function abundanceCard(run) {
     const { rows, params } = run.result;
+    const readCounts = !!params.estimate_read_counts;
     const card = el('section', { class: 'card', 'aria-label': 'Abundance' });
     const body = el('div', { class: 'abund' });
     const dlBtn = el('button', { type: 'button', class: 'btn' });
@@ -814,10 +851,16 @@
       el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Rank' }),
         seg('Rank', 'r-rank', T.RANKS.slice().reverse().map((r) => [r, T.RANK_NAMES[r][0].toUpperCase() + T.RANK_NAMES[r].slice(1)]), view.rank, (v) => { view.rank = v; view.showAll = false; draw(); })),
       el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Abundance' }),
-        seg('Abundance measure', 'r-metric', [['relative', 'Taxonomic', 'Share of the organisms, corrected for genome size'], ['sequence', 'Sequence', 'Share of the reads (k-mers) assigned to the genome']], view.metric, (v) => { view.metric = v; draw(); })));
+        seg('Abundance measure', 'r-metric', [
+          ['relative', 'Taxonomic', 'Share of the organisms, corrected for genome size'],
+          ['sequence', readCounts ? 'Reads (estimated)' : 'Sequence', readCounts
+            ? 'Estimated number of reads of each genome (sylph --estimate-read-counts)'
+            : 'Share of the reads (k-mers) assigned to the genome'],
+        ], view.metric, (v) => { view.metric = v; draw(); })));
     card.append(el('div', { class: 'card-head' }, el('h2', { text: 'Abundance' }), el('div', { class: 'export' }, dlBtn)), controls, body);
     draw();
-    if (params.estimate_unknown) {
+    // the unknown fraction is a share of the sample, which estimated read counts do not give
+    if (params.estimate_unknown && !readCounts) {
       card.append(el('p', { class: 'detail abund-note', text: `Estimated unknown fraction: ${fmtPct(unknownFraction(rows))} of the sample is not covered by the database (shown in the sequence abundance view; taxonomic abundance is relative to the genomes found).` }));
     }
     return card;
@@ -825,9 +868,14 @@
 
   function abundanceBody(run) {
     const { rows, params } = run.result;
+    // With estimated read counts the "sequence" measures are reads, not percentages, so
+    // they are shown as integers and the unknown fraction (a share of the sample) is off.
+    const readCounts = !!params.estimate_read_counts;
+    const reads = readCounts && view.metric === 'sequence';
+    const fmtVal = reads ? (v) => fmtInt(v) : fmtPct;
     const { groups, none, total } = T.rankGroups(rows, view.taxonomy, view.rank, view.metric);
     const rankName = T.RANK_NAMES[view.rank];
-    const unknown = params.estimate_unknown && view.metric === 'sequence' ? unknownFraction(rows) : 0;
+    const unknown = params.estimate_unknown && !readCounts && view.metric === 'sequence' ? unknownFraction(rows) : 0;
     const shown = groups.slice(0, TOP_GROUPS);
     const rest = groups.slice(TOP_GROUPS);
     const restValue = rest.reduce((n, g) => n + g.value, 0);
@@ -838,16 +886,16 @@
     const sum = segs.reduce((n, s) => n + s.value, 0) || 1;
     const scale = Math.max(100, sum);
 
-    const bar = el('div', { class: 'stack', role: 'img', 'aria-label': `Abundance by ${rankName}: ${segs.slice(0, 3).map((s) => `${s.label} ${fmtPct(s.value)}`).join(', ')}` },
-      segs.map((s) => el('span', { class: `seg-${s.cls}`, style: `width:${((s.value / scale) * 100).toFixed(3)}%`, title: `${s.label}: ${fmtPct(s.value)}` })));
+    const bar = el('div', { class: 'stack', role: 'img', 'aria-label': `Abundance by ${rankName}: ${segs.slice(0, 3).map((s) => `${s.label} ${fmtVal(s.value)}`).join(', ')}` },
+      segs.map((s) => el('span', { class: `seg-${s.cls}`, style: `width:${((s.value / scale) * 100).toFixed(3)}%`, title: `${s.label}: ${fmtVal(s.value)}` })));
 
     const maxV = Math.max(...segs.map((s) => s.value), 1e-9);
     const rowsEl = [];
     let listed = [...shown.map((g, i) => ({ g, cls: `cat-${(i % 10) + 1}` })), ...rest.map((g) => ({ g, cls: 'cat-other' }))];
     const limit = view.showAll ? listed.length : 15;
-    for (const { g, cls } of listed.slice(0, limit)) rowsEl.push(listRow(g.name, g.value, maxV, cls, italicRank(view.rank, g.name), `${g.genomes} ${g.genomes === 1 ? 'genome' : 'genomes'}`));
-    if (none > 0.0005) rowsEl.push(listRow(`Not classified at ${rankName} level`, none, maxV, 'cat-none', false, ''));
-    if (unknown > 0.0005) rowsEl.push(listRow('Unknown (not in the database)', unknown, maxV, 'cat-unknown', false, ''));
+    for (const { g, cls } of listed.slice(0, limit)) rowsEl.push(listRow(g.name, g.value, maxV, cls, italicRank(view.rank, g.name), `${g.genomes} ${g.genomes === 1 ? 'genome' : 'genomes'}`, fmtVal));
+    if (none > 0.0005) rowsEl.push(listRow(`Not classified at ${rankName} level`, none, maxV, 'cat-none', false, '', fmtVal));
+    if (unknown > 0.0005) rowsEl.push(listRow('Unknown (not in the database)', unknown, maxV, 'cat-unknown', false, '', fmtVal));
     const more = listed.length > 15
       ? el('button', { type: 'button', class: 'link-btn', text: view.showAll ? 'show fewer' : `show all ${listed.length}`, onclick: () => {
         view.showAll = !view.showAll;
@@ -856,16 +904,16 @@
       } }) : null;
     const head = el('p', { class: 'abund-head muted' },
       `${groups.length} ${(groups.length === 1 ? PLURAL[view.rank][0] : PLURAL[view.rank][1])}`,
-      ` · ${view.metric === 'relative' ? 'taxonomic' : 'sequence'} abundance, ${view.taxonomy === 'gtdb' ? 'GTDB' : 'NCBI'}`);
+      ` · ${view.metric === 'relative' ? 'taxonomic abundance' : reads ? 'estimated reads' : 'sequence abundance'}, ${view.taxonomy === 'gtdb' ? 'GTDB' : 'NCBI'}`);
     return [head, bar, el('ul', { class: 'alist' }, rowsEl), more ? el('p', null, more) : null];
   }
 
-  function listRow(name, value, maxV, cls, italic, sub) {
+  function listRow(name, value, maxV, cls, italic, sub, fmt = fmtPct) {
     return el('li', { class: 'arow' },
       el('i', { class: `sw seg-${cls}`, 'aria-hidden': 'true' }),
       el('span', { class: 'aname', title: name }, italic ? el('i', { text: name }) : name, sub ? el('small', { text: sub }) : null),
       el('span', { class: 'abar', 'aria-hidden': 'true' }, el('span', { class: `seg-${cls}`, style: `width:${Math.max(0.5, (value / maxV) * 100).toFixed(2)}%` })),
-      el('b', { class: 'apct', text: fmtPct(value) }));
+      el('b', { class: 'apct', text: fmt(value) }));
   }
 
   function downloadSylphmpa(run) {
@@ -879,20 +927,34 @@
   const RANK_LABEL = { d: 'Domain', p: 'Phylum', c: 'Class', o: 'Order', f: 'Family', g: 'Genus', s: 'Species' };
   const covOf = (r) => (isNum(r.Eff_cov) ? r.Eff_cov : isNum(r.True_cov) ? r.True_cov : null);
 
+  // A row without GTDB taxonomy may carry tax_lineage/tax_source from a sylph-tax source
+  // ('vFAM-..;vOTU-..', 'root;Monodnaviria;..', 'k__Eukaryota;..;s__..'): show its last rank.
+  function taxLineage(r) {
+    if (!has(r.tax_lineage)) return [];
+    return String(r.tax_lineage).split(';').map((t) => t.trim()).filter(Boolean).map((token) => {
+      const m = /^([a-z]{1,4})__(.*)$/.exec(token);
+      return m ? { rank: m[1], name: m[2] } : { rank: '', name: token };
+    });
+  }
+
   function tableCard(run) {
     const { rows, params } = run.result;
-    const covLabel = params.estimate_unknown ? 'True cov.' : 'Eff. cov.';
+    const readCounts = !!params.estimate_read_counts;
+    const covLabel = params.estimate_unknown || readCounts ? 'True cov.' : 'Eff. cov.';
+    const seqLabel = readCounts ? 'Reads (estimated)' : 'Sequence %';
     const hits = rows.map((r, i) => {
       const lin = S.parseLineage(r.gtdb_taxonomy);
       const sp = lin.find((e) => e.rank === 's');
-      return { r, i: i + 1, lin, species: sp ? sp.name : '' };
+      const tax = lin.length ? [] : taxLineage(r);
+      return { r, i: i + 1, lin, tax, species: sp ? sp.name : (tax.length ? tax[tax.length - 1].name : '') };
     });
+    const taxonLabel = hits.some((h) => h.tax.length) ? 'Taxon' : 'GTDB species';
     const maxTax = Math.max(...hits.map((h) => h.r.Taxonomic_abundance || 0), 1e-9);
     const COLS = [
       { key: 'rank', label: '#', get: (h) => h.i, dir: 'asc' },
-      { key: 'species', label: 'GTDB species', get: (h) => h.species, dir: 'asc' },
+      { key: 'species', label: taxonLabel, get: (h) => h.species, dir: 'asc' },
       { key: 'tax', label: 'Taxonomic %', hint: 'taxonomic abundance', get: (h) => h.r.Taxonomic_abundance, dir: 'desc' },
-      { key: 'seq', label: 'Sequence %', hint: 'sequence abundance', get: (h) => h.r.Sequence_abundance, dir: 'desc' },
+      { key: 'seq', label: seqLabel, hint: readCounts ? 'estimated number of reads' : 'sequence abundance', get: (h) => h.r.Sequence_abundance, dir: 'desc' },
       { key: 'ani', label: 'ANI %', hint: 'adjusted ANI', get: (h) => h.r.Adjusted_ANI, dir: 'desc' },
       { key: 'cov', label: covLabel, hint: covLabel === 'True cov.' ? 'true (estimated) coverage' : 'effective coverage', get: (h) => covOf(h.r), dir: 'desc' },
       { key: 'ncbi', label: 'NCBI organism', get: (h) => h.r.ncbi_organism_name, dir: 'asc' },
@@ -943,18 +1005,26 @@
 
     const td = (label, cls, ...content) => el('td', { class: cls, 'data-label': label }, el('div', { class: 'cv' }, content));
     const dash = () => el('span', { class: 'dash', text: '–' });
-    function row({ r, i, lin, species }) {
+    function row({ r, i, lin, tax, species }) {
       const key = r.accession || r.Genome_file || `#${i}`;
       const ci = Array.isArray(r['ANI_5-95_percentile']) ? r['ANI_5-95_percentile'] : null;
       const cont = Array.isArray(r.Containment_ind) ? r.Containment_ind : null;
+      const lineage = lin.length ? lin : tax;
+      const source = lin.length ? 'GTDB' : (has(r.tax_source) ? r.tax_source : 'the taxonomy source');
       return el('tr', { class: i === 1 ? 'top-row' : null },
         td('#', 'num rank', String(i)),
-        td('GTDB species', null, lin.length ? el('details', { class: 'lineage', 'data-key': key, open: tv.open.has(key) ? '' : null },
-          el('summary', { title: 'Show the full GTDB lineage' }, el('i', { text: species || '(no species)' })),
-          el('ol', null, lin.map((e) => el('li', null, el('b', { text: RANK_LABEL[e.rank] || e.rank || '' }), el('span', { text: e.name || '–' }))))) : dash()),
+        td(taxonLabel, null, lineage.length ? el('details', { class: 'lineage', 'data-key': key, open: tv.open.has(key) ? '' : null },
+          el('summary', { title: `Show the full lineage from ${source}` },
+            lin.length ? el('i', { text: species || '(no species)' }) : el('span', { text: species || '(no taxon)' })),
+          el('ol', null, lineage.map((e, j) => el('li', null,
+            el('b', { text: RANK_LABEL[e.rank] || e.rank || `level ${j + 1}` }), el('span', { text: e.name || '–' }))))) : dash()),
         td('Taxonomic %', 'num', el('div', { class: 'anibar' }, el('b', { text: isNum(r.Taxonomic_abundance) ? r.Taxonomic_abundance.toFixed(2) : '–' }),
           el('div', { class: 'bar rel-closest', 'aria-hidden': 'true' }, el('span', { style: `width:${(((r.Taxonomic_abundance || 0) / maxTax) * 100).toFixed(1)}%` })))),
-        td('Sequence %', 'num', isNum(r.Sequence_abundance) ? r.Sequence_abundance.toFixed(2) : dash()),
+        td(seqLabel, 'num', isNum(r.Sequence_abundance)
+          ? (readCounts
+            ? el('span', { title: 'Estimated number of reads of this genome (sylph --estimate-read-counts)', text: fmtInt(r.Sequence_abundance) })
+            : r.Sequence_abundance.toFixed(2))
+          : dash()),
         td('ANI %', 'num', isNum(r.Adjusted_ANI) ? r.Adjusted_ANI.toFixed(2) : dash(),
           ci && ci.every(isNum) ? el('div', { class: 'sub', title: '5–95 % confidence interval of the adjusted ANI', text: `${ci[0].toFixed(1)}–${ci[1].toFixed(1)}` }) : null),
         td(covLabel, 'num', isNum(covOf(r)) ? covOf(r).toFixed(covOf(r) < 10 ? 2 : 1) : dash(),
@@ -996,7 +1066,9 @@
   function downloadTsv(run) {
     const { rows, params } = run.result;
     const base = PROFILE_COLUMNS.slice();
-    if (params.estimate_unknown) base[base.indexOf('Eff_cov')] = 'True_cov';
+    // as in `sylph profile`: True_cov is the header when estimate_unknown (or the
+    // estimate_read_counts that implies it) is set
+    if (params.estimate_unknown || params.estimate_read_counts) base[base.indexOf('Eff_cov')] = 'True_cov';
     const info = S.info();
     let metaCols = info && info.metadata && Array.isArray(info.metadata.columns) ? info.metadata.columns : null;
     const known = new Set([...PROFILE_COLUMNS, 'True_cov', 'accession', 'Lambda_status']);
