@@ -30,6 +30,7 @@
   --cat-1: #2f6fe4; --cat-2: #e0801a; --cat-3: #1f9d55; --cat-4: #b8407a; --cat-5: #0e9aa7;
   --cat-6: #d9b30b; --cat-7: #7b4fb0; --cat-8: #d9534f; --cat-9: #6f8f1e; --cat-10: #8a6a4f;
   --cat-other: #a3adba;
+  --nohit: #b45309;
   --shadow: 0 1px 2px rgba(20, 30, 50, .06), 0 4px 16px rgba(20, 30, 50, .05);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -66,6 +67,7 @@
     --cat-1: #6b9bf5; --cat-2: #f29a40; --cat-3: #3ecf7a; --cat-4: #e06aa5; --cat-5: #3fc4d1;
     --cat-6: #e8c13a; --cat-7: #a98ae0; --cat-8: #ef6f6a; --cat-9: #9bc24a; --cat-10: #c29a7a;
     --cat-other: #5d6876;
+    --nohit: #f0b45a;
     --shadow: none;
   }
 }
@@ -792,6 +794,18 @@ table.pc-table tr.pc-detail > td { background: var(--soft); padding: 10px 12px; 
 .pc-best b { font-variant-numeric: tabular-nums; }
 .pc-best-taxon { overflow-wrap: anywhere; }
 .pc-status-too_short { opacity: .75; }
+
+/* A contig the database could not place: its own badge colour, readable on both
+   the light and the dark theme, and muted "no hit" text in the empty cells. */
+.badge.pc-status-no_hit {
+  background: color-mix(in srgb, var(--nohit) 16%, var(--card));
+  color: color-mix(in srgb, var(--nohit) 80%, var(--fg));
+  border-color: color-mix(in srgb, var(--nohit) 50%, transparent);
+}
+.pc-nohit-badge, .pc-nohit-summary { cursor: help; }
+.pc-nohit-text { color: var(--muted); font-style: italic; }
+.pc-nohit-detail p { margin: 2px 0; }
+.pc-nohit-detail .detail { color: var(--muted); font-size: .88rem; }
 @media (max-width: 600px) {
   .pc-bar { grid-template-columns: 1fr; }
   .pc-bar-meta { grid-column: 1; }

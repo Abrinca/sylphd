@@ -462,13 +462,56 @@
     return S.isNum(ani) ? `${Number(ani).toFixed(2)} %` : '–';
   }
 
+  /* ------------------------------------------------------- no-hit wording */
+  const NO_HIT_TIP = 'No reference passed the thresholds.';
+  const NO_HIT_SCREEN_TIP = "For short or divergent contigs this can be a miss by the database's first-stage screen, not proof that the organism is absent.";
+  let helpSeq = 0;
+  const helpId = () => `pc-nohit-help-${++helpSeq}`;
+
+  // A plain database has no first-stage screen, so the screen sentence is only
+  // true when at least one loaded database is two-stage (/info databases[].kind,
+  // with the same fallbacks app.js uses for older servers).
+  function hasTwoStageDatabase(info) {
+    const dbs = info && Array.isArray(info.databases) ? info.databases : [];
+    const entries = dbs.length ? dbs : (info && info.database ? [info.database] : []);
+    return entries.some((d) => !!d && (d.kind ? d.kind === 'two-stage'
+      : /\.syl2db$/i.test(String(d.file || '')) || d.two_stage === true));
+  }
+
+  function noHitHelp(info) {
+    return hasTwoStageDatabase(info) ? `${NO_HIT_TIP} ${NO_HIT_SCREEN_TIP}` : NO_HIT_TIP;
+  }
+
+  // Both the title and a visually hidden description, so the text is available
+  // to screen readers and to keyboard users (the badge and summary box are not
+  // focusable, so aria-describedby is the accessible equivalent of hovering).
+  function withHelp(node, text, id) {
+    node.setAttribute('title', text);
+    node.setAttribute('aria-describedby', id);
+    node.append(el('span', { class: 'sr-only', id, text: ` ${text}` }));
+    return node;
+  }
+
+  const statusLabel = (record) => (record.status === 'too_short' ? 'too short'
+    : record.status === 'too_few_kmers' ? 'too few k-mers'
+      : record.status === 'no_hit' ? 'no hit' : record.status);
+  // Cells of a queried contig without hits say so, instead of an empty gap.
+  const noHitLabel = (record) => (record.status === 'no_hit' ? 'no hit' : 'not classified');
+  const noHitCell = (record) => el('span', { class: 'pc-nohit-text', text: noHitLabel(record) });
+
   function statusBadge(record) {
-    const label = record.status === 'too_short' ? 'too short'
-      : record.status === 'no_hit' ? 'no hit' : record.status;
-    const title = record.reason ? String(record.reason)
-      : record.status === 'too_short' ? `Shorter than the minimum contig length (${S.fmtInt(st.view && st.view.options.minLength)} bp)`
-        : record.status === 'no_hit' ? 'Queried, but nothing reached the minimum ANI' : null;
-    return el('span', { class: `badge badge-plain pc-status pc-status-${record.status}`, title, text: label });
+    const label = statusLabel(record);
+    const node = el('span', { class: `badge badge-plain pc-status pc-status-${record.status}`, text: label });
+    if (record.status === 'no_hit') {
+      const id = helpId();
+      node.classList.add('pc-nohit-badge');
+      withHelp(node, noHitHelp(st.view && st.view.info), id);
+    } else {
+      const title = record.reason ? String(record.reason)
+        : record.status === 'too_short' ? `Shorter than the minimum contig length (${S.fmtInt(st.view && st.view.options.minLength)} bp)` : null;
+      if (title) node.setAttribute('title', title);
+    }
+    return node;
   }
 
   const COLS = [
@@ -511,6 +554,18 @@
   function summaryItem(label, value, small, title) {
     return el('div', { title: title || null }, el('dt', { text: label }),
       el('dd', null, value, small ? el('small', { text: small }) : null));
+  }
+
+  // The "No hit" box carries the same explanation as the badge, as a title and
+  // as hidden text referenced from its <dd>.
+  function noHitSummaryItem(count, info) {
+    const text = noHitHelp(info);
+    const id = helpId();
+    return el('div', null,
+      el('dt', { text: 'No hit' }),
+      el('dd', { class: 'pc-nohit-summary', title: text, 'aria-describedby': id },
+        `${S.fmtInt(count)} contigs`,
+        el('span', { class: 'sr-only', id, text: ` ${text}` })));
   }
 
   function taxonLabel(item) {
@@ -563,7 +618,7 @@
         summaryItem(`Below ${S.fmtInt(s.min_contig_length)} bp`, `${S.fmtInt(short.contigs)} contigs`,
           `${S.fmtBp(short.bp)} · not classified`),
         summaryItem('Too few k-mers', `${S.fmtInt(few.contigs)} contigs`, `${S.fmtBp(few.bp)} · not classified`),
-        summaryItem('No hit', `${S.fmtInt(s.no_hit_contigs)} contigs`),
+        noHitSummaryItem(s.no_hit_contigs, view.info),
         summaryItem('Search time', S.isNum(view.searchMs) ? `${Math.round(view.searchMs)} ms` : '–',
           `${S.fmtDur(view.totalMs || 0)} end to end`)),
       limitNode,
@@ -580,13 +635,22 @@
 
   function bestCell(record) {
     const hit = record.hits && record.hits[0];
-    if (!hit) return el('span', { class: 'dash', text: '–' });
+    if (!hit) return noHitCell(record);
     const frac = S.isNum(hit.explained_fraction) ? `${(100 * hit.explained_fraction).toFixed(1)} %` : '–';
     return el('div', { class: 'pc-best' },
       el('b', { text: fmtPct(hit.ani) }),
       el('span', { class: 'pc-best-taxon', text: hitTaxon(hit) || '–' }),
       el('span', { class: 'sub mono', title: 'genome_id', text: hitGenome(hit) }),
       el('span', { class: 'sub', text: `explained ${frac} · reference ANI ${fmtPct(hit.reference_ani)}` }));
+  }
+
+  // The expanded detail of a contig without hits: a line or two instead of an
+  // empty hit table.
+  function noHitDetail(record) {
+    const head = record.status === 'no_hit' ? 'No hit. ' : `${noHitLabel(record)}. `;
+    return el('div', { class: 'pc-nohit-detail' },
+      el('p', null, el('strong', { text: head }), noHitHelp(st.view && st.view.info)),
+      record.reason ? el('p', { class: 'detail', text: `Reason: ${record.reason}` }) : null);
   }
 
   function hitsTable(record) {
@@ -613,9 +677,12 @@
   function contigRow(record) {
     const open = st.open.has(record.id);
     const hits = record.hits || [];
+    const empty = !hits.length;
     const toggleBtn = el('button', {
       type: 'button', class: 'pc-expand', 'aria-expanded': open ? 'true' : 'false',
-      'aria-label': `${open ? 'Hide' : 'Show'} the ${hits.length} hit${hits.length === 1 ? '' : 's'} of ${record.id}`,
+      'aria-label': hits.length
+        ? `${open ? 'Hide' : 'Show'} the ${hits.length} hit${hits.length === 1 ? '' : 's'} of ${record.id}`
+        : `${open ? 'Hide' : 'Show'} why ${record.id} has no hit`,
       onclick: () => {
         if (st.open.has(record.id)) st.open.delete(record.id); else st.open.add(record.id);
         rerender();
@@ -623,24 +690,25 @@
     }, el('span', { class: 'pc-caret', 'aria-hidden': 'true', text: open ? '▾' : '▸' }), el('span', { class: 'mono', text: record.id }));
     const cells = [
       el('td', { class: 'pc-contig', 'data-label': 'Contig' },
-        el('div', { class: 'pc-contig-cell' }, hits.length ? toggleBtn : el('span', { class: 'mono', text: record.id }),
+        el('div', { class: 'pc-contig-cell' }, toggleBtn,
           hits.length > 1 ? el('span', { class: 'sub', text: `${hits.length} hits` }) : null)),
       el('td', { class: 'num', 'data-label': 'Length', text: S.fmtInt(record.length) }),
       el('td', { class: 'num', 'data-label': 'GC %', text: S.isNum(record.gc) ? `${Number(record.gc).toFixed(2)} %` : '–' }),
       el('td', { 'data-label': 'Status' }, el('div', { class: 'cv' }, statusBadge(record),
         record.reason ? el('div', { class: 'sub', text: String(record.reason) }) : null)),
       el('td', { 'data-label': 'Consensus taxon' }, el('div', { class: 'cv pc-consensus' },
-        consensusText(record.consensus) || (record.consensus && record.consensus.mixed_sources
+        empty ? noHitCell(record) : consensusText(record.consensus) || (record.consensus && record.consensus.mixed_sources
           ? el('span', { class: 'badge badge-plain', title: 'The close set spans two taxonomy sources, so their ranks are not comparable', text: 'mixed sources' })
           : '–'),
-        consensusSub(record) ? el('div', { class: 'sub', text: consensusSub(record) }) : null)),
-      el('td', { 'data-label': 'Rank', text: (record.consensus && record.consensus.rank) || '–' }),
-      el('td', { class: 'num', 'data-label': 'n_close', text: record.consensus && S.isNum(record.consensus.n_close) ? String(record.consensus.n_close) : '–' }),
+        !empty && consensusSub(record) ? el('div', { class: 'sub', text: consensusSub(record) }) : null)),
+      el('td', { 'data-label': 'Rank' }, empty ? noHitCell(record) : el('span', { text: (record.consensus && record.consensus.rank) || '–' })),
+      el('td', { class: 'num', 'data-label': 'n_close' }, empty ? noHitCell(record)
+        : el('span', { text: record.consensus && S.isNum(record.consensus.n_close) ? String(record.consensus.n_close) : '–' })),
       el('td', { 'data-label': 'Best ANI %' }, bestCell(record)),
     ];
     const main = el('tr', { class: open ? 'top-row' : null }, cells);
-    const detail = el('tr', { class: 'pc-detail', hidden: hits.length && open ? null : true },
-      el('td', { colspan: String(cells.length) }, hits.length ? hitsTable(record) : null));
+    const detail = el('tr', { class: 'pc-detail', hidden: open ? null : true },
+      el('td', { colspan: String(cells.length) }, empty ? noHitDetail(record) : hitsTable(record)));
     return [main, detail];
   }
 
