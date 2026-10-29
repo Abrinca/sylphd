@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="style.css">
   <script src="config.js"></script>
   <script src="sketching.js" defer></script>
+  <script src="markdown.js" defer></script>
   <script src="app.js" defer></script>
   <script src="taxonomy.js" defer></script>
   <script src="reads.js" defer></script>
@@ -23,12 +24,29 @@
           <h1><a href="#" id="home-link" title="Back to the start"><picture class="logo"><source media="(prefers-color-scheme: dark)" srcset="img/sylphd-icon-tile.svg"><img src="img/sylphd-icon.svg" alt="" width="44" height="44"></picture>sylphd</a></h1>
           <p class="tagline">Identify bacterial and archaeal genomes against <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a> with <a href="https://github.com/bluenote-1577/sylph" rel="noopener">sylph</a> k-mer ANI: the closest genomes of an assembly, or a taxonomic profile of your reads. <a href="./docs/">Docs</a>.</p>
         </div>
-        <button type="button" id="status" class="status" data-state="checking" title="Click to re-check the server">
-          <span class="dot" aria-hidden="true"></span>
-          <span class="status-text">Checking server…</span>
-        </button>
       </div>
-      <p id="status-detail" class="status-detail" role="status"></p>
+      <section id="server-panel" class="server-panel" data-state="checking" aria-label="Server">
+        <div class="sp-top">
+          <button type="button" id="status" class="status" data-state="checking" title="Click to re-check the server">
+            <span class="dot" aria-hidden="true"></span>
+            <span class="status-text">Checking server…</span>
+          </button>
+          <span class="sp-name" id="sp-name"></span>
+          <code class="sp-addr" id="sp-addr"></code>
+          <span class="sp-actions">
+            <button type="button" id="sp-change" class="link-btn" aria-expanded="false" aria-controls="sp-connect">Change server</button>
+            <a id="sp-reset" class="link-btn" href="#" title="Remove ?api= and use the default server" hidden>reset</a>
+          </span>
+        </div>
+        <div id="status-detail" class="status-detail" role="status"></div>
+        <div id="sp-connect" class="sp-connect" hidden></div>
+        <div id="sp-about" class="sp-about" hidden>
+          <div class="sp-about-label">From the server operator</div>
+          <div id="sp-about-body" class="sp-about-body collapsed"></div>
+          <button type="button" id="sp-about-toggle" class="link-btn" aria-expanded="false" aria-controls="sp-about-body" hidden>Show more</button>
+          <p id="sp-about-note" class="sp-about-note" hidden>This text comes from the server you connected to; sylphd does not verify it.</p>
+        </div>
+      </section>
       <p class="privacy">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1 2 3.5v4.2c0 3.4 2.4 6.1 6 7.3 3.6-1.2 6-3.9 6-7.3V3.5L8 1Zm-1 9.6L4.6 8.2l1-1L7 8.6l3.4-3.4 1 1L7 10.6Z"/></svg>
         <span><strong>Privacy:</strong> <strong>your sequences never leave your computer.</strong> Assemblies and reads are sketched in your browser and only the sketch (k-mer hashes and counts, no sequence) is sent to the server, which does not store or log it. Only sizes, timings and request outcomes are recorded.</span>

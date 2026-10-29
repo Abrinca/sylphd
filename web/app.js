@@ -23,7 +23,9 @@
     top: $('top'), minAni: $('min-ani'), submit: $('submit'), cancel: $('cancel'),
     progress: $('progress'), progressText: $('progress-text'), results: $('results'),
     status: $('status'), statusText: document.querySelector('#status .status-text'),
-    statusDetail: $('status-detail'), banner: $('server-banner'), submitHint: $('submit-hint'),
+    statusDetail: $('status-detail'), panel: $('server-panel'), spName: $('sp-name'), spAddr: $('sp-addr'),
+    spChange: $('sp-change'), spReset: $('sp-reset'), spConnect: $('sp-connect'), spAbout: $('sp-about'),
+    spAboutBody: $('sp-about-body'), spAboutToggle: $('sp-about-toggle'), spAboutNote: $('sp-about-note'), banner: $('server-banner'), submitHint: $('submit-hint'),
   };
 
   /* ----------------------------------------------------------- helpers */
@@ -125,6 +127,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   function setStatus(state, text) {
     ui.status.dataset.state = state;
     ui.statusText.textContent = text;
+    ui.panel.dataset.state = state;
   }
 
   // Why the server cannot be used right now: null (usable or not yet known),
@@ -149,7 +152,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     return el('a', { href: pageUrl(null), text: 'reset', title: 'Remove ?api= and use the default server' });
   }
 
-  function connectForm() {
+  // The one "use another server" form, in the server panel (the offline banner opens it).
+  function buildConnectForm() {
     const input = el('input', {
       type: 'text', id: 'other-api', placeholder: 'http://127.0.0.1:8765', spellcheck: 'false',
       autocomplete: 'off', autocapitalize: 'off', inputmode: 'url', 'aria-label': 'API URL of another server',
@@ -157,7 +161,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     const err = el('p', { class: 'detail connect-err', role: 'alert', hidden: true });
     const form = el('form', { class: 'connect', novalidate: true },
       el('label', { for: 'other-api', text: 'Use another server' }),
-      el('div', { class: 'connect-row' }, input, el('button', { type: 'submit', class: 'btn', text: 'Connect' })),
+      el('div', { class: 'connect-row' }, input, el('button', { type: 'submit', class: 'btn', text: 'Connect' }),
+        el('button', { type: 'button', class: 'btn btn-ghost', text: 'Cancel', onclick: () => closeConnect() })),
       err,
       el('p', { class: 'detail' },
         'The server must allow this page\u2019s origin (start it with ', el('code', { text: `--cors-origin ${location.origin}` }),
@@ -175,8 +180,23 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       }
       location.assign(pageUrl(v));
     });
+    form.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeConnect(); });
     return form;
   }
+  const connectFormEl = buildConnectForm();
+  ui.spConnect.append(connectFormEl);
+  function openConnect() {
+    ui.spConnect.hidden = false;
+    ui.spChange.setAttribute('aria-expanded', 'true');
+    ui.panel.scrollIntoView({ block: 'nearest' });
+    $('other-api').focus();
+  }
+  function closeConnect() {
+    ui.spConnect.hidden = true;
+    ui.spChange.setAttribute('aria-expanded', 'false');
+    ui.spChange.focus();
+  }
+  ui.spChange.addEventListener('click', () => (ui.spConnect.hidden ? openConnect() : closeConnect()));
 
   const shownProblem = () => serverProblem;
 
@@ -223,8 +243,8 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       : null;
     ui.banner.replaceChildren(el('div', { class: `notice ${cls}`, role: cls === 'error' ? 'alert' : 'status' },
       el('h3', { text: title }), ...body, foot,
-      apiOverride ? el('p', { class: 'detail' }, 'Using ', el('code', { text: API || '(empty)' }), ' from the address. ', resetLink(), ' to go back to the default server.') : null,
-      connectForm()));
+      el('p', { class: 'detail' }, el('button', { type: 'button', class: 'btn btn-small', text: 'Use another server', onclick: openConnect }),
+        apiOverride ? [' or ', resetLink(), ' to go back to the default server.'] : null)));
   }
 
   function setProblem(kind) {
@@ -233,17 +253,67 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     updateSubmit();
   }
 
-  function overrideBits() {
-    return apiOverride ? [' · ', el('span', null, 'API: ', el('code', { text: API || '(empty)' }), ' ('), resetLink(), ')'] : [];
+  /* ------------------------------------------------------ server panel */
+  const defaultApi = (configured || '').trim().replace(/\/+$/, '');
+
+  // Name, address and reset link: from /info when known, else from the address alone.
+  function renderPanelHead() {
+    const name = serverInfo && typeof serverInfo.name === 'string' && serverInfo.name.trim() ? serverInfo.name.trim() : '';
+    // without a name the address alone identifies the server
+    ui.spName.textContent = name;
+    ui.spName.hidden = !name;
+    ui.spAddr.textContent = API || '(no server configured)';
+    ui.spAddr.hidden = false;
+    ui.spAddr.classList.toggle('sp-addr-main', !name);
+    ui.spReset.hidden = !apiOverride;
+    ui.spReset.href = pageUrl(null);
   }
+
+  // The operator's Markdown text, collapsed to a few lines when long. Rebuilt only when the text changes.
+  let aboutShown = null;
+  function renderAbout() {
+    const about = serverInfo && serverInfo.about;
+    const md = about && about.format === 'markdown' && typeof about.text === 'string' ? about.text : '';
+    if (!md || !window.SylphdMarkdown) {
+      aboutShown = null;
+      ui.spAbout.hidden = true;
+      ui.spAboutBody.replaceChildren();
+      return;
+    }
+    ui.spAbout.hidden = false;
+    ui.spAboutNote.hidden = !API || API === defaultApi;
+    if (md === aboutShown) return;
+    aboutShown = md;
+    ui.spAboutBody.replaceChildren(window.SylphdMarkdown.render(md, document));
+    setAboutCollapsed(true);
+    requestAnimationFrame(measureAbout);
+  }
+  function setAboutCollapsed(collapsed) {
+    ui.spAboutBody.classList.toggle('collapsed', collapsed);
+    ui.spAboutToggle.textContent = collapsed ? 'Show more' : 'Show less';
+    ui.spAboutToggle.setAttribute('aria-expanded', String(!collapsed));
+  }
+  // Show the toggle only when the text is longer than the collapsed height.
+  function measureAbout() {
+    if (ui.spAbout.hidden) return;
+    const collapsed = ui.spAboutBody.classList.contains('collapsed');
+    ui.spAboutBody.classList.add('collapsed');
+    const long = ui.spAboutBody.scrollHeight > ui.spAboutBody.clientHeight + 2;
+    if (!collapsed) ui.spAboutBody.classList.remove('collapsed');
+    ui.spAboutToggle.hidden = !long && collapsed;
+    if (!long) ui.spAboutBody.classList.remove('collapsed');
+  }
+  ui.spAboutToggle.addEventListener('click', () => setAboutCollapsed(!ui.spAboutBody.classList.contains('collapsed')));
+  window.addEventListener('resize', () => { if (!ui.spAbout.hidden) measureAbout(); });
 
   async function loadInfo() {
     clearTimeout(infoTimer);
     if (!API) {
       serverInfo = null;
       setStatus('offline', 'Public server offline');
-      ui.statusDetail.replaceChildren('The public server is offline. ',
-        'To use your own server, add ', el('code', { text: '?api=https://…' }), ' to the address.');
+      ui.statusDetail.replaceChildren();
+      renderPanelHead();
+      renderAbout();
       setProblem('none');
       notifyInfo();
       return;
@@ -256,7 +326,9 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     } catch {
       serverInfo = null;
       setStatus('offline', 'No valid API URL');
-      ui.statusDetail.replaceChildren('The API base URL ', el('code', { text: API || '(empty)' }), ' is not a valid URL.', ...(apiOverride ? [' (', resetLink(), ')'] : []));
+      ui.statusDetail.replaceChildren();
+      renderPanelHead();
+      renderAbout();
       setProblem('invalid');
       notifyInfo();
       return;
@@ -283,12 +355,10 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
         const w = Math.round(lim.rate_limit.window_seconds);
         facts.push(fact('Rate', `${lim.rate_limit.count} / ${w === 60 ? 'min' : `${w} s`}`, 'Requests allowed per client address'));
       }
-      if (apiOverride) {
-        facts.push(el('span', { class: 'fact' }, el('span', { class: 'fact-label', text: 'API' }),
-          el('code', { class: 'fact-value', text: API }), ' ', resetLink()));
-      }
       const frag = [el('span', { class: 'facts' }, ...facts)];
       ui.statusDetail.replaceChildren(...frag);
+      renderPanelHead();
+      renderAbout();
       infoTimer = setTimeout(loadInfo, 60000);
       setProblem(null);
       refreshInput();
@@ -296,7 +366,9 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     } catch (e) {
       serverInfo = null;
       setStatus('offline', 'Server offline');
-      ui.statusDetail.replaceChildren('Cannot reach ', el('code', { text: API }), ...(apiOverride ? [' (', resetLink(), ')'] : ['.']));
+      ui.statusDetail.replaceChildren();
+      renderPanelHead();
+      renderAbout();
       setProblem('offline');
       notifyInfo();
       const rb = $('retry-now');

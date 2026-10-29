@@ -114,6 +114,43 @@ browser rule, not access control: see the [security notes](../reference/security
 the web app links it. Nothing is shown by default. The [terms of the Abrinca web service](../project/terms.md)
 are one example.
 
+## Describing your instance { #describing-your-instance }
+
+`--name TEXT` and `--about FILE` let you tell visitors what this server is, for example which
+database it holds. The [web app](https://abrinca.github.io/sylphd/) shows both in a panel at the top
+of every page, next to the server address, headed *From the server operator*, collapsed to a few
+lines with *Show more* when it is long. `GET /info` reports them as `name` and `about` (see the
+[HTTP API](../reference/http-api.md#get-info)); both are absent when you set nothing.
+
+```bash
+sylphd serve --db data/gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite \
+    --name "GTDB r232" --about /etc/sylphd/about.md
+```
+
+with `/etc/sylphd/about.md` containing, for example:
+
+```markdown
+This sylphd server contains the [official pre-built](https://sylph-docs.github.io/pre%E2%80%90built-databases/)
+gtdb-r232-c200-dbv2.syl2db database. It contains 199,923 prokaryotic species from GTDB r232, but no
+eukaryotes (fungi, human, etc.).
+```
+
+- **Editing without a restart:** the server looks at the file's modification time and size on every
+  `/info` request and re-reads it when they change. If the new file cannot be read (too large, not
+  UTF-8, removed) the last good text stays and a warning is logged once. A bad file at startup is an
+  error, as is a `--name` over 80 characters. The file may be at most 16 KiB.
+- **Markdown only, never HTML:** the page can be pointed at any server with `?api=`, so the text is
+  untrusted and server-provided HTML would let a malicious server script the page. The page renders
+  this subset with its own small renderer (it builds DOM nodes and never parses HTML): paragraphs
+  (a single line break is a line break), `**bold**`, `*italic*` or `_italic_`, `` `code` ``,
+  `[text](url)` and bare `https://` links, `-`/`*`/`+` and `1.` lists (one level), `#` headings
+  (shown small), `>` quotes and backslash escapes. Links open in a new tab and only `http:`,
+  `https:` and `mailto:` become links; any other target (`javascript:`, `data:`, relative or
+  `//host` addresses) stays plain text. Images are not supported and are shown as text. Raw HTML,
+  such as `<b>` or `<script>`, is shown as plain text.
+- **Trust:** when a visitor has connected to a server other than the page's default, the page adds
+  "This text comes from the server you connected to; sylphd does not verify it."
+
 ## Using the web app against your server
 
 The web app is a static page in `web/` that calls `GET /info` and `POST /assembly` of a server
