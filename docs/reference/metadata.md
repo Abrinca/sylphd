@@ -45,8 +45,7 @@ The file contains:
   (`reps_only`).
 
 Dictionary-encoding the repetitive text brings the full release down to about **198 MiB** instead
-of about 630 MiB, while lookups stay in the low milliseconds. The file uses 8 KiB pages. Files
-from older `sylphd` versions (format 1: a plain `metadata` table) remain readable.
+of about 630 MiB, while lookups stay in the low milliseconds. The file uses 8 KiB pages.
 
 ## `--reps-only`
 

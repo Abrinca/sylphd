@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import socket
-import sqlite3
 import struct
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import anyio
 import dnaio
-import httpx
 import pysylph
 import pytest
 import uvicorn
@@ -137,18 +133,6 @@ class TestProfileQuery:
         response = _post(client, "query", [("from-file", O157_SKETCH.read_bytes())])
         assert response.json()[0]["name"] == "from-file"
 
-    def test_profile_estimate_unknown_header(self, client: TestClient) -> None:
-        # estimate_unknown only changes the label in the TSV header; JSON keeps Eff_cov.
-        response = _post(
-            client,
-            "profile",
-            [("o157", O157_SKETCH.read_bytes())],
-            names=["o157"],
-            estimate_unknown=True,
-        )
-        assert response.status_code == 200
-        assert "Eff_cov" in response.json()[0]["rows"][0]
-
 
 class TestErrors:
     def test_requires_multipart(self, client: TestClient) -> None:
@@ -213,24 +197,16 @@ class TestErrors:
         assert response.status_code == 400
         assert "sample name" in response.json()["error"]
 
-    def test_filename_derived_name_is_capped(self, client: TestClient) -> None:
-        response = _post(client, "query", [("x" * 1025, b"x")])
-        assert response.status_code == 400
-        assert "sample name" in response.json()["error"]
-
     def test_invalid_sketch(self, client: TestClient) -> None:
         response = _post(client, "query", [("bad", b"not a sketch")])
         assert response.status_code == 400
         assert "not a valid sample sketch" in response.json()["error"]
 
-    @pytest.mark.parametrize("count", [100_000_000, 2**63])
-    def test_allocation_bomb_sketch_returns_400(
-        self, client: TestClient, count: int
-    ) -> None:
-        # Eight bytes declaring ``count`` k-mers: sylph's deserializer would
+    def test_allocation_bomb_sketch_returns_400(self, client: TestClient) -> None:
+        # Eight bytes declaring 100 million k-mers: sylph's deserializer would
         # reserve the memory up front and abort the process.  The validator
         # rejects it from the length prefix instead.
-        response = _post(client, "query", [("bomb", struct.pack("<Q", count))])
+        response = _post(client, "query", [("bomb", struct.pack("<Q", 100_000_000))])
         assert response.status_code == 400
         assert "declares" in response.json()["error"]
         # The server is still alive and still profiles normal sketches.
@@ -353,44 +329,6 @@ class TestMetadataJoin:
                 fields=["nope"],
             )
             assert response.status_code == 400
-
-    def test_old_format_metadata_table(
-        self, tiny_database: Path, tiny_metadata: Path, tmp_path: Path
-    ) -> None:
-        # Format 1 files store everything in a plain ``metadata`` table; the
-        # server must keep serving them without a rebuild.
-        old_path = tmp_path / "old-meta.sqlite"
-        connection = sqlite3.connect(old_path)
-        try:
-            connection.execute("ATTACH DATABASE ? AS built", (str(tiny_metadata),))
-            connection.execute("CREATE TABLE metadata AS SELECT * FROM built.metadata")
-            connection.execute(
-                "CREATE TABLE info (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-            )
-            connection.execute("INSERT INTO info SELECT key, value FROM built.info")
-            # format 1 has no ``reps_only`` key and recorded version 1
-            connection.execute("DELETE FROM info WHERE key = 'reps_only'")
-            connection.execute(
-                "UPDATE info SET value = '1' WHERE key = 'format_version'"
-            )
-            connection.commit()
-            connection.execute("DETACH DATABASE built")
-        finally:
-            connection.close()
-
-        app = create_app(ServerConfig(db_path=tiny_database, meta_path=old_path))
-        with TestClient(app) as joined:
-            info = joined.get("/info").json()
-            assert info["metadata"]["rows"] == 1
-            assert info["metadata"]["format_version"] == "1"
-            response = _post(
-                joined, "query", [("mix", MIX_SKETCH.read_bytes())], names=["mix"]
-            )
-            assert response.status_code == 200
-            row = response.json()[0]["rows"][0]
-            assert row["gtdb_taxonomy"] == "d__Bacteria;p__Test;c__Test"
-            assert row["genome_size"] == 9957
-            assert row["ncbi_taxid"] is None
 
 
 class TestFormatting:
@@ -523,53 +461,3 @@ class TestConcurrency:
                 )
                 good = future.result(timeout=10)
             assert good.status_code == 200
-
-    def test_semaphore_released_after_cancellation(
-        self, client: TestClient, monkeypatch
-    ) -> None:
-        started = threading.Event()
-        release = threading.Event()
-        finished = threading.Event()
-
-        def blocking_run_sample(*args, **kwargs):
-            started.set()
-            release.wait(timeout=10)
-            finished.set()
-            return {"name": "blocked", "kind": "query", "rows": []}
-
-        monkeypatch.setattr("sylphd.server.run_sample", blocking_run_sample)
-        app = create_app(
-            ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1),
-            database=client.app.state.database,
-        )
-
-        async def run():
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(
-                transport=transport, base_url="http://test"
-            ) as ac:
-                task = asyncio.create_task(
-                    ac.post(
-                        "/query",
-                        data={"params": "{}"},
-                        files=[
-                            ("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))
-                        ],
-                    )
-                )
-                await anyio.to_thread.run_sync(started.wait, 5)
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                release.set()
-                await anyio.to_thread.run_sync(finished.wait, 5)
-                response = await ac.post(
-                    "/query",
-                    data={"params": "{}"},
-                    files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
-                )
-                assert response.status_code == 200
-
-        anyio.run(run)

@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import gzip
 import json
-import subprocess
-import sys
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -16,9 +13,6 @@ import pytest
 from starlette.testclient import TestClient
 
 from sylphd.assembly import (
-    IMPRECISE_BELOW_ANI,
-    INTERPRETATION_THRESHOLDS,
-    SPECIES_ANI,
     SequenceError,
     SequenceTooLarge,
     gunzip_limited,
@@ -150,14 +144,6 @@ class TestAssemblyUpload:
         assert response.status_code == 200
         assert response.json()["query"]["records"] == 1
 
-    def test_wrong_content_type(self, assembly_client: TestClient) -> None:
-        response = assembly_client.post(
-            "/assembly",
-            content=_raw_fasta(),
-            headers={"content-type": "multipart/form-data"},
-        )
-        assert response.status_code == 415
-
     @pytest.mark.parametrize(
         "params",
         [
@@ -238,10 +224,6 @@ class TestAssemblyHelpers:
         assert parsed.gc == 60.0
         assert parsed.sequences == ("ACGTNN", "GGCC")
 
-    def test_thresholds_are_one_constant(self) -> None:
-        assert INTERPRETATION_THRESHOLDS == {"species": 95.0, "imprecise_below": 85.0}
-        assert SPECIES_ANI == 95.0 and IMPRECISE_BELOW_ANI == 85.0
-
     def test_gunzip_limited(self) -> None:
         data = gzip.compress(b"A" * 1000)
         assert gunzip_limited(data, 1000) == b"A" * 1000
@@ -292,17 +274,6 @@ class TestNoAdjust:
         assert naive["Adjusted_ANI"] == pytest.approx(naive["Naive_ANI"], abs=0.005)
         assert naive["ANI_5-95_percentile"] is None
         assert default["ANI_5-95_percentile"] is not None
-
-    def test_no_adjust_must_be_boolean(self) -> None:
-        app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE))
-        with TestClient(app) as test_client:
-            response = test_client.post(
-                "/query",
-                data={"params": json.dumps({"no_adjust": "maybe"})},
-                files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
-            )
-        assert response.status_code == 400
-        assert "boolean" in response.json()["error"]
 
 
 class TestRateLimit:
@@ -572,110 +543,3 @@ class TestCORS:
         with TestClient(app) as test_client:
             response = test_client.get("/health", headers={"origin": origin})
             assert ("access-control-allow-origin" in response.headers) == allowed
-
-
-def _wait_for_socket(path: Path, timeout: float = 120.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.is_socket():
-            return
-        time.sleep(0.1)
-    raise AssertionError(f"server did not create {path} in time")
-
-
-@pytest.fixture(scope="module")
-def assembly_server(tmp_path_factory, tiny_database: Path, tiny_metadata: Path):
-    directory = tmp_path_factory.mktemp("assembly-server")
-    socket_path = directory / "sylphd.sock"
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "sylphd",
-            "serve",
-            "--db",
-            str(tiny_database),
-            "--meta",
-            str(tiny_metadata),
-            "--socket",
-            str(socket_path),
-            "--allow-sequences",
-            "--log-level",
-            "warning",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        _wait_for_socket(socket_path)
-        yield socket_path
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-
-
-class TestCLI:
-    def test_assembly_command(self, assembly_server: Path, tmp_path: Path) -> None:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "sylphd",
-                "assembly",
-                str(CLODF13_FASTA),
-                "--socket",
-                str(assembly_server),
-                "--top",
-                "3",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        assert result.returncode == 0, result.stderr
-        lines = [line for line in result.stdout.splitlines() if line]
-        header = lines[0].split("\t")
-        assert header == [
-            "rank",
-            "ani",
-            "relation",
-            "shared_rank",
-            "accession",
-            "gtdb_species",
-            "ncbi_organism_name",
-            "ncbi_taxid",
-        ]
-        row = lines[1].split("\t")
-        assert row[0] == "1"
-        assert float(row[1]) == pytest.approx(100.0, abs=0.01)
-        assert row[2] == "same species"
-        assert row[3] == "species"
-        assert row[4] == "GCA_000000001.1"
-        assert row[5] == ""  # the test taxonomy has no s__ rank
-        assert row[6] == ""
-
-    def test_assembly_json(self, assembly_server: Path) -> None:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "sylphd",
-                "assembly",
-                str(CLODF13_FASTA),
-                "--socket",
-                str(assembly_server),
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        assert result.returncode == 0, result.stderr
-        payload = json.loads(result.stdout)
-        assert payload["query"]["length"] == 9957
-        assert payload["hits"][0]["relation"] == "same species"

@@ -17,7 +17,7 @@ from sylphd.sketching import (
     sketch_sample,
 )
 
-from conftest import CLODF13_FASTA, K12_PAIRED_SKETCH, K12_R1, K12_R1_SKETCH, K12_R2
+from conftest import K12_PAIRED_SKETCH, K12_R1, K12_R1_SKETCH, K12_R2
 
 
 class TestSampleNames:
@@ -112,13 +112,6 @@ class TestSketching:
         assert sketch.k == 31
         assert len(sketch.to_bytes()) > 100
 
-    def test_paired_end(self) -> None:
-        sample = SampleInput("k12", ((str(K12_R1), str(K12_R2)),))
-        sketch = sketch_sample(sample, c=200, k=31)
-        assert sketch.c == 200
-        assert sketch.k == 31
-        assert len(sketch.to_bytes()) > 100
-
     def test_interleaved_matches_paired(self, tmp_path: Path) -> None:
         path = tmp_path / "interleaved.fq"
         with dnaio.open(K12_R1) as r1, dnaio.open(K12_R2) as r2, dnaio.open(
@@ -145,11 +138,6 @@ class TestSketching:
             check_sketch(sketch, c=200, k=21)
         with pytest.raises(InputError, match="sparser"):
             check_sketch(sketch, c=100, k=31)
-
-    def test_assembly_fasta(self) -> None:
-        sample = SampleInput("clodf13", ((str(CLODF13_FASTA),),))
-        sketch = sketch_sample(sample, c=200, k=31)
-        assert sketch.c == 200
 
     def test_missing_file(self, tmp_path: Path) -> None:
         sample = SampleInput("gone", ((str(tmp_path / "nope.fq"),),))

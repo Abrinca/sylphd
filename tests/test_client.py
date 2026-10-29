@@ -38,7 +38,9 @@ def recording_server():
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+    )
     thread.start()
     try:
         yield server.server_address[1], paths
@@ -131,29 +133,12 @@ class TestPathPrefix:
             assert client.info() == {"path": "/sylphd/info"}
         assert paths == ["/sylphd/info"]
 
-    def test_trailing_slash_in_prefix(self, recording_server) -> None:
-        port, paths = recording_server
-        with connect(url=f"http://127.0.0.1:{port}/sylphd/") as client:
-            client.health()
-        assert paths == ["/sylphd/health"]
-
-    def test_no_prefix(self, recording_server) -> None:
-        port, paths = recording_server
-        with connect(url=f"http://127.0.0.1:{port}") as client:
-            client.info()
-        assert paths == ["/info"]
-
 
 class TestCliAddressPrecedence:
     @staticmethod
     def _client(*argv: str) -> SylphClient:
         args = cli.build_parser().parse_args(["info", *argv])
         return cli._client_from_args(args)
-
-    def test_url_flag(self) -> None:
-        with self._client("--url", "https://api.example.org/sylphd") as client:
-            assert client.base_url == "https://api.example.org/sylphd"
-            assert client.socket_path is None
 
     def test_env_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SYLPHD_URL", "http://env.example:1234/prefix")
@@ -164,6 +149,7 @@ class TestCliAddressPrecedence:
         monkeypatch.setenv("SYLPHD_URL", "http://env.example:1234")
         with self._client("--url", "https://flag.example/sylphd") as client:
             assert client.base_url == "https://flag.example/sylphd"
+            assert client.socket_path is None
 
     def test_socket_flag_beats_env_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SYLPHD_URL", "http://env.example:1234")

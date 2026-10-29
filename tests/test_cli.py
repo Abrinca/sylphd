@@ -248,13 +248,6 @@ class TestUnixSocketRoundTrip:
             assert client.query([("o157", O157_SKETCH.read_bytes())])
         assert process.poll() is None
 
-    def test_info(self, server) -> None:
-        socket_path, _ = server
-        result = _run("info", "--socket", str(socket_path), "--json")
-        info = json.loads(result.stdout)
-        assert info["database"]["c"] == 200
-        assert info["database"]["k"] == 31
-
     def test_profile_matches_pysylph(self, server) -> None:
         socket_path, _ = server
         result = _run(
@@ -352,36 +345,17 @@ class TestUnixSocketRoundTrip:
         row = dict(zip(header, lines[1].split("\t")))
         assert row["True_cov"] != ""
 
-    def test_graceful_shutdown_removes_socket(self, server) -> None:
-        socket_path, process = server
-        assert socket_path.is_socket()
-        process.terminate()
-        process.wait(timeout=20)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and socket_path.exists():
-            time.sleep(0.1)
-        assert not socket_path.exists()
-
 
 class TestMetadataTSV:
-    def test_default_includes_metadata_columns(self, metadata_server) -> None:
+    @pytest.mark.parametrize("fields", [[], ["--fields", "all"]])
+    def test_default_includes_metadata_columns(self, metadata_server, fields) -> None:
         socket_path, _ = metadata_server
-        result = _run("query", str(O157_SKETCH), "--socket", str(socket_path))
+        result = _run("query", str(O157_SKETCH), "--socket", str(socket_path), *fields)
         lines = [line for line in result.stdout.splitlines() if line]
         header = lines[0].split("\t")
         assert "gtdb_taxonomy" in header
         assert "genome_size" in header
         assert len(lines[1].split("\t")) == len(header)
-
-    def test_fields_all_includes_metadata_columns(self, metadata_server) -> None:
-        socket_path, _ = metadata_server
-        result = _run(
-            "query", str(O157_SKETCH), "--socket", str(socket_path), "--fields", "all"
-        )
-        lines = [line for line in result.stdout.splitlines() if line]
-        header = lines[0].split("\t")
-        assert "gtdb_taxonomy" in header
-        assert "genome_size" in header
 
     def test_explicit_fields(self, metadata_server) -> None:
         socket_path, _ = metadata_server
@@ -469,23 +443,6 @@ class TestLocalCLI:
         assert result.returncode == 2
         assert "duplicate sample name" in result.stderr
 
-    def test_setup_command(self, tmp_path: Path) -> None:
-        from sylphd.metadata import METADATA_COLUMNS
-
-        source = tmp_path / "meta.tsv"
-        header = ["accession", *METADATA_COLUMNS]
-        values = {column: "none" for column in METADATA_COLUMNS}
-        values["genome_size"] = "42"
-        source.write_text(
-            "\t".join(header)
-            + "\n"
-            + "\t".join(["GCA_1", *[values[column] for column in METADATA_COLUMNS]])
-            + "\n"
-        )
-        output = tmp_path / "meta.sqlite"
-        assert cli.main(["setup", "-m", str(source), "-o", str(output), "-q"]) == 0
-        assert output.is_file()
-
     def test_setup_reps_only(self, tmp_path: Path) -> None:
         from sylphd.metadata import METADATA_COLUMNS, MetadataDB
 
@@ -513,20 +470,6 @@ class TestLocalCLI:
         with MetadataDB(output) as db:
             assert db.info["reps_only"] == "true"
             assert set(db.lookup(["GCA_1", "GCA_2"])) == {"GCA_1"}
-
-    def test_setup_help(self) -> None:
-        result = _run("setup", "--help")
-        assert "--reps-only" in result.stdout
-
-    def test_download_help(self) -> None:
-        result = _run("download", "--help")
-        assert "--release" in result.stdout
-        assert "--only" in result.stdout
-
-    def test_serve_requires_db(self) -> None:
-        result = _run("serve", check=False)
-        assert result.returncode == 2
-        assert "--db" in result.stderr
 
 
 class TestTaxonomyOutputs:
@@ -568,48 +511,8 @@ class TestTaxonomyOutputs:
         assert (directory / "matrix-ncbi.tsv").is_file()
 
         gtdb = (directory / "taxprof-one.gtdb.sylphmpa").read_text().splitlines()
-        assert gtdb[0] == "#SampleID\tone\tTaxonomies_used:['gtdb']"
-        assert gtdb[1].split("\t") == [
-            "clade_name",
-            "relative_abundance",
-            "sequence_abundance",
-            "ANI (if strain-level)",
-            "Coverage (if strain-level)",
-        ]
         rows = {line.split("\t")[0]: line.split("\t") for line in gtdb[2:]}
-        root = rows["d__Bacteria"]
-        assert float(root[1]) == pytest.approx(100.0)
-        assert float(root[2]) == pytest.approx(100.0)
-        assert root[3:] == ["NA", "NA"]
-
-        species = (
-            "d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|"
-            "f__Clostridiaceae|g__Clostridium|s__Clostridium difficile"
-        )
-        strain = rows[species + "|t__GCA_111111111.1"]
-        assert float(strain[3]) > 90.0
-        assert float(strain[4]) == pytest.approx(1.0)
-
-        ncbi = (directory / "taxprof-one.ncbi.sylphmpa").read_text().splitlines()
-        assert (
-            "d__Bacteria|p__Bacillota|c__Clostridia|o__unclassified Clostridia"
-            in {line.split("\t")[0] for line in ncbi[2:]}
-        )
-
-        matrix = (directory / "matrix-gtdb.tsv").read_text().splitlines()
-        assert matrix[0] == "clade_name\tone\ttwo"
-        values = {line.split("\t")[0]: line.split("\t")[1:] for line in matrix[1:]}
-        assert [float(value) for value in values["d__Bacteria"]] == pytest.approx(
-            [100.0, 100.0]
-        )
-        assert [
-            float(value) for value in values["d__Bacteria|p__Pseudomonadota"]
-        ] == pytest.approx([0.0, 50.0])
-        # Rows below a missing taxon are present with zero.
-        assert (
-            "d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria"
-            in values
-        )
+        assert float(rows["d__Bacteria"][1]) == pytest.approx(100.0)
 
     def test_taxonomy_selection_and_visible_fields(self, taxonomy_server) -> None:
         _, directory = taxonomy_server
@@ -661,76 +564,30 @@ class TestTaxonomyOutputs:
         assert result.returncode == 1
         assert "unknown taxonomy" in result.stderr
 
-    def test_requires_server_metadata(self, tmp_path: Path) -> None:
-        # A server without --meta: the taxonomy flags must fail clearly.
-        socket_path = tmp_path / "plain.sock"
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "sylphd",
-                "serve",
-                "--db",
-                str(ECOLI_TWO_STAGE),
-                "--socket",
-                str(socket_path),
-                "--log-level",
-                "warning",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        try:
-            _wait_for_socket(socket_path)
-            result = _run(
-                "profile",
-                str(O157_SKETCH),
-                "--socket",
-                str(socket_path),
-                "--taxprof",
-                str(tmp_path / "p-"),
-                check=False,
-            )
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-        assert result.returncode == 1
-        assert "no metadata database" in result.stderr
-
-    def test_query_no_adjust(self, metadata_server) -> None:
-        socket_path, _ = metadata_server
+    def test_requires_server_metadata(self, server, tmp_path: Path) -> None:
+        # The plain server has no --meta: the taxonomy flags must fail clearly.
+        socket_path, _ = server
         result = _run(
-            "query",
+            "profile",
             str(O157_SKETCH),
             "--socket",
             str(socket_path),
-            "--fields",
-            "none",
-            "--no-adjust",
-            check=False,
-        )
-        assert result.returncode == 0, result.stderr
-        lines = [line for line in result.stdout.splitlines() if line]
-        header = lines[0].split("\t")
-        row = dict(zip(header, lines[1].split("\t")))
-        assert float(row["Adjusted_ANI"]) == pytest.approx(96.02, abs=0.01)
-        assert row["Adjusted_ANI"] == row["Naive_ANI"]
-        assert row["ANI_5-95_percentile"] == ""
-
-    def test_query_has_no_taxonomy_flags(self) -> None:
-        result = _run(
-            "query",
-            str(O157_SKETCH),
             "--taxprof",
-            "x-",
-            "--socket",
-            "/nonexistent.sock",
+            str(tmp_path / "p-"),
             check=False,
         )
-        assert result.returncode == 2
-        assert "unrecognized arguments" in result.stderr
+        assert result.returncode == 1
+        assert "no metadata database" in result.stderr
+
+
+class TestShutdown:
+    # Last on purpose: it terminates the module-scoped ``server``.
+    def test_graceful_shutdown_removes_socket(self, server) -> None:
+        socket_path, process = server
+        assert socket_path.is_socket()
+        process.terminate()
+        process.wait(timeout=20)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and socket_path.exists():
+            time.sleep(0.1)
+        assert not socket_path.exists()

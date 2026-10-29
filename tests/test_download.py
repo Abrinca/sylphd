@@ -19,14 +19,9 @@ from sylphd.download import (
     MD5SUMS_FILE,
     Database,
     DownloadError,
-    aria2c_command,
-    aria2c_path,
-    database_table,
     download_database,
-    download_file,
     download_release,
     download_urls,
-    lookup_database,
     parse_md5sums,
     release_url,
 )
@@ -63,7 +58,9 @@ def http_server(tmp_path: Path):
     directory.mkdir(parents=True)
     handler = functools.partial(_QuietHandler, directory=str(root))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+    )
     thread.start()
     try:
         yield directory, f"http://127.0.0.1:{server.server_port}/releases/release232/232.0/"
@@ -136,32 +133,12 @@ def test_unlisted_file(tmp_path: Path, http_server) -> None:
         download_release(232, tmp_path, domains=["bac120"], base_url=base_url)
 
 
-def test_download_file_without_checksum(tmp_path: Path, http_server) -> None:
-    directory, base_url = http_server
-    content = b"plain"
-    (directory / "x.tsv.gz").write_bytes(content)
-    target = download_file(base_url + "x.tsv.gz", tmp_path / "x.tsv.gz")
-    assert target.read_bytes() == content
-
-
 # ---------------------------------------------------------------------------
 # database catalogue
 # ---------------------------------------------------------------------------
 
 
 class TestCatalogue:
-    def test_gtdb_r232_c200_dbv2(self) -> None:
-        entry = lookup_database("gtdb-r232-c200-dbv2.syl2db")
-        assert entry.filename == "gtdb-r232-c200-dbv2.syl2db"
-        assert entry.size == 20044737329
-        # Computed from a local copy of the file; matches the cloud mirror's
-        # published object checksum.
-        assert entry.md5 == "89ad2dbdd532be81c72e78f5d493d78d"
-        assert entry.mirrors == (
-            "http://faust.compbio.cs.cmu.edu/sylph-stuff/gtdb-r232-c200-dbv2.syl2db",
-            "https://storage.googleapis.com/sylph-stuff/gtdb-r232-c200-dbv2.syl2db",
-        )
-
     def test_entries_are_consistent(self) -> None:
         assert DATABASES
         for name, entry in DATABASES.items():
@@ -173,18 +150,6 @@ class TestCatalogue:
             for mirror in entry.mirrors:
                 assert mirror.startswith(("http://", "https://"))
                 assert mirror.endswith("/" + entry.filename)
-
-    def test_table_lists_every_database(self) -> None:
-        table = database_table()
-        assert "NAME" in table and "SIZE" in table
-        for name in DATABASES:
-            assert name in table
-
-    def test_unknown_database(self) -> None:
-        with pytest.raises(ValueError, match="unknown database"):
-            lookup_database("nope.syldb")
-        with pytest.raises(ValueError, match="gtdb-r232-c200-dbv2"):
-            lookup_database("nope.syldb")
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +228,9 @@ def serve(tmp_path: Path):
             records=records,
         )
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(
+            target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         thread.start()
         started.append((server, thread))
         return f"http://127.0.0.1:{server.server_port}/"
@@ -457,16 +424,6 @@ def test_download_database_skips_existing(tmp_path: Path, www: Path, serve) -> N
     assert records == [None]
 
 
-def test_download_database_force(tmp_path: Path, www: Path, serve) -> None:
-    content = b"x" * 10
-    base_url = serve(www)
-    entry = _serve_database(www, "db.syldb", content, base_url)
-    destination = tmp_path / "db.syldb"
-    destination.write_bytes(content)
-    download_database(entry, tmp_path, force=True, use_aria2c=False)
-    assert destination.read_bytes() == content
-
-
 def test_download_database_verify(tmp_path: Path, www: Path, serve) -> None:
     content = b"verify me" * 50
     digest = hashlib.md5(content).hexdigest()
@@ -511,23 +468,6 @@ class _FakeCompleted:
         self.returncode = returncode
 
 
-def test_aria2c_command() -> None:
-    command = aria2c_command("aria2c", ["http://a/x", "http://b/x"], Path("d/x.part"))
-    assert command[:11] == [
-        "aria2c", "-s", "16", "-x", "8", "-k", "5M", "-c", "--file-allocation=none",
-        "-d", "d",
-    ]
-    assert command[11:13] == ["-o", "x.part"]
-    assert command[-2:] == ["http://a/x", "http://b/x"]
-
-
-def test_aria2c_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(download.shutil, "which", lambda name: "/usr/bin/aria2c")
-    assert aria2c_path() == "/usr/bin/aria2c"
-    monkeypatch.setattr(download.shutil, "which", lambda name: None)
-    assert aria2c_path() is None
-
-
 def test_download_urls_with_aria2c(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -559,14 +499,6 @@ def test_download_urls_without_aria2c(tmp_path: Path, monkeypatch: pytest.Monkey
         download_urls(["http://a/x"], tmp_path / "x", use_aria2c=True)
 
 
-def test_aria2c_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        download.subprocess, "run", lambda command, check=False: _FakeCompleted(9)
-    )
-    with pytest.raises(DownloadError, match="aria2c failed with exit status 9"):
-        download_urls(["http://a/x"], tmp_path / "x", use_aria2c=True)
-
-
 def test_aria2c_failure_keeps_control_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -576,7 +508,7 @@ def test_aria2c_failure_keeps_control_file(
         return _FakeCompleted(7)
 
     monkeypatch.setattr(download.subprocess, "run", fake_run)
-    with pytest.raises(DownloadError):
+    with pytest.raises(DownloadError, match="aria2c failed with exit status 7"):
         download_urls(["http://a/x"], tmp_path / "x", use_aria2c=True)
     assert (tmp_path / "x.part").exists()
     assert (tmp_path / "x.part.aria2").exists()

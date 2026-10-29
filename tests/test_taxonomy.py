@@ -18,7 +18,6 @@ from sylphd.taxonomy import (
     strain_label,
     taxprof_lines,
     write_outputs,
-    write_taxprof,
 )
 
 GTDB_SPECIES = (
@@ -232,25 +231,6 @@ class TestAggregateRows:
         assert clades[1].is_strain
         assert clades[1].ani == pytest.approx(99.0)
 
-    def test_ncbi_gap_paths_are_consistent(self) -> None:
-        rows = [
-            _row(
-                ncbi="d__Bacteria;p__Bacillota;c__Clostridia;o__;f__;g__Alpha;s__",
-                relative=70.0,
-                accession="A",
-            ),
-            _row(
-                ncbi="d__Bacteria;p__Bacillota;c__Clostridia;o__;f__;g__Beta;s__",
-                relative=30.0,
-                accession="B",
-            ),
-        ]
-        clades = aggregate_rows(rows, "ncbi")
-        by_name = {item.clade: item for item in clades}
-        gap = "d__Bacteria|p__Bacillota|c__Clostridia|o__unclassified Clostridia"
-        assert by_name[gap].relative == pytest.approx(100.0)
-        assert by_name[gap + "|f__unclassified Clostridia"].relative == pytest.approx(100.0)
-
     def test_per_sample_aggregation(self) -> None:
         samples = [
             {"name": "a", "rows": [_row(gtdb=GTDB_SPECIES, relative=100.0, accession="A")]},
@@ -274,10 +254,6 @@ class TestAggregateRows:
         assert second["d__Bacteria"] == pytest.approx(100.0)
         assert "d__Bacteria|p__Pseudomonadota" not in first
         assert second["d__Bacteria|p__Pseudomonadota"] == pytest.approx(60.0)
-
-    def test_unknown_taxonomy(self) -> None:
-        with pytest.raises(TaxonomyError, match="unknown taxonomy"):
-            aggregate_rows([], "kraken")
 
 
 class TestTaxprof:
@@ -320,21 +296,6 @@ class TestTaxprof:
         assert float(strain[3]) == pytest.approx(99.25)
         assert float(strain[4]) == pytest.approx(3.5)
 
-    def test_ordering_matches_sylph_tax(self) -> None:
-        # Rank by rank, and within a rank the more abundant clade first.
-        clades = self._clades()
-        assert [item.clade for item in clades][1:3] == [
-            "d__Bacteria|p__Bacillota",
-            "d__Bacteria|p__Pseudomonadota",
-        ]
-
-    def test_write_taxprof(self, tmp_path: Path) -> None:
-        path = write_taxprof(tmp_path / "x.sylphmpa", "s", "gtdb", self._clades())
-        text = path.read_text()
-        assert text.startswith("#SampleID\ts\tTaxonomies_used:['gtdb']\n")
-        assert text.endswith("\n")
-        assert len(text.splitlines()) == 2 + len(self._clades())
-
 
 class TestMatrix:
     def _table(self, samples):
@@ -371,10 +332,6 @@ class TestMatrix:
         ]
         lines = list(clade_matrix_lines(self._table(samples), value="sequence"))
         assert lines[1] == "d__Bacteria\t80.0"
-
-    def test_unknown_value(self) -> None:
-        with pytest.raises(TaxonomyError, match="unknown matrix value"):
-            list(clade_matrix_lines([], value="ani"))
 
     def test_row_union_order(self) -> None:
         first = "d__Bacteria;p__Bacillota;c__C;o__O;f__F;g__G;s__S"

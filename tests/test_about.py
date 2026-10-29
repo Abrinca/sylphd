@@ -41,15 +41,11 @@ def test_name_and_about(tmp_path: Path) -> None:
         "format": "markdown",
         "text": "This server holds **GTDB**.\n\n[docs](https://example.org)",
     }
-
-
-def test_name_only_and_about_only(tmp_path: Path) -> None:
+    # each one on its own
     info = _info(name="x")
     assert info["name"] == "x" and "about" not in info
-    about = tmp_path / "a.md"
-    about.write_text("hello", encoding="utf-8")
     info = _info(about_path=about)
-    assert "name" not in info and info["about"]["text"] == "hello"
+    assert "name" not in info and info["about"]["text"].startswith("This server")
 
 
 def test_empty_file_means_no_about(tmp_path: Path) -> None:
@@ -84,15 +80,12 @@ def test_bad_files_fail_at_startup(tmp_path: Path) -> None:
         About(tmp_path)  # a directory
 
 
-@pytest.mark.parametrize("name", ["x" * 81, "two\nlines", "tab\there"])
-def test_bad_names(name: str) -> None:
-    with pytest.raises(AboutError):
-        check_name(name)
-
-
-def test_name_limits() -> None:
+def test_name_validation() -> None:
     assert check_name("x" * 80) == "x" * 80
     assert check_name("   ") is None and check_name(None) is None
+    for name in ["x" * 81, "two\nlines", "tab\there"]:
+        with pytest.raises(AboutError):
+            check_name(name)
 
 
 def test_reload_on_change_and_keep_last_good(tmp_path: Path, caplog) -> None:

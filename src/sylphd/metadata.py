@@ -27,10 +27,6 @@ from . import __version__
 
 #: Schema version of the generated SQLite file.  Bump when the column layout
 #: or the meaning of the ``info`` table changes.
-#:
-#: 1: plain ``metadata`` table, every value stored verbatim.
-#: 2: dictionary-encoded columns, ``metadata_data`` base table and
-#:    ``metadata`` view (readers accept both layouts).
 METADATA_FORMAT_VERSION = "2"
 
 #: Page size of the generated file.  8 KiB trims the b-tree page slack of the
@@ -242,7 +238,7 @@ def _view_sql() -> str:
     """DDL for the ``metadata`` view: the original columns in the original order.
 
     A missing id (``NULL`` cell) joins to no dictionary row, so the view yields
-    ``NULL`` exactly where the plain table did.
+    ``NULL`` for it.
     """
     select = ["m.accession AS accession"]
     joins: list[str] = []
@@ -459,13 +455,8 @@ class MetadataDB:
         self._connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = threading.Lock()
-        # ``metadata`` is a view in format 2 and a table in format 1; both are
-        # readable, so accept either kind of sqlite_master entry here.
         tables = {
-            row[0]
-            for row in self._connection.execute(
-                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
-            )
+            row[0] for row in self._connection.execute("SELECT name FROM sqlite_master")
         }
         if "metadata" not in tables:
             self._connection.close()

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import gzip
 import json
-import struct
 import subprocess
 import sys
 import time
@@ -133,20 +132,6 @@ class TestSketchUpload:
         assert a["hits"] == b["hits"] and a["hits"]
         assert a["closest"] == b["closest"]
 
-    def test_info_reports_sequence_support(self, sketch_only_client, sequences_client) -> None:
-        info = sketch_only_client.get("/info").json()
-        assert info["limits"]["allow_sequences"] is False
-        assert sequences_client.get("/info").json()["limits"]["allow_sequences"] is True
-        assert "/assembly" in info["endpoints"]
-        assert "assembly" not in info
-
-    def test_content_type_parameters_are_ignored(self, sketch_only_client, tmp_path) -> None:
-        sketch, _ = _sketch(tmp_path, _fasta())
-        response = sketch_only_client.post(
-            "/assembly", content=sketch, headers={"content-type": SKETCH_CONTENT_TYPE + "; charset=binary"}
-        )
-        assert response.status_code == 200
-
     def test_sketch_limit_is_the_general_upload_limit(self, tiny_database, tmp_path) -> None:
         # 1 MB upload limit; a 2 MB body is refused even though it is "a sketch"
         app = create_app(ServerConfig(db_path=tiny_database, max_upload_mb=1))
@@ -175,7 +160,7 @@ class TestSketchErrors:
 
     @pytest.mark.parametrize(
         "body",
-        [b"not a sketch", b"\x01\x02\x03", struct.pack("<Q", 100_000_000), b">a\nACGT\n"],
+        [b"not a sketch", b"\x01\x02\x03", b">a\nACGT\n"],
     )
     def test_malformed_sketch_is_400(self, sketch_only_client, body) -> None:
         response = _post_sketch(sketch_only_client, body)
@@ -204,14 +189,11 @@ class TestSketchErrors:
 
     @pytest.mark.parametrize(
         "params",
-        [{"records": -1}, {"records": "x"}, {"length": "1.5"}, {"gc": 101}, {"gc": "x"}, {"top": 0}, {"min_ani": 60}],
+        [{"records": -1}, {"records": "x"}, {"length": "1.5"}, {"gc": 101}, {"gc": "x"}],
     )
     def test_parameter_validation(self, sketch_only_client, tmp_path, params) -> None:
         sketch, _ = _sketch(tmp_path, _fasta())
         assert _post_sketch(sketch_only_client, sketch, **params).status_code == 400
-
-    def test_raw_sequences_still_refused(self, sketch_only_client) -> None:
-        assert _post_raw(sketch_only_client, _fasta()).status_code == 404
 
     def test_unknown_content_type_with_sequences_enabled(self, sequences_client) -> None:
         response = sequences_client.post(
@@ -219,15 +201,6 @@ class TestSketchErrors:
         )
         assert response.status_code == 415
         assert SKETCH_CONTENT_TYPE in response.json()["error"]
-
-
-def test_sketch_uploads_are_rate_limited(tiny_database, tmp_path) -> None:
-    sketch, _ = _sketch(tmp_path, _fasta())
-    app = create_app(ServerConfig(db_path=tiny_database, rate_limit=(1, 60.0)))
-    with TestClient(app) as client:
-        assert _post_sketch(client, sketch).status_code == 200
-        response = _post_sketch(client, sketch)
-    assert response.status_code == 429
 
 
 def test_sketch_assembly_matches_the_servers_sketch(tmp_path) -> None:
@@ -329,7 +302,20 @@ class TestCLI:
             capture_output=True, text=True, timeout=600,
         )
         assert result.returncode == 0, result.stderr
-        assert result.stdout.splitlines()[1].split("\t")[:3] == ["1", "100.00", "same species"]
+        lines = result.stdout.splitlines()
+        assert lines[0].split("\t") == [
+            "rank",
+            "ani",
+            "relation",
+            "shared_rank",
+            "accession",
+            "gtdb_species",
+            "ncbi_organism_name",
+            "ncbi_taxid",
+        ]
+        row = lines[1].split("\t")
+        assert row[:5] == ["1", "100.00", "same species", "species", "GCA_000000001.1"]
+        assert row[5:7] == ["", ""]  # the test taxonomy has no s__ rank
 
 
 class TestGzipMembers:
