@@ -30,6 +30,13 @@ All notable changes to `sylphd` are documented here. The format follows
   `sketch-wasm/build.sh` builds into `web/wasm` by default.
 - Deployment: `/srv/sylphd` and `releases/` are owned by root; the updater builds a release as the
   service user inside a directory it hands over and makes the finished release root-owned.
+- **Terms of the public service:** regular, light academic use of the API from your own scripts is
+  free too; heavy and commercial use need an agreement. The public instance accepts raw FASTA/FASTQ
+  on `POST /assembly` (`--allow-sequences`), so the terms no longer say it is sketch-only; raw
+  sequences sent through the API reach the server, are processed in memory and are not stored or
+  logged. The shipped example unit shows `--allow-sequences` again; for other operators it stays
+  optional. New curl example in the HTTP API reference.
+- The metadata file has one format (the reader for the plain-table "format 1" was removed).
 - The package version lives only in `src/sylphd/__init__.py`.
 - The browser tests (XSS check of the operator text, `.sylsp` header parser, taxonomy parity) run in
   GitHub Actions (`web-tests.yml`) and fail there instead of being skipped.

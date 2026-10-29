@@ -129,6 +129,6 @@ case.
 sylphd query --url https://api.example.org/sylphd reads.fq.gz
 ```
 
-A public instance may rate-limit `/query` and `/profile`. The terms of the Abrinca web service do
-not cover programmatic access; see [Terms](../project/terms.md) and
-[Running a public server](public-server.md).
+A public instance may rate-limit `/query` and `/profile`. The terms of the Abrinca web service
+allow regular, light academic use of the API, while heavy and commercial use need an agreement; see
+[Terms](../project/terms.md) and [Running a public server](public-server.md).

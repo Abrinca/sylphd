@@ -32,11 +32,14 @@ The scripts are the mechanism; these are the knobs you choose:
 - **Domain** — `DOMAIN` in `site.env`. `setup-server.sh` writes it into a
   `caddy.service` drop-in and Caddy requests a certificate for it.
 - **Public flags** — `SYLPH_SERVE_ARGS` in `site.env`, on top of the defaults
-  in `sylphd.service`. The shipped set is an example, not a requirement:
-  `--max-jobs`, `--max-queue`, `--rate-limit`, `--trusted-proxy unix`,
-  `--cors-origin`. The web app and `sylphd assembly` send
-  sketches, so the public instance runs without `--allow-sequences`
-  (optional raw FASTA uploads for scripts).
+  in `sylphd.service`. The shipped set is the public instance's policy and an
+  example, not a requirement: `--allow-sequences`, `--max-jobs`, `--max-queue`,
+  `--rate-limit`, `--trusted-proxy unix`, `--cors-origin`.
+  `--allow-sequences` is optional: it lets scripts (`curl`) post a raw FASTA or
+  FASTQ to `/assembly`, which the server then sketches itself. That costs CPU
+  and RAM per job (up to `--max-sequence-mb`, 20 MB by default, and up to 5×
+  that once decompressed); without it the server only takes sketches, which the
+  web app and `sylphd assembly` make locally.
   `--about /etc/sylphd/about.md` publishes a Markdown description of your
   instance (shown at the top of the web page, editable without a restart;
   put the file somewhere the `sylphd` service account can read, for example

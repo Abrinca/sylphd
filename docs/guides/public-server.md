@@ -46,9 +46,13 @@ which the [web app](https://abrinca.github.io/sylphd/) (in the browser, WebAssem
 sketches, which hold k-mer hashes and counts only. That is the setup for confidential data.
 
 The optional `--allow-sequences` additionally accepts a raw FASTA or FASTQ on `/assembly` and sketches it on the
-server, for scripts (`curl`, `sylphd assembly --no-local-sketch`) and local use. The public instance
-runs **without** it. Uploads are never logged: only sizes, timings and request outcomes appear in the
-server log.
+server, so any language can use the server without pysylph or WebAssembly
+([`curl` example](../reference/http-api.md#raw-sequence-with-curl), `sylphd assembly --no-local-sketch`).
+The public instance runs **with** it, and so does the example policy in `deploy/`; for your own
+server it is optional. It costs the server CPU for sketching and RAM per job: an upload may be up
+to `--max-sequence-mb` (20 MB by default) and a gzip body may decompress to 5× that, so keep
+`--max-jobs`, `--max-queue` and `--rate-limit` set on a server that is open to others. Uploads are
+never logged: only sizes, timings and request outcomes appear in the server log.
 
 ## Limits { #limits }
 

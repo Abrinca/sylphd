@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>sylphd – terms of use</title>
-  <meta name="description" content="Terms of use for the public sylphd web service: free for academic, non-commercial use through the web page; other uses by agreement.">
+  <meta name="description" content="Terms of use for the public sylphd web service: free for academic, non-commercial use through the web page and, for regular light use, through the API; heavy and commercial use by agreement.">
   <link rel="icon" type="image/svg+xml" href="img/sylphd-icon-tile.svg">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -24,17 +24,19 @@
       <h2 id="terms-h">Terms of use</h2>
       <p>These terms cover the public sylphd web service at this address. In
         short: it is free for academic, non-commercial use through this web
-        page, and anything else needs an agreement with us first.</p>
+        page and, for regular light use, through the API from your own
+        scripts; heavy use and commercial use need an agreement with us first.</p>
 
       <h3>Free academic use</h3>
       <p>The service is provided free of charge for academic, non-commercial
-        research use through this web page.</p>
+        research use through this web page. Regular, light use of the API from
+        your own scripts and pipelines (your own samples) is free for academic
+        use too.</p>
 
       <h3>Other uses</h3>
-      <p>Other uses, including programmatic or API access (for example calling
-        the server directly from scripts or pipelines), commercial use, and
-        high-volume use, are only allowed after an agreement with us. Please
-        contact us first: <a href="https://abrinca.com/contact" rel="noopener">https://abrinca.com/contact</a>.
+      <p>Commercial use, and heavy or bulk programmatic use (also if you
+        regularly hit the rate limit), are only allowed after an agreement with
+        us. Please contact us first: <a href="https://abrinca.com/contact" rel="noopener">https://abrinca.com/contact</a>.
         This applies whether the use is for a non-profit or a commercial
         organisation; we are happy to talk about it.</p>
 
@@ -42,9 +44,12 @@
       <p>In the <strong>Assembly</strong> and <strong>Reads</strong> modes,
         your sequences stay on your computer: they are sketched in your browser
         and only the sketch (k-mer hashes and counts, no sequences) is sent to
-        the server. It is processed in memory and is not stored or logged.</p>
-      <p>The public server runs sketch-only: it does not accept raw sequences
-        at all. A browser that cannot make the sketch cannot use the page.</p>
+        the server. It is processed in memory and is not stored or logged.
+        A browser that cannot make the sketch cannot use the page.</p>
+      <p>Through the API you can send a sketch (preferred; the sylphd client
+        makes it locally) or a raw FASTA/FASTQ file to <code>/assembly</code>,
+        which the server sketches in memory. Raw sequences are not stored or
+        logged either, but unlike a sketch they do reach the server.</p>
       <p>Only sizes, timings and request outcomes may be
         recorded, to run and monitor the service.</p>
 
@@ -55,7 +60,7 @@
 
       <h3>Fair use</h3>
       <p>Please do not overload the service or use it to disrupt other users.
-        Automated or bulk access belongs under an agreement, as above.</p>
+        Light use stays free; bulk access belongs under an agreement, as above.</p>
 
       <h3>Contact</h3>
       <p>Operator: <a href="https://abrinca.com" rel="noopener">Abrinca Genomics</a>.

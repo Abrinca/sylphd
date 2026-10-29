@@ -49,8 +49,8 @@ sylph changes.
 | request rate (`--rate-limit`) | off | `429` with `Retry-After`; checked before the body is read |
 
 Sketches uploaded to `/assembly` go through the same structural header check as those of `/profile`
-(see above). Without `--allow-sequences` a server never receives sequence data at all. Raw sequences
-uploaded to `/assembly` are checked (FASTA or FASTQ, only `ACGTN`) and error messages say
+(see above). Without `--allow-sequences` a server never receives sequence data at all (the public
+instance runs with it). Raw sequences uploaded to `/assembly` are processed in memory and checked (FASTA or FASTQ, only `ACGTN`) and error messages say
 where a problem is, never what the sequence or its headers contain. Uploads are never logged.
 
 ## The rate limit trusts only what you tell it to

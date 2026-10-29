@@ -32,8 +32,8 @@ flowchart LR
 ```
 
 Assemblies are sketched locally too (`sylphd assembly`, and the web app in the browser), so a server
-started without `--allow-sequences` (like the public instance) never receives a sequence. The flag
-only adds raw FASTA uploads for scripts.
+started without `--allow-sequences` never receives a sequence. The flag adds raw FASTA uploads for
+scripts; the public instance runs with it.
 
 ## What it does
 

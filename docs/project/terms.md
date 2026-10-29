@@ -4,51 +4,18 @@ These terms cover the **public sylphd web service operated by Abrinca Genomics**
 restrict your use of the open-source software, which is licensed under the
 [AGPL-3.0-or-later](license.md). The page served with the web app,
 [abrinca.github.io/sylphd/terms.html](https://abrinca.github.io/sylphd/terms.html), is the
-authoritative version; this page reproduces its content.
+authoritative version; this is a summary.
 
-In short: the service is free for academic, non-commercial use through the web page, and anything
-else needs an agreement with us first.
-
-## Free academic use
-
-The service is provided free of charge for academic, non-commercial research use through the web
-page.
-
-## Other uses
-
-Other uses, including programmatic or API access (for example calling the server directly from
-scripts or pipelines), commercial use, and high-volume use, are only allowed after an agreement
-with us. Please contact us first: <https://abrinca.com/contact>. This applies whether the use is
-for a non-profit or a commercial organisation; we are happy to talk about it.
-
-## Your sequences
-
-In the **Assembly** and **Reads** modes of the web page, your sequences stay on your computer: they
-are sketched in your browser and only the sketch (k-mer hashes and counts, no sequences) is sent to
-the server, processed in memory and not stored or logged.
-
-The public server runs sketch-only: it does not accept raw sequences at all. A browser that cannot
-make the sketch cannot use the page.
-
-Only sizes, timings and request outcomes may be recorded, to run and monitor the
-service.
-
-## No warranty, availability
-
-The service is provided as-is, without warranty of any kind. We do not guarantee availability or
-correctness, and we may rate-limit, change or discontinue the service at any time.
-
-## Fair use
-
-Please do not overload the service or use it to disrupt other users. Automated or bulk access
-belongs under an agreement, as above.
-
-## Contact
-
-Operator: [Abrinca Genomics](https://abrinca.com). Questions about these terms or about other uses:
-<https://abrinca.com/contact>.
-
-## Running your own server
+- The service is free for academic, non-commercial use through the web page and, for regular light
+  use (your own samples, scripts and pipelines), through the API.
+- Commercial use and heavy or bulk programmatic use (also if you regularly hit the rate limit)
+  need an agreement with us first.
+- Through the API you can send a sketch (preferred) or a raw FASTA/FASTQ file to `/assembly`. The
+  server sketches raw sequences in memory and neither stores nor logs them, but unlike a sketch
+  they do reach the server. The web page sketches in your browser, so your sequences stay on your
+  computer.
+- The service is provided as-is, without warranty, and may be rate-limited, changed or discontinued.
+- Contact: <https://abrinca.com/contact>.
 
 Nothing here applies to a server you run yourself. To tell users of your instance about your own
 terms, put them into the plain text of its [`--about`](../guides/public-server.md#describing-your-instance) file.

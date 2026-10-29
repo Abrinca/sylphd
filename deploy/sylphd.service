@@ -38,9 +38,11 @@ Environment=PATH=/srv/sylphd/current/bin:/usr/local/bin:/usr/bin:/bin
 Environment=SYLPH_DB=gtdb-r232-c200-dbv2.syl2db
 Environment=SYLPH_META=meta-r232-reps.sqlite
 
-# Example public-instance policy, not a requirement. The server only ever
-# receives sketches; add --allow-sequences only if you want it to accept raw
-# FASTA/FASTQ on POST /assembly too.
+# Example public-instance policy (the one the public instance runs), not a
+# requirement.
+#   --allow-sequences        also accept raw FASTA/FASTQ on POST /assembly
+#                            (optional; the server then sketches it itself,
+#                            which costs CPU and RAM, see --max-sequence-mb)
 #   --max-jobs 2             profiling jobs running at once
 #   --max-queue 16           jobs (samples) allowed to wait for a job slot
 #   --rate-limit 10/min      per-client limit on the three POST endpoints
@@ -49,7 +51,7 @@ Environment=SYLPH_META=meta-r232-reps.sqlite
 # Drop any of them, raise the limits, or narrow CORS to your own page.
 # `--cors-origin *` is written unquoted: systemd splits the value on
 # whitespace and passes the asterisk through literally.
-Environment="SYLPH_SERVE_ARGS=--max-jobs 2 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin *"
+Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin *"
 
 # The display name has its own variable: SYLPH_SERVE_ARGS is split on
 # whitespace, but ${SYLPH_NAME} stays one argument even with spaces. Unset, it

@@ -8,10 +8,10 @@ classifies the hits. The sequence never leaves your machine (the command line sk
 pysylph, the web app in the browser with WebAssembly), and the command line has no size limit on the assembly (the web app takes up to 2 GiB).
 A sketch of a bacterial genome is 100–500 kB.
 
-That works on every server. The public instance runs without `--allow-sequences`, so it **never
-receives a sequence**, which is what you want when the assembly is confidential. A server started
-with the optional `--allow-sequences` also takes raw FASTA, for scripts and local use: `--no-local-sketch` uploads
-the file as it is (limited by `--max-sequence-mb`, 20 MB by default) and gives the same hits.
+That works on every server, and the sequence is never sent, which is what you want when the assembly
+is confidential. A server started with the optional `--allow-sequences` (the public instance is) also
+takes raw FASTA, for scripts and local use: `--no-local-sketch` uploads the file as it is (limited by
+`--max-sequence-mb`, 20 MB by default) and gives the same hits, but then the sequence does reach the server.
 
 ```bash
 sylphd assembly assembly.fasta

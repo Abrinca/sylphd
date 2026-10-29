@@ -180,6 +180,29 @@ assignment and closest hit whichever way it is sent.
   `null`, so the shape is stable.
 - Uploads are never logged.
 
+### Raw sequence with curl { #raw-sequence-with-curl }
+
+Any language can call the endpoint without pysylph or WebAssembly: post the FASTA (or FASTQ) file as
+the request body and put the parameters in the query string. Use `--data-binary`, which sends the
+file unchanged; plain `-d` would strip newlines.
+
+```bash
+curl --data-binary @assembly.fasta -H 'Content-Type: text/plain' \
+    'https://sylphd.abrinca.com/assembly?top=5&min_ani=85&name=my-assembly'
+
+# a gzip file is sent as it is
+curl --data-binary @assembly.fasta.gz -H 'Content-Type: application/gzip' \
+    'https://sylphd.abrinca.com/assembly?top=5'
+```
+
+The response is the JSON document above. This needs a server started with `--allow-sequences`; the
+public instance (`https://sylphd.abrinca.com`, the one the web page uses) has it, and `limits` in
+`GET /info` tells you for any other server. The sequence then reaches the server, which sketches it
+in memory; if that is not acceptable, [sketch locally](../guides/assembly.md) instead. The public
+instance limits each client to 10 POST requests per minute and the body to `--max-sequence-mb` (20 MB by
+default, before decompression); over the rate limit you get a `429` with `Retry-After` (see
+[Errors](#errors)). See the [terms](../project/terms.md) for what counts as light use.
+
 ### Hit relations { #hit-relations }
 
 `relation` is the human label and `shared_rank` its machine form. They come from the GTDB lineage
