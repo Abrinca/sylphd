@@ -33,8 +33,10 @@ The scripts are the mechanism; these are the knobs you choose:
   `caddy.service` drop-in and Caddy requests a certificate for it.
 - **Public flags** — `SYLPH_SERVE_ARGS` in `site.env`, on top of the defaults
   in `sylphd.service`. The shipped set is the public instance's policy and an
-  example, not a requirement: `--allow-sequences`, `--max-jobs`, `--max-queue`,
-  `--rate-limit`, `--trusted-proxy unix`, `--cors-origin`.
+  example, not a requirement: `--allow-sequences`, `--max-jobs`, `--max-contigs`
+  (100 here: one `/contigs` request is one job, and a contig costs ~0.6 s with
+  the plain databases), `--max-queue`, `--rate-limit`, `--trusted-proxy unix`,
+  `--cors-origin`.
   `--allow-sequences` is optional: it lets scripts (`curl`) post a raw FASTA or
   FASTQ to `/assembly`, which the server then sketches itself. That costs CPU
   and RAM per job (up to `--max-sequence-mb`, 20 MB by default, and up to 5×

@@ -42,6 +42,10 @@ pub struct RecordParser {
     /// FASTA: a header has been seen and its record has not been emitted yet.
     pending: bool,
     line: u64,
+    /// 0 = unlimited. Otherwise the longest sequence (and line, and header)
+    /// the parser accepts, checked before a buffer grows, so a single huge
+    /// record cannot exhaust the browser's wasm heap.
+    max_sequence: usize,
 }
 
 impl Default for RecordParser {
@@ -59,7 +63,23 @@ impl RecordParser {
             header: Vec::new(),
             pending: false,
             line: 0,
+            max_sequence: 0,
         }
+    }
+
+    /// Refuse any single line or sequence longer than `limit` bases (0 = no
+    /// limit). The check runs before a buffer is extended.
+    pub fn with_max_sequence(mut self, limit: usize) -> Self {
+        self.max_sequence = limit;
+        self
+    }
+
+    fn too_long(&self, what: &str) -> Result<(), String> {
+        Err(format!(
+            "line {}: {what} is longer than {} bp, the browser's per-record limit; \
+             classify this input with the sylphd command line",
+            self.line, self.max_sequence
+        ))
     }
 
     /// Feeds one chunk; `emit` is called with `(sequence, header)` for every
@@ -83,6 +103,11 @@ impl RecordParser {
                 result?;
             }
             data = rest;
+        }
+        // An incomplete last line: check before growing, so a single huge
+        // record without a newline cannot fill the heap.
+        if self.max_sequence > 0 && self.partial.len() + data.len() > self.max_sequence {
+            return self.too_long("a line");
         }
         self.partial.extend_from_slice(data);
         Ok(())
@@ -119,6 +144,9 @@ impl RecordParser {
     fn on_line(&mut self, line: &[u8], emit: &mut dyn FnMut(&[u8], &[u8])) -> Result<(), String> {
         self.line += 1;
         let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if self.max_sequence > 0 && line.len() > self.max_sequence {
+            return self.too_long("a line");
+        }
         match self.format {
             Format::Unknown => match line.first() {
                 None => Ok(()),
@@ -199,6 +227,11 @@ impl RecordParser {
                 } else if !self.pending {
                     return Err(format!("line {}: sequence before first header", self.line));
                 } else {
+                    if self.max_sequence > 0
+                        && self.seq.len() + line.len() > self.max_sequence
+                    {
+                        return self.too_long("a record");
+                    }
                     self.seq.extend_from_slice(line);
                 }
                 Ok(())

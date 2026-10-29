@@ -175,6 +175,11 @@ A browser without WebAssembly SIMD and workers (Chrome 91, Firefox 89, Safari 16
 them) cannot use the page and says so; use `sylphd assembly` there. See
 [Running a public server](public-server.md#sketches-only-or-raw-sequences-too-allow-sequences).
 
+Per-contig mode in the browser keeps at most the 100 longest contigs (largest first) and sends them
+in batches of the server's `limits.max_contigs`. It reads at most 1,000,000 records per run and
+refuses any single record longer than 50 Mbp, with a message saying so: those are tab-memory
+guards, and `sylphd assembly FILE --per-contig` has neither limit.
+
 ## Why the ANI is not adjusted { #why-the-ani-is-not-adjusted }
 
 sylph's default ANI is *adjusted* for sequencing coverage: it fits a coverage model to the k-mer

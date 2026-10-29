@@ -24,7 +24,6 @@ from __future__ import annotations
 import base64
 import gzip
 import json
-import os
 import random
 import shutil
 import struct
@@ -286,11 +285,11 @@ def test_pipeline_sketch_contigs(tmp_path: Path) -> None:
     assert stats["chunks"] > 1  # the 2.2 Mbp record spans chunks
     assert stats["contigs"] == len(sequences)
 
-    used: set[str] = set()
-    for got, want in zip(records, expected, strict=True):
-        assert got["name"] == want.name
-        assert got["name"] not in used
-        used.add(got["name"])
+    for got, want, (raw, _) in zip(records, expected, sequences, strict=True):
+        # Names are raw record ids here (no bookkeeping per streamed record);
+        # the caller makes them unique only for the records it keeps.
+        assert got["headerName"] == raw
+        assert got["name"] == (raw or f"contig-{got['index']}")
         assert got["length"] == want.length
         assert got["gc"] == want.gc
         assert got["contigKmers"] == want.contig_kmers
@@ -303,8 +302,17 @@ def test_pipeline_sketch_contigs(tmp_path: Path) -> None:
                 sorted_bytes(want.sketch.to_bytes())
             ), want.name
 
-    # duplicate ids are suffixed, like the CLI
-    assert [rec["name"] for rec in records if rec["headerName"] == "dupe"] == ["dupe", "dupe_2"]
+    # raw duplicate ids survive the stream unchanged ...
+    assert [rec["name"] for rec in records if rec["headerName"] == "dupe"] == ["dupe", "dupe"]
+
+    # ... and naming the kept records at send time reproduces the CLI's names,
+    # because `uniqueContigName` is applied in record order.
+    done = subprocess.run(
+        ["node", "-e", NODE_NAMING, str(ROOT / "web" / "sketching.js"),
+         json.dumps([rec["name"] if rec["headerName"] else "" for rec in records])],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(done.stdout) == [want.name for want in expected]
 
 
 NODE_NAMING = r"""
@@ -328,6 +336,38 @@ def test_unique_contig_name_matches_python() -> None:
     used: set[str] = set()
     py = [unique_contig_name(raw, counts, used, i + 1) for i, raw in enumerate(raws)]
     assert js == py
+
+
+NODE_LIMITS = r"""
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+const [js, wasm] = process.argv.slice(2);
+const mod = await import(pathToFileURL(js).href);
+mod.initSync({ module: readFileSync(wasm) });
+const fasta = ">a\nACGTACGTACGT\n>b\nACGTACGTACGT\n>c\nACGTACGTACGT\n";
+let records = null;
+let length = null;
+const counted = new mod.WasmContigSketcher(200, 31, 0, undefined, false, 2, 0);
+try { counted.push(new TextEncoder().encode(fasta)); counted.end_file(); } catch (e) { records = String((e && e.message) || e); }
+const long = new mod.WasmContigSketcher(200, 31, 0, undefined, false, 0, 10);
+try { long.push(new TextEncoder().encode(">a\nACGTACGTACGT\n")); } catch (e) { length = String((e && e.message) || e); }
+console.log(JSON.stringify({ records, length }));
+"""
+
+
+def test_wasm_record_limits_are_enforced(tmp_path: Path) -> None:
+    """The browser refuses too many records and an over-long one, before growing."""
+    harness = tmp_path / "limits.mjs"
+    harness.write_text(NODE_LIMITS)
+    done = subprocess.run(
+        ["node", str(harness), str(WASM), str(WASM.with_name("sylph_sketch_bg.wasm"))],
+        capture_output=True, text=True, check=True, timeout=120,
+    )
+    result = json.loads(done.stdout)
+    assert "more than 2 records" in result["records"]
+    assert "sylphd command line" in result["records"]
+    assert "per-record limit" in result["length"]
+    assert "sylphd command line" in result["length"]
 
 
 def test_pipeline_cancels(tmp_path: Path) -> None:

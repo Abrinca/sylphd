@@ -32,27 +32,30 @@ curl --unix-socket "$XDG_RUNTIME_DIR/sylphd.sock" http://localhost/info
 Reports:
 
 - `service`, `version`, `pysylph_version`, `python_version`;
-- `database`: `name`, `path`, `size`, `sha256` (`null` unless `--hash`), `genomes`, `c`, `k`,
-  `screen_c` (`null` for a plain `.syldb`) and `two_stage`. A plain `.syldb` reports the
-  **smallest `c` of its genomes** (genomes may differ in `c`; a sample must be sparser than all of
-  them). Genomes that differ in `k` are refused at startup. This is the **pooled view** of a
-  multi-database server: `name` and `path` are the database names (the `--db NAME=PATH` alias,
-  else the file name) and paths joined with `", "`, `size` and `genomes` the sums, `c` the
-  **smallest** `c` (sketch samples with it), `k` the common `k`, `sha256` `null` for more than one
-  database, and `screen_c`/`two_stage` only when every database agrees (`null`/`false` otherwise).
+- `database`: `name`, `size`, `sha256` (`null` unless `--hash`), `genomes`, `c`, `k`,
+  `screen_c` (`null` for a plain `.syldb`) and `two_stage`. **No filesystem paths** are exposed:
+  `/info` is public and names files, never directories (the full paths are in the server log). A
+  plain `.syldb` reports the **smallest `c` of its genomes** (genomes may differ in `c`; a sample
+  must be sparser than all of them). Genomes that differ in `k` are refused at startup. This is
+  the **pooled view** of a multi-database server: `name` is the database names (the
+  `--db NAME=PATH` alias, else the file name) joined with `", "`, `size` and `genomes` the sums,
+  `c` the **smallest** `c` (sketch samples with it), `k` the common `k`, `sha256` `null` for more
+  than one database, and `screen_c`/`two_stage` only when every database agrees
+  (`null`/`false` otherwise).
   A single-database server reports exactly what it always did;
 - `databases`: one object per database, always present (a single entry on a single-database
   server): `name` (alias or file name), `file` (the file name, since `name` may be an alias),
-  `kind` (`two-stage` for a `.syl2db`, `plain` for a `.syldb`), `path`, `size`, `sha256`,
+  `kind` (`two-stage` for a `.syl2db`, `plain` for a `.syldb`), `size`, `sha256`,
   `genomes`, `c`, `k`, `screen_c`, `two_stage` and `gtdb` (`true` when a sample of up to 100
   genome names of the database are GTDB accessions of the metadata file; a fungi or UHGV server
   that has GTDB metadata only for taxonomy lookups reports `false`). Results carry no
   per-database field: a hit belongs to the database whose taxonomy it has;
-- `metadata`: `path`, `size`, `columns`, `rows`, `release`, `built`, `format_version`, `reps_only`
-  and `sources`, or `null` without `--meta`. A format 3 file (taxonomy sources, see
+- `metadata`: `file` (the base name of the SQLite file), `size`, `columns`, `rows`, `release`,
+  `built`, `format_version`, `reps_only` and `sources`, or `null` without `--meta`. A format 3 file (taxonomy sources, see
   [the metadata reference](metadata.md#taxonomy-sources)) adds `taxonomy_sources` — one object per
-  source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`,
-  `md5`, `keys`, `has_host` — `taxonomy_overlaps` — the pairs of sources that share keys, each
+  source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`
+  (the catalogue URL it was downloaded from, or the **base name** of a local file — never a
+  local path), `md5`, `keys`, `has_host` — `taxonomy_overlaps` — the pairs of sources that share keys, each
   pair once, in setup order: `{"sources": [a, b], "keys": n, "examples": [...]}`, where `b` is
   the later-imported source and wins for those keys — and `sylphtax_rules` (the sylph-tax version
   whose rules apply). `examples` holds up to five shared keys. Both keys are absent for a format 2
@@ -68,7 +71,8 @@ Reports:
   [Describing your instance](../guides/public-server.md#describing-your-instance). Clients must
   treat `text` as untrusted;
 - `limits`: `max_jobs`, `max_upload_mb`, `max_sketches`, `max_contigs` (the largest `/contigs`
-  batch; a whole `/contigs` request is one job), `max_params_bytes` (the largest non-file
+  batch, `--max-contigs`, 4096 by default; a whole `/contigs` request is one job),
+  `max_params_bytes` (the largest non-file
   form field, i.e. how large the JSON `params` of one request may grow), `allow_sequences`,
   `max_sequence_mb` (`null` unless sequences are allowed), `rate_limit` (`{"count",
   "window_seconds"}` or `null`) and `max_queue` (`null` means unlimited);
@@ -395,7 +399,9 @@ Unknown keys are a 400. **A whole request is one job**, whatever its number of c
 contigs are queried one after the other inside that single job slot, so `--max-jobs` and
 `--max-queue` bound concurrent requests (a second request beyond the capacity is refused whole
 with `503`), and `--rate-limit` sees one request. The per-request bound is
-`limits.max_contigs` (4096, the same as `max_sketches`). Each sketch is validated like a `/query`
+`limits.max_contigs` (`--max-contigs`, 4096 by default; a public server should set 100, because a
+contig on a server with plain databases costs ~0.5-0.6 s and the whole request is one job). Each
+sketch is validated like a `/query`
 sketch (`k` must match, `c` must not be sparser than the database's), and the whole request is
 refused with a 400 if any entry is invalid (a count that does not match the sketch parts, a
 `contig_kmers` no sequence of that length can have, a duplicate name, ...).
@@ -468,7 +474,7 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 
 | Status | When |
 |---|---|
-| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request; for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, or malformed or non-`ACGTN` raw sequence; for `/contigs` a `contigs` list that does not match the sketch parts, a duplicate or unusable contig name, a `contig_kmers` that is not a positive integer or that no sequence of that `length` can have, or an out-of-range option |
+| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request (or more than the server's `max_contigs` for `/contigs`); for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, or malformed or non-`ACGTN` raw sequence; for `/contigs` a `contigs` list that does not match the sketch parts, a duplicate or unusable contig name, a `contig_kmers` that is not a positive integer or that no sequence of that `length` can have, or an out-of-range option |
 | `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted) |
 | `413` | the body exceeds `--max-upload-mb`, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
 | `415` | `/query`, `/profile` and `/contigs` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |

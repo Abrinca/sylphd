@@ -9,7 +9,7 @@ An example deployment behind a reverse proxy:
 
 ```bash
 sylphd serve --db gtdb-r232-c200-dbv2.syl2db --meta gtdb-r232.sqlite \
-    --tcp 127.0.0.1:8765 --max-jobs 4 --max-queue 16 \
+    --tcp 127.0.0.1:8765 --max-jobs 4 --max-contigs 100 --max-queue 16 \
     --rate-limit 10/min --trusted-proxy 127.0.0.1 \
     --cors-origin https://abrinca.github.io
 ```
@@ -59,14 +59,25 @@ never logged: only sizes, timings and request outcomes appear in the server log.
 | Option | Default | Applies to | Meaning |
 |---|---|---|---|
 | `--max-jobs N` | `2` | `/profile`, `/query`, `/assembly`, `/contigs` | profiling jobs running at once; further jobs queue. A job is one sample of a `/profile` or `/query` request, one `/assembly` upload, or one whole `/contigs` request (whose contigs then run one after the other in that slot) |
+| `--max-contigs N` | `4096` | `/contigs` | contigs in one request (400 above it); one request is one job, so this is also the largest amount of work one client can ask for at once. A public instance should use a small value, **100** in the example below |
 | `--max-upload-mb N` | `512` | all `POST`s | request body limit (413 above it) |
 | `--max-sequence-mb N` | `20` | raw `/assembly` | upload limit of a raw sequence before decompression; gzip bodies may decompress to 5× this. Sketch uploads use `--max-upload-mb` |
 | `--rate-limit N/min` | off | `/profile`, `/query`, `/assembly`, `/contigs` | per-client limit (`N/min` or `N/s`); over the limit: `429` with `Retry-After` |
 | `--max-queue N` | unlimited | the same | jobs allowed to wait for a job slot; beyond that `503` with `Retry-After: 1` |
 
 `/health` and `/info` are always served and never limited. At most 4096 sketches fit in one
-`/query`, `/profile` or `/contigs` request; `/info` reports the cap as `max_sketches` and, for
-`/contigs`, also as `max_contigs`, plus the largest JSON `params` part as `max_params_bytes`.
+`/query` or `/profile` request; `/info` reports that cap as `max_sketches`. For `/contigs` the cap
+is `--max-contigs` (`4096` by default), reported as `max_contigs`, plus the largest JSON `params`
+part as `max_params_bytes`.
+
+**Set `--max-contigs` to a small value on a public server** — `100` is a sensible one. A whole
+`/contigs` request is one job, and its contigs are queried one after the other, so the cap is what
+bounds how long one client can hold a job slot. The cost of a contig depends on the databases: on
+a `.syl2db` it is a few milliseconds, but every plain `.syldb` is scanned per contig, so on GTDB +
+UHGV + fungi a *single* contig costs roughly 0.6 s. With the default 4096, a ~5 MB upload of tiny
+contigs would occupy one of the two job slots for about 40 minutes; with `--max-contigs 100` it is
+about a minute. Both `sylphd assembly --per-contig` and the web page batch by the advertised
+`limits.max_contigs`, so a client adapts to the value without a flag of its own.
 
 `--max-queue` counts jobs, not HTTP requests, and a request is accepted or refused as a whole.
 `/query` and `/profile` use one job per sample, `/assembly` one per upload, and `/contigs` **one

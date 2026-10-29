@@ -5,7 +5,6 @@
   "python_version": "<version>",
   "database": {
     "name": "ecoli.syl2db",
-    "path": "<path>",
     "size": 419015,
     "sha256": null,
     "genomes": 3,

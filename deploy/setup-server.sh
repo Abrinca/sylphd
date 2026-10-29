@@ -29,6 +29,37 @@ UV=/usr/local/bin/uv
 log() { printf '%s setup-server: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
 die() { log "error: $*"; exit 1; }
 
+# Escape one value for a systemd `Environment="NAME=VALUE"` line: quotes and
+# backslashes are backslash-escaped and a `%` becomes `%%` (systemd expands
+# specifiers in unit files). Newlines are refused rather than encoded: none of
+# the site settings is meant to span lines, and a `\n` escape would silently
+# change the value. Every value written into the drop-in goes through this one
+# routine; nothing is interpolated into the unit file raw.
+#
+# The newline check runs in the caller's shell (an `exit` inside `$(...)` would
+# only leave the substitution), before any escaping happens.
+require_one_line() {
+    case $1 in
+        *$'\n'* | *$'\r'*) die "a site setting contains a newline; each value must be one line" ;;
+    esac
+}
+
+systemd_value() {
+    local value=$1
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//%/%%}
+    printf '%s' "$value"
+}
+
+# One `Environment="NAME=VALUE"` line for the drop-in (empty value = omitted).
+systemd_environment() {
+    local name=$1 value=$2
+    [[ -n $value ]] || return 0
+    require_one_line "$value"
+    printf 'Environment="%s=%s"\n' "$name" "$(systemd_value "$value")"
+}
+
 [[ ${SYLPHD_DRY_RUN:-0} == 1 || $EUID -eq 0 ]] || die "run as root (sudo $0)"
 
 # ---------------------------------------------------------------------------
@@ -70,6 +101,16 @@ name_re='[A-Za-z0-9.-]+(:[0-9]+)?'
 # (which would corrupt that expansion) and must name files in /srv/sylphd/db.
 db_dir=${SYLPH_DB_DIR:-$ROOT/db}
 db_args=()
+# A database file name is copied into a systemd value and (through
+# SYLPH_DB_ARGS) onto a command line: keep it to a conservative allowlist and
+# refuse the leading '.'/'-' that would make it a hidden file or an option.
+db_file_re='^[A-Za-z0-9._+-]+$'
+db_name_re='^[A-Za-z0-9_.-]+$'
+# The list is whitespace-separated; a newline would silently split an entry,
+# so a multi-line value is an error rather than one more separator.
+case ${SYLPH_DB:-} in
+    *$'\n'* | *$'\r'*) die "SYLPH_DB must be one line (entries separated by spaces)" ;;
+esac
 if [[ -n ${SYLPH_DB:-} ]]; then
     read -r -a db_entries <<<"$SYLPH_DB"
     for entry in "${db_entries[@]}"; do
@@ -78,11 +119,17 @@ if [[ -n ${SYLPH_DB:-} ]]; then
         if [[ $entry == *=* ]]; then
             name=${entry%%=*}
             file=${entry#*=}
+            [[ -n $name ]] ||
+                die "SYLPH_DB entry '$entry': the NAME before '=' is empty"
         fi
         [[ -n $file ]] || die "SYLPH_DB entry '$entry' has no file name"
         [[ $file != */* ]] ||
             die "SYLPH_DB entry '$entry': give a file name in $db_dir, not a path"
-        if [[ -n $name && ! $name =~ ^[A-Za-z0-9_.-]+$ ]]; then
+        [[ $file =~ $db_file_re ]] ||
+            die "SYLPH_DB entry '$entry': the file name may only contain letters, digits, '_', '.', '+' and '-'"
+        [[ $file != .* && $file != -* ]] ||
+            die "SYLPH_DB entry '$entry': the file name must not start with '.' or '-'"
+        if [[ -n $name && ! $name =~ $db_name_re ]]; then
             die "SYLPH_DB entry '$entry': the NAME before '=' may only contain letters, digits, '_', '.' and '-'"
         fi
         [[ -f $db_dir/$file ]] ||
@@ -99,16 +146,27 @@ fi
 # it is split back into arguments.  No entry can contain whitespace (checked).
 db_args_text="${db_args[*]}"
 
+# SYLPH_META ends up as `--meta $db_dir/$SYLPH_META` in ExecStart (unquoted) and
+# in Environment=: the same allowlist applies, for the same reasons.
+if [[ -n ${SYLPH_META:-} ]]; then
+    [[ $SYLPH_META != *$'\n'* && $SYLPH_META != *$'\r'* ]] ||
+        die "SYLPH_META must be one line"
+    [[ $SYLPH_META =~ $db_file_re ]] ||
+        die "SYLPH_META may only contain letters, digits, '_', '.', '+' and '-'"
+    [[ $SYLPH_META != .* && $SYLPH_META != -* ]] ||
+        die "SYLPH_META must not start with '.' or '-'"
+fi
+
 # `SYLPHD_DRY_RUN=1 ./setup-server.sh` validates site.env and prints the unit
 # fragment it would install, without touching the host (no root needed; set
 # SYLPH_DB_DIR to check against a directory other than /srv/sylphd/db).
 if [[ ${SYLPHD_DRY_RUN:-0} == 1 ]]; then
     echo "# sylphd.service.d/10-site.conf (dry run)"
     echo "[Service]"
-    [[ -n $db_args_text ]] && echo "Environment=\"SYLPH_DB_ARGS=$db_args_text\""
-    [[ -n ${SYLPH_META:-} ]] && echo "Environment=\"SYLPH_META=$SYLPH_META\""
-    [[ -n ${SYLPH_NAME:-} ]] && echo "Environment=\"SYLPH_NAME=$SYLPH_NAME\""
-    [[ -n ${SYLPH_SERVE_ARGS:-} ]] && echo "Environment=\"SYLPH_SERVE_ARGS=$SYLPH_SERVE_ARGS\""
+    systemd_environment SYLPH_DB_ARGS "$db_args_text"
+    systemd_environment SYLPH_META "${SYLPH_META:-}"
+    systemd_environment SYLPH_NAME "${SYLPH_NAME:-}"
+    systemd_environment SYLPH_SERVE_ARGS "${SYLPH_SERVE_ARGS:-}"
     echo "# ExecStart arguments: $db_args_text"
     echo "# (+ --meta $db_dir/${SYLPH_META:-}, --socket $ROOT/run/sylphd.sock, --name=${SYLPH_NAME:-}, ${SYLPH_SERVE_ARGS:-})"
     exit 0
@@ -259,11 +317,12 @@ site_conf=$(mktemp)
     echo "# Edit site.env and re-run setup-server.sh instead of this file."
     echo "[Service]"
     # The database list is rendered into one string of --db arguments; the
-    # unit expands $SYLPH_DB_ARGS (unquoted) into separate arguments.
-    [[ -n $db_args_text ]] && echo "Environment=\"SYLPH_DB_ARGS=$db_args_text\""
-    [[ -n ${SYLPH_META:-} ]] && echo "Environment=\"SYLPH_META=$SYLPH_META\""
-    [[ -n ${SYLPH_NAME:-} ]] && echo "Environment=\"SYLPH_NAME=$SYLPH_NAME\""
-    [[ -n ${SYLPH_SERVE_ARGS:-} ]] && echo "Environment=\"SYLPH_SERVE_ARGS=$SYLPH_SERVE_ARGS\""
+    # unit expands $SYLPH_DB_ARGS (unquoted) into separate arguments.  Every
+    # value is escaped by systemd_environment (quotes, backslashes, %).
+    systemd_environment SYLPH_DB_ARGS "$db_args_text"
+    systemd_environment SYLPH_META "${SYLPH_META:-}"
+    systemd_environment SYLPH_NAME "${SYLPH_NAME:-}"
+    systemd_environment SYLPH_SERVE_ARGS "${SYLPH_SERVE_ARGS:-}"
     true
 } >"$site_conf"
 if ! grep -q '^Environment=' "$site_conf"; then
@@ -333,17 +392,22 @@ fi
 # process holds the old environment).
 caddy_dropin=/etc/systemd/system/caddy.service.d
 install -d -m 0755 "$caddy_dropin"
+# SYLPH_HTTP_MAX is substituted textually into the Caddyfile, so it is a size
+# (number + unit), never free text.
+http_max=${SYLPH_HTTP_MAX:-64MB}
+[[ $http_max =~ ^[0-9]+(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$ ]] ||
+    die "SYLPH_HTTP_MAX does not look like a size (e.g. 64MB): $http_max"
 caddy_conf=$(mktemp)
 {
     echo "# Managed by sylphd setup-server.sh from $site_env."
     echo "[Service]"
-    echo "Environment=\"SYLPHD_DOMAIN=$DOMAIN\""
-    echo "Environment=\"SYLPH_HTTP_MAX=${SYLPH_HTTP_MAX:-64MB}\""
+    systemd_environment SYLPHD_DOMAIN "$DOMAIN"
+    systemd_environment SYLPH_HTTP_MAX "$http_max"
 } >"$caddy_conf"
 
 if [[ -f $HERE/Caddyfile ]]; then
     log "Caddyfile for $DOMAIN"
-    SYLPHD_DOMAIN="$DOMAIN" SYLPH_HTTP_MAX="${SYLPH_HTTP_MAX:-64MB}" \
+    SYLPHD_DOMAIN="$DOMAIN" SYLPH_HTTP_MAX="$http_max" \
         /usr/bin/caddy validate --config "$HERE/Caddyfile" --adapter caddyfile ||
         die "Caddyfile is invalid (domain: $DOMAIN)"
     changed=0

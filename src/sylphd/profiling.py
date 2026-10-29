@@ -161,9 +161,10 @@ class LoadedDatabase:
         return k, c
 
     def info(self) -> dict[str, Any]:
+        # Public: the file name only.  The absolute path is written to the
+        # server log at startup and never leaves the process through /info.
         return {
             "name": self.name,
-            "path": str(self.path),
             "size": self.size,
             "sha256": self.sha256,
             "genomes": self.genomes,
@@ -179,7 +180,6 @@ class LoadedDatabase:
             "name": self.name,
             "file": self.path.name,
             "kind": "two-stage" if self.two_stage else "plain",
-            "path": str(self.path),
             "size": self.size,
             "sha256": self.sha256,
             "genomes": self.genomes,
@@ -227,8 +227,9 @@ class DatabaseSet:
 
     ``/info`` reports the pooled view: ``c`` is the smallest ``c`` (the value
     samples must be sketched with), ``k`` the common ``k``, ``genomes`` the
-    sum.  ``name``/``path`` of several databases are their names/paths joined
-    with ``", "``; a single database reports exactly what it did before.
+    sum.  ``name`` of several databases is their names joined with ``", "``;
+    the joined ``path`` stays internal (it holds absolute paths) and is only
+    used in log lines and error messages.
     """
 
     def __init__(
@@ -294,8 +295,9 @@ class DatabaseSet:
         databases = cls([database for database, _ in loaded], cache_size=cache_size)
         for database, seconds in loaded:
             log.info(
-                "loaded %s: %s, %s genomes, c=%d, k=%d, %.2f s",
+                "loaded %s (%s): %s, %s genomes, c=%d, k=%d, %.2f s",
                 database.name,
+                database.path,
                 "two-stage" if database.two_stage else "plain",
                 f"{database.genomes:,}",
                 database.c,
@@ -337,10 +339,12 @@ class DatabaseSet:
     # -- description -----------------------------------------------------
 
     def info(self) -> dict[str, Any]:
-        """The pooled view ``/info`` (and ``/assembly``) reports as ``database``."""
+        """The pooled view ``/info`` (and ``/assembly``) reports as ``database``.
+
+        Public, like :meth:`LoadedDatabase.info`: no filesystem paths.
+        """
         return {
             "name": self.name,
-            "path": self.path,
             "size": self.size,
             "sha256": self.sha256,
             "genomes": self.genomes,
@@ -566,20 +570,32 @@ def run_assembly_sketch(
     return result
 
 
-def _decode_sketch(
+def check_sketch_header(
     databases: DatabaseSet, name: str, payload: bytes
-) -> tuple[Any, Any]:
-    """Validate sketch bytes against the databases and decode them.
+) -> SketchHeader:
+    """Validate a sketch's fixed header against the databases, without decoding.
 
     Checks the fixed header before decoding: sylph's deserializer allocates
     from the k-mer count prefix, and a huge count aborts the whole process.
-    This also lets a c/k mismatch be rejected without deserializing anything.
+    This also lets a c/k mismatch be rejected without deserializing anything,
+    and it tells ``POST /contigs`` the k-mer count of an upload cheaply, so a
+    sketch below sylph's sample floor is reported without a query.
     """
     try:
         header = parse_sketch_header(payload)
     except SketchFormatError as error:
-        raise BadRequest(f"sample {name!r}: not a valid sample sketch ({error})") from error
+        raise BadRequest(
+            f"sample {name!r}: not a valid sample sketch ({error})"
+        ) from error
     databases.check_sketch(header, name)
+    return header
+
+
+def _decode_sketch(
+    databases: DatabaseSet, name: str, payload: bytes
+) -> tuple[Any, Any]:
+    """Validate sketch bytes against the databases and decode them."""
+    header = check_sketch_header(databases, name, payload)
     try:
         sketch = pysylph.SampleSketch.from_bytes(payload)
     except (ValueError, OSError) as error:

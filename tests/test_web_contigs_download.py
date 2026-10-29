@@ -213,6 +213,27 @@ def test_tsv_and_json_match_the_cli() -> None:
     assert got["doc"]["summary"]["bp"] == totals["bp"]
 
 
+NODE_CHUNK = r"""
+const F = require(process.argv[1]);
+console.log(JSON.stringify({
+  configured: F.chunkSizeFor({ limits: { max_contigs: 2, max_sketches: 4096 } }),
+  fallback: F.chunkSizeFor({ limits: { max_sketches: 4 } }),
+  default: F.chunkSizeFor({}),
+  cap: F.MAX_CLASSIFIED,
+}));
+"""
+
+
+def test_the_web_batches_by_max_contigs_and_keeps_its_own_cap() -> None:
+    """The browser follows ``limits.max_contigs`` but never sends over 100 contigs."""
+    done = subprocess.run(
+        ["node", "-e", NODE_CHUNK, str(CONTIGS_JS)],
+        capture_output=True, text=True, check=True,
+    )
+    result = json.loads(done.stdout)
+    assert result == {"configured": 2, "fallback": 4, "default": 4096, "cap": 100}
+
+
 def test_skipped_records_have_no_tsv_rows() -> None:
     """A skipped record is a count, not a row (the CLI is changing the same way)."""
     classified = [record for record in RECORDS if record["status"] == "ok"]

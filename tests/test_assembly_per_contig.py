@@ -101,6 +101,19 @@ def server(tmp_path_factory, tiny_database, tiny_metadata):
 
 
 @pytest.fixture(scope="module")
+def capped_server(tmp_path_factory, tiny_database, tiny_metadata):
+    """A server that accepts at most two contigs per POST /contigs."""
+    with _serve(
+        tmp_path_factory.mktemp("capped-server"),
+        tiny_database,
+        "--max-contigs",
+        "2",
+        meta=tiny_metadata,
+    ) as socket_path:
+        yield socket_path
+
+
+@pytest.fixture(scope="module")
 def queue_server(tmp_path_factory, tiny_database, tiny_metadata):
     """A server whose queue refuses more than two sketches per request."""
     with _serve(
@@ -521,6 +534,39 @@ def test_chunk_size_for() -> None:
     limits["max_sketches"] = 4
     assert per_contig_client.chunk_size_for({"limits": limits}) == 4
     assert per_contig_client.chunk_size_for({}) == 4096
+
+
+def test_client_batches_by_the_advertised_max_contigs(
+    capped_server, genome, tmp_path, monkeypatch, capsys
+) -> None:
+    """Five contigs against --max-contigs 2: three sequential requests (2+2+1)."""
+    records = [(f"c{index}", genome) for index in range(5)]
+    path = _write_fasta(tmp_path / "five.fa", records)
+    calls: list[list[str]] = []
+    original = SylphClient.contigs
+
+    def counting(self, samples, **kwargs):
+        calls.append([name for name, _ in samples])
+        return original(self, samples, **kwargs)
+
+    monkeypatch.setattr(SylphClient, "contigs", counting)
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        capped_server,
+        "--fields",
+        "none",
+        "--quiet",
+    )
+    rows = _rows(capsys)[1]
+    assert [len(batch) for batch in calls] == [2, 2, 1]
+    assert [name for batch in calls for name in batch] == [f"c{i}" for i in range(5)]
+    assert len(rows) == 5
+    assert {row["status"] for row in rows} == {"ok"}
 
 
 def test_params_budget_counts_json_escapes() -> None:
@@ -1309,6 +1355,27 @@ def test_fastq_records(server, genome, tmp_path, capsys) -> None:
     assert [row["status"] for row in rows] == ["ok", "ok"]
 
 
+def test_duplicate_fields_are_requested_and_printed_once(
+    server, fragmented, capsys
+) -> None:
+    """``--fields a,a`` must not duplicate the request list or a TSV column."""
+    _run(
+        "assembly",
+        fragmented,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        server,
+        "--fields",
+        "gtdb_taxonomy,gtdb_taxonomy",
+        "--quiet",
+    )
+    header, rows, _ = _rows(capsys)
+    assert header.count("gtdb_taxonomy") == 1
+    assert rows and rows[0]["gtdb_taxonomy"]
+
+
 def test_fields_none_hides_metadata_but_keeps_relations(
     server, fragmented, capsys
 ) -> None:
@@ -1482,6 +1549,75 @@ def test_info_advertises_the_contigs_endpoint(endpoint_app: TestClient) -> None:
     assert info["limits"]["max_contigs"] == 4096
 
 
+def test_max_contigs_is_advertised_and_enforced(ani_data: AniData) -> None:
+    """``--max-contigs`` bounds one request and /info tells clients the bound."""
+    with TestClient(
+        create_app(ServerConfig(db_path=ani_data.database, max_contigs=2))
+    ) as client:
+        assert client.get("/info").json()["limits"]["max_contigs"] == 2
+        payloads = []
+        specs = []
+        for index in range(3):
+            sequence = ani_data.reference[index * 5000 : index * 5000 + 40_000]
+            payload, kmers, gc = _sketch_contig(sequence, f"c{index}")
+            payloads.append((f"c{index}", payload))
+            specs.append(_contig_spec(f"c{index}", sequence, kmers, gc))
+
+        too_many = _post_contigs(client, payloads, {"contigs": specs})
+        assert too_many.status_code == 400
+        error = too_many.json()["error"]
+        assert "too many contigs" in error
+        assert "3 > 2" in error
+        assert "limits.max_contigs" in error
+
+        accepted = _post_contigs(client, payloads[:2], {"contigs": specs[:2]})
+        assert accepted.status_code == 200
+        assert len(accepted.json()["contigs"]) == 2
+
+
+def test_floor_contigs_never_reach_the_profiler(
+    endpoint_app: TestClient, monkeypatch
+) -> None:
+    """A sketch below the sample k-mer floor is answered without a query."""
+    sequence = "".join(random.Random(6).choices("ACGT", k=300))
+    payload, kmers, gc = _sketch_contig(sequence, "tiny")
+    calls = []
+
+    def counting(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("the profiler ran for a floor contig")
+
+    monkeypatch.setattr("sylphd.server.run_contig_query", counting)
+    response = _post_contigs(
+        endpoint_app,
+        [("tiny", payload)],
+        {"contigs": [_contig_spec("tiny", sequence, kmers, gc)]},
+    )
+    assert response.status_code == 200
+    (result,) = response.json()["contigs"]
+    assert result["status"] == "too_few_kmers"
+    assert calls == []
+
+
+def test_contig_kmers_zero_is_rejected_before_profiling(
+    endpoint_app: TestClient, monkeypatch
+) -> None:
+    """A taste of ``contig_kmers == 0`` is a 400, never a query."""
+    sequence = "A" * 1000
+    payload, _, gc = _sketch_contig(sequence, "zero")
+    monkeypatch.setattr(
+        "sylphd.server.run_contig_query",
+        lambda *args, **kwargs: pytest.fail("the profiler ran"),
+    )
+    response = _post_contigs(
+        endpoint_app,
+        [("zero", payload)],
+        {"contigs": [_contig_spec("zero", sequence, 0, gc)]},
+    )
+    assert response.status_code == 400
+    assert "contig_kmers must be between" in response.json()["error"]
+
+
 def test_contigs_endpoint_response(endpoint_app, endpoint_data) -> None:
     payload, spec = endpoint_data
     response = _post_contigs(
@@ -1569,6 +1705,59 @@ def test_contigs_endpoint_too_few_kmers(endpoint_app: TestClient) -> None:
     assert result["consensus"] is None
     assert body["summary"]["too_few_kmers_contigs"] == 1
     assert body["summary"]["queried_contigs"] == 0
+
+
+def test_slow_scoring_stays_off_the_event_loop(
+    ani_data: AniData, endpoint_data, monkeypatch
+) -> None:
+    """Scoring runs in the worker too: /health answers during a /contigs job."""
+    payload, spec = endpoint_data
+    started = threading.Event()
+    release = threading.Event()
+    original = per_contig.contig_result
+
+    def slow_scorer(*args, **kwargs):
+        started.set()
+        assert release.wait(timeout=10)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr("sylphd.server.per_contig.contig_result", slow_scorer)
+    app = create_app(ServerConfig(db_path=ani_data.database))
+    with TestClient(app) as client, ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _post_contigs, client, [("contig1", payload)], {"contigs": [spec]}
+        )
+        assert started.wait(timeout=5)
+        began = time.monotonic()
+        response = client.get("/health")
+        elapsed = time.monotonic() - began
+        release.set()
+        assert response.status_code == 200
+        assert elapsed < 2.0
+        assert future.result(timeout=30).status_code == 200
+
+
+def test_duplicate_fields_are_deduplicated(
+    tiny_database, tiny_metadata, genome
+) -> None:
+    """Repeated metadata columns are fetched once and echoed once."""
+    with TestClient(
+        create_app(ServerConfig(db_path=tiny_database, meta_path=tiny_metadata))
+    ) as client:
+        sequence = genome[:40_000]
+        payload, kmers, gc = _sketch_contig(sequence, "c1")
+        response = _post_contigs(
+            client,
+            [("c1", payload)],
+            {
+                "contigs": [_contig_spec("c1", sequence, kmers, gc)],
+                "fields": ["gtdb_taxonomy", "gtdb_taxonomy"],
+            },
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["params"]["fields"] == ["gtdb_taxonomy"]
+    assert body["contigs"][0]["hits"][0]["gtdb_taxonomy"]
 
 
 def test_contigs_endpoint_requires_multipart(endpoint_app: TestClient) -> None:

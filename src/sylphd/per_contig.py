@@ -478,7 +478,7 @@ def classification_fields(fields: Sequence[str], available: Sequence[str]) -> li
     ``gtdb_taxonomy``, and the ``tax_lineage``/``tax_source`` a sylph-tax
     source resolved for a non-GTDB hit (design note B6).
     """
-    requested = list(fields)
+    requested = list(dict.fromkeys(fields))
     for column in ("gtdb_taxonomy", "tax_lineage", "tax_source"):
         if column in available and column not in requested:
             requested.append(column)
@@ -575,7 +575,7 @@ def contig_hits(
         for key in ("taxonomy", "taxonomy_source"):
             if key in label:
                 hit[key] = label[key]
-        for column in options.fields:
+        for column in dict.fromkeys(options.fields):
             hit[column] = item.row.get(column)
         hits.append(hit)
     return hits, assignment, closest, consensus_summary

@@ -9,6 +9,11 @@
   const CREDITS = 4; // chunks in flight per decompress worker
   const GIB = 1024 ** 3;
   const MEM_ABORT = 3.6 * GIB; // wasm memory is capped at 4 GiB per instance
+  // Per-contig mode bounds. The browser keeps one record's sketch at a time, but a
+  // pathological input must not keep a tab busy for hours: the wasm parser enforces
+  // these (before growing a buffer) and its error message points to the CLI.
+  const MAX_CONTIG_RECORDS = 1000000; // records in one per-contig run
+  const MAX_CONTIG_LENGTH = 50000000; // bp in a single record
 
   // WebAssembly SIMD probe (the module is built with simd128): Chrome 91, Firefox 89, Safari 16.4.
   const SIMD_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]);
@@ -117,10 +122,11 @@
 
   const isSylsp = (file) => /\.sylsp$/i.test(file.name || '');
 
-  // A sample name for one contig, unique within the request: repeated header
-  // ids get `_2`, `_3`, ... like sylphd's `unique_contig_name`; a record with
-  // no id is `contig-<index>`. `counts` (Map) and `used` (Set) are the
-  // bookkeeping of one file.
+  // A sample name for one contig, unique within the *sent* set: repeated header
+  // ids get `_2`, `_3`, ... like sylphd's `unique_contig_name`; a record with no
+  // id is `contig-<index>`. `counts` (Map) and `used` (Set) belong to the caller
+  // and must only cover records it keeps (the sent batch): doing this for every
+  // record of a fragmented assembly would grow with the file.
   function uniqueContigName(raw, counts, used, index) {
     const base = raw || `contig-${index}`;
     let count = (counts.get(base) || 0) + 1;
@@ -143,18 +149,21 @@
   //   });
   //   const stats = await run.done;   // records, sketched, skipped, bases, ...
   //
-  // `name` is unique (see uniqueContigName); `sketch` is the .sylsp bytes of the
-  // record's sample sketch and `contigKmers` the record's genome-style k-mer
+  // `name` is the record's header id (raw), or `contig-<index>` when the header
+  // has none; it is **not** unique. Records are transient -- the caller keeps at
+  // most a bounded set -- so unique request names are made for the kept records
+  // only, at send time (see uniqueContigName). `sketch` is the .sylsp bytes of
+  // the record's sample sketch and `contigKmers` the record's genome-style k-mer
   // count, both null for an empty record or one shorter than `minLength`.
   // `gc` is the GC percent (two decimals), `gcCount` the number of G/C bases.
   // Returns { done, cancel() }; cancelling rejects `done` with an AbortError.
   // The caller must not hold on to the records (a large assembly does not fit
   // in memory) and should send or aggregate them as they arrive.
+  // The wasm sketcher refuses more than MAX_CONTIG_RECORDS records and any
+  // single record longer than MAX_CONTIG_LENGTH bp (see sketch-wasm/src/contig.rs).
   function sketchContigs(file, { c, k, minLength = 20000, minSpacing, onProgress = () => {} } = {}, onContig = () => {}) {
     let kill = () => {};
     let cancelled = false;
-    const counts = new Map();
-    const used = new Set();
     const done = new Promise((resolve, reject) => {
       (async () => {
         const module = await loadModule();
@@ -178,11 +187,10 @@
           } else if (data.type === 'contigs') {
             try {
               for (const record of data.records) {
-                const name = uniqueContigName(record.name, counts, used, record.index);
                 state.contigs++;
                 onContig({
                   index: record.index,
-                  name,
+                  name: record.name || `contig-${record.index}`,
                   headerName: record.name,
                   length: record.length,
                   gcCount: record.gcCount,
@@ -213,7 +221,10 @@
           { module, port: channel.port1, files: [file], stream: 0, chunkSize: CHUNK, credits: CREDITS, crc: 'deferred', engine: 'wasm' },
           [channel.port1]);
         sketchWorker.postMessage(
-          { module, port: channel.port2, mode: 'contigs', c, k, minLength, minSpacing },
+          {
+            module, port: channel.port2, mode: 'contigs', c, k, minLength, minSpacing,
+            maxRecords: MAX_CONTIG_RECORDS, maxRecordLength: MAX_CONTIG_LENGTH,
+          },
           [channel.port2]);
       })().catch(reject);
     });
@@ -279,5 +290,8 @@
     return null;
   }
 
-  window.SylphdSketch = { unsupported, loadModule, start, sketchContigs, uniqueContigName, isSylsp, readSylspHeader, sketchProblem };
+  window.SylphdSketch = {
+    unsupported, loadModule, start, sketchContigs, uniqueContigName, isSylsp,
+    readSylspHeader, sketchProblem, MAX_CONTIG_RECORDS, MAX_CONTIG_LENGTH,
+  };
 })();

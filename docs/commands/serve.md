@@ -7,7 +7,7 @@ worker threads, so the server stays responsive while jobs run.
 ```text
 sylphd serve --db [NAME=]PATH [--db [NAME=]PATH ...] [--meta PATH]
              [--socket PATH | --tcp HOST:PORT]
-             [--max-jobs N] [--max-upload-mb N] [--hash]
+             [--max-jobs N] [--max-contigs N] [--max-upload-mb N] [--hash]
              [--allow-sequences] [--max-sequence-mb N] [--rate-limit N/min]
              [--max-queue N] [--trusted-proxy IP] [--cors-origin ORIGIN]
              [--name TEXT] [--about FILE] [--log-level LEVEL]
@@ -74,6 +74,7 @@ bytes are rejected. The socket file is removed on shutdown, including on `SIGTER
 | Option | Default | Meaning |
 |---|---|---|
 | `--max-jobs N` | `2` | profiling jobs running at once; further jobs queue. A job is one sample of a `/profile` or `/query` request, one `/assembly` upload, or one whole `/contigs` request (its contigs run one after the other in that slot). A job costs more with several databases (plain databases are scanned per sample), so lower this on a multi-database server |
+| `--max-contigs N` | `4096` | contigs accepted in one `POST /contigs` request (a `400` above it), advertised as `limits.max_contigs`. The whole request is one job and its contigs run one after the other, so this bounds the work one request can occupy. **A public server should set `100`**: a plain database is scanned per contig (~0.6 s on GTDB + UHGV + fungi), so 4096 tiny contigs could hold a job slot for ~40 minutes |
 | `--max-upload-mb N` | `512` | request body limit in MB |
 | `--max-sequence-mb N` | `20` | limit of a *raw-sequence* `/assembly` upload, before decompression; gzip bodies are decompressed up to 5× this. Sketch uploads are limited by `--max-upload-mb` instead |
 | `--max-queue N` | unlimited | jobs allowed to wait for a job slot; a request that does not fit is refused whole with `503` and `Retry-After` |

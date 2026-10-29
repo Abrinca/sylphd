@@ -558,6 +558,44 @@ class TestMetadataJoin:
             assert response.status_code == 400
 
 
+class TestFields:
+    def test_duplicate_fields_are_deduplicated(
+        self, tiny_database: Path, tiny_metadata: Path, monkeypatch
+    ) -> None:
+        """A repeated metadata column is fetched and echoed once."""
+        seen: list[tuple[str, ...]] = []
+
+        def fake_run_sample(database, metadata, mode, params, fields, *args, **kwargs):
+            seen.append(tuple(fields or ()))
+            return {"name": "x", "kind": "query", "rows": []}
+
+        monkeypatch.setattr("sylphd.server.run_sample", fake_run_sample)
+        app = create_app(ServerConfig(db_path=tiny_database, meta_path=tiny_metadata))
+        with TestClient(app) as test_client:
+            response = _post(
+                test_client,
+                "query",
+                [("x", O157_SKETCH.read_bytes())],
+                fields=["gtdb_taxonomy", "genome_size", "gtdb_taxonomy"],
+            )
+        assert response.status_code == 200, response.text
+        assert seen == [("gtdb_taxonomy", "genome_size")]
+
+    def test_unknown_fields_are_still_rejected(
+        self, tiny_database: Path, tiny_metadata: Path
+    ) -> None:
+        app = create_app(ServerConfig(db_path=tiny_database, meta_path=tiny_metadata))
+        with TestClient(app) as test_client:
+            response = _post(
+                test_client,
+                "query",
+                [("x", O157_SKETCH.read_bytes())],
+                fields=["gtdb_taxonomy", "no_such_column"],
+            )
+        assert response.status_code == 400
+        assert "unknown metadata column" in response.json()["error"]
+
+
 class TestFormatting:
     def test_format_value(self) -> None:
         assert format_value("Adjusted_ANI", 99.789) == "99.79"

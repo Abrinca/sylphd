@@ -280,8 +280,9 @@ not detected: k-mer counts cannot tell them from a uniformly divergent contig.
 
 - **Requests are chunked.** Contigs are sent as batches to `POST /contigs`, each with the
   contig's genome-style k-mer count, length and GC content. A whole request is **one server job**,
-  so the chunk size is the server's `limits.max_contigs` (`max_sketches` on an older server;
-  4096 on both), not `max_jobs + max_queue`; it is also cut when the JSON `params` part (which
+  so the chunk size is the server's `limits.max_contigs` (`--max-contigs`, 4096 by default;
+  `max_sketches` on an older server), not `max_jobs + max_queue`; it is also cut when the JSON
+  `params` part (which
   repeats every contig name, length and k-mer count; names may be up to 1024 characters) would
   exceed 90 % of `limits.max_params_bytes` (900 KiB at most), and when the *measured* multipart
   body would exceed `max_upload_mb`. A request that is still too large is split in half. Every

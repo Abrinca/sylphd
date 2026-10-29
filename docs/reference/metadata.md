@@ -103,10 +103,12 @@ Two kinds of source exist:
 | `kind` | Meaning |
 |---|---|
 | `metadata` | the **virtual GTDB source** over `metadata_data`: its keys are `metadata_data.accession` and its lineages `gtdb_taxonomy`, so no lineage is stored twice. It is created from `-m` and named `GTDB_r<release>` (`GTDB` without `--release`). Importing the sylph-tax catalogue file of the *same* release (`GTDB_r232` with `--release 232`) and `-m` would duplicate it, so that source is skipped with a message; a different release or a local file is imported. |
-| `sylphtax` | one imported file; `md5` is always computed from the file, `origin` is the path or the download URL |
+| `sylphtax` | one imported file; `md5` is always computed from the file, `origin` is the path or the download URL it was imported from |
 
 `GET /info` reports the sources under `metadata.taxonomy_sources` (name, kind, origin, md5, keys,
-has_host), the shared keys once per pair under `metadata.taxonomy_overlaps`, and
+has_host). The file keeps the full `origin`; `/info` publishes only the base name of a local file
+(or the catalogue URL), never a directory. It also reports the shared keys once per pair under
+`metadata.taxonomy_overlaps`, and
 `metadata.sylphtax_rules`; `sylphd info` prints one line per source and one per overlapping pair. A
 format 2 file reports neither key, so its output is unchanged.
 

@@ -84,3 +84,58 @@ def test_missing_database_is_an_error(tmp_path: Path) -> None:
     result = _run(tmp_path, SYLPH_DB="gtdb=gtdb.syl2db")
     assert result.returncode == 1
     assert f"SYLPH_DB file not found: {tmp_path}/gtdb.syl2db" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("entry", "needle"),
+    [
+        (".hidden.syl2db", "must not start with '.' or '-'"),
+        ("-db.syl2db", "must not start with '.' or '-'"),
+        ("gtdb=.hidden.syl2db", "must not start with '.' or '-'"),
+        ("bad?.syl2db", "may only contain letters"),
+        ("gtdb=a;b.syl2db", "may only contain letters"),
+        ("=gtdb.syl2db", "NAME before '=' is empty"),
+        ("gtdb=", "has no file name"),
+    ],
+)
+def test_database_file_names_are_restricted(
+    tmp_path: Path, entry: str, needle: str
+) -> None:
+    """The file name is copied into a unit and a command line: allowlist it."""
+    result = _run(tmp_path, SYLPH_DB=entry)
+    assert result.returncode == 1, result.stdout
+    assert needle in result.stderr
+
+
+def test_multiline_database_list_is_refused(tmp_path: Path) -> None:
+    _touch(tmp_path, "a.syl2db", "b.syl2db")
+    result = _run(tmp_path, SYLPH_DB="a.syl2db\nb.syl2db")
+    assert result.returncode == 1
+    assert "SYLPH_DB must be one line" in result.stderr
+
+
+def test_metadata_file_name_is_restricted(tmp_path: Path) -> None:
+    _touch(tmp_path, "gtdb.syl2db")
+    for value in ("../meta.sqlite", ".meta.sqlite", "-meta.sqlite", "me ta.sqlite"):
+        result = _run(tmp_path, SYLPH_DB="gtdb.syl2db", SYLPH_META=value)
+        assert result.returncode == 1, value
+        assert "SYLPH_META" in result.stderr
+
+
+def test_systemd_values_are_escaped(tmp_path: Path) -> None:
+    """Quotes, backslashes and % are escaped in the drop-in; newlines refused."""
+    _touch(tmp_path, "gtdb.syl2db")
+    result = _run(
+        tmp_path,
+        SYLPH_DB="gtdb.syl2db",
+        SYLPH_NAME='A "B" C\\D 50%',
+        SYLPH_SERVE_ARGS="--name x",
+    )
+    assert result.returncode == 0, result.stderr
+    assert r'Environment="SYLPH_NAME=A \"B\" C\\D 50%%"' in result.stdout
+    # A value without special characters is unchanged.
+    assert 'Environment="SYLPH_SERVE_ARGS=--name x"' in result.stdout
+
+    result = _run(tmp_path, SYLPH_DB="gtdb.syl2db", SYLPH_NAME="two\nlines")
+    assert result.returncode == 1
+    assert "newline" in result.stderr

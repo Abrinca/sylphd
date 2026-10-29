@@ -157,7 +157,8 @@ class TestBuild:
             assert sources[1]["has_host"] is True
             assert sources[2]["has_host"] is False
             assert len(sources[1]["md5"]) == 32
-            assert sources[1]["origin"] == str(uhgv_file)
+            # Public (/info) description: a local path is reduced to its base name.
+            assert sources[1]["origin"] == uhgv_file.name
 
             summary = db.summary()
             assert summary["sylphtax_rules"] == "1.9.2"
@@ -1099,7 +1100,6 @@ class TestOverlaps:
         document = {
             "database": {
                 "name": "db",
-                "path": "db.syl2db",
                 "size": 1,
                 "genomes": 1,
                 "c": 200,
@@ -1108,7 +1108,7 @@ class TestOverlaps:
                 "two_stage": False,
             },
             "metadata": {
-                "path": "meta.sqlite",
+                "file": "meta.sqlite",
                 "release": "232",
                 "rows": 2,
                 "built": "2026-01-01T00:00:00+00:00",
@@ -1142,6 +1142,8 @@ class TestOverlaps:
         out = capsys.readouterr().out
         assert "    First: 9 keys" in out
         assert "    Second: 10 keys" in out
+        assert "path:" not in out
+        assert "metadata: meta.sqlite" in out
         assert "  taxonomy overlaps: 1" in out
         assert "    First and Second: 1,234 shared keys; examples: K1, K2; the source imported later wins" in out
 

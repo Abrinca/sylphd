@@ -58,6 +58,7 @@ from .profiling import (
     BadRequest,
     DatabaseSet,
     DatabaseSpec,
+    check_sketch_header,
     run_assembly,
     run_assembly_sketch,
     run_contig_query,
@@ -69,14 +70,16 @@ from .taxonomy import TaxonomyError, parse_taxonomies, resolve_taxonomy_columns
 
 log = logging.getLogger("uvicorn.error")
 
-#: Maximum number of sketches accepted in one request.
+#: Maximum number of sketches accepted in one ``/profile`` or ``/query``
+#: request.
 MAX_SKETCHES = 4096
 
-#: Maximum number of contigs accepted in one ``/contigs`` request.  The whole
-#: request is one job (its contigs run sequentially in that slot), so this is
-#: also the batch bound a client should use; ``/info`` advertises it as
-#: ``limits.max_contigs``.
-MAX_CONTIGS = MAX_SKETCHES
+#: Default of ``--max-contigs``: the maximum number of contigs accepted in one
+#: ``/contigs`` request.  The whole request is one job (its contigs run
+#: sequentially in that slot) and a contig can cost tens of milliseconds on a
+#: multi-database server, so the operator can tighten it; ``/info`` advertises
+#: the effective value as ``limits.max_contigs`` and clients batch by it.
+DEFAULT_MAX_CONTIGS = MAX_SKETCHES
 
 #: Largest non-file form field (``params``) Starlette accepts in one request.
 #: ``/contigs`` repeats every contig name, length and k-mer count there, so the
@@ -155,8 +158,13 @@ class ServerConfig:
     about: About = field(default_factory=lambda: About(None))
     #: Set when serving on a Unix socket, so the app can adjust its mode.
     socket_path: Path | None = None
+    #: Contigs accepted in one ``POST /contigs`` request (``--max-contigs``);
+    #: kept after the historical positional fields so their order is unchanged.
+    max_contigs: int = DEFAULT_MAX_CONTIGS
 
     def __post_init__(self) -> None:
+        if self.max_contigs < 1:
+            raise ValueError("max_contigs must be at least 1")
         if self.db_paths:
             if self.db_path is not None:
                 raise ValueError(
@@ -267,7 +275,7 @@ async def _info(request: Request) -> JSONResponse:
                 "max_jobs": state.max_jobs,
                 "max_upload_mb": state.max_upload_mb,
                 "max_sketches": MAX_SKETCHES,
-                "max_contigs": MAX_CONTIGS,
+                "max_contigs": state.max_contigs,
                 "max_params_bytes": MAX_PARAMS_BYTES,
                 "allow_sequences": state.allow_sequences,
                 "max_sequence_mb": state.max_sequence_mb if state.allow_sequences else None,
@@ -520,11 +528,13 @@ async def _contigs(request: Request) -> JSONResponse:
     The body is ``multipart/form-data``: one ``sketch`` part per contig (the
     contig sketched as a single-end sample) and a ``params`` field holding each
     contig's measurements and the options.  The whole request is **one job**,
-    however many contigs it carries (a contig costs milliseconds, far less than
-    a profiling job); its contigs run one after the other inside that one job
-    slot, so ``--max-jobs``/``--max-queue`` bound requests rather than contigs.
-    The per-request bound is ``MAX_CONTIGS``/``MAX_SKETCHES``.  The
-    contig-relative ANI, ranking, classification and consensus are computed by
+    however many contigs it carries; its contigs run one after the other inside
+    that one job slot, so ``--max-jobs``/``--max-queue`` bound requests rather
+    than contigs.  The per-request bound is ``--max-contigs`` (4096 by default,
+    advertised as ``limits.max_contigs``); on a server whose plain databases are
+    scanned per contig a contig can cost ~0.6 s, so that bound is what keeps one
+    upload from occupying a job slot for an hour.  The contig-relative ANI,
+    ranking, classification and consensus are computed by
     :mod:`sylphd.per_contig`, so every client gets the same answer.
     """
     state = request.app.state
@@ -547,12 +557,23 @@ async def _contigs(request: Request) -> JSONResponse:
 
     start = time.perf_counter()
     results: list[dict[str, Any] | None] = [None] * len(contigs)
+    # The metadata columns to fetch are request-wide; resolve them once.
+    row_fields = per_contig.classification_fields(
+        options.fields, _metadata_columns(state.metadata)
+    )
     try:
         with state.jobs.admit():
             async with state.jobs.slot():
                 for index, (contig, payload) in enumerate(zip(contigs, payloads)):
-                    results[index] = await _run_contig(
-                        state, contig, payload, options, tax_sources
+                    results[index] = await anyio.to_thread.run_sync(
+                        _contig_job,
+                        state.database,
+                        state.metadata,
+                        contig,
+                        payload,
+                        options,
+                        tax_sources,
+                        row_fields,
                     )
     except QueueFullError:
         return _busy()
@@ -589,25 +610,40 @@ async def _contigs(request: Request) -> JSONResponse:
     )
 
 
-async def _run_contig(
-    state: Any,
+def _contig_job(
+    database: DatabaseSet,
+    metadata: MetadataDB | None,
     contig: per_contig.ContigInput,
     payload: bytes,
     options: per_contig.ContigOptions,
     tax_sources: Sequence[str] | None,
+    row_fields: Sequence[str],
 ) -> dict[str, Any]:
-    """Query one contig and score it (the caller already holds the job slot).
+    """Query **and** score one contig; runs in a worker thread.
 
-    The query runs in a worker thread; scoring is cheap and keeps the slot,
-    which is fine because the whole request is a single job anyway.
+    The server calls this through ``anyio.to_thread.run_sync`` while it holds
+    the job slot, so both the synchronous pysylph query and the scoring /
+    classification / consensus of :mod:`sylphd.per_contig` stay off the event
+    loop: a /contigs request with many contigs must not delay ``/health``.
+
+    The sketch header is validated first.  A sketch below sylph's sample k-mer
+    floor (or a contig with no genome-style k-mer) cannot produce an ANI, so it
+    is reported as ``too_few_kmers`` **without** running the query: on a
+    multi-database server a query is the expensive part, and a fragmented
+    assembly may carry thousands of such records.
     """
-    row_fields = per_contig.classification_fields(
-        options.fields, _metadata_columns(state.metadata)
-    )
-    query = await anyio.to_thread.run_sync(
-        run_contig_query,
-        state.database,
-        state.metadata,
+    header = check_sketch_header(database, contig.name, payload)
+    k = database.k
+    if (
+        header.kmer_count < per_contig.QUERY_PARAMS.min_number_kmers
+        or contig.contig_kmers == 0
+    ):
+        return per_contig.contig_result(
+            contig, sketch_kmers=header.kmer_count, rows=(), options=options, k=k
+        )
+    query = run_contig_query(
+        database,
+        metadata,
         contig.name,
         payload,
         per_contig.QUERY_PARAMS,
@@ -619,7 +655,7 @@ async def _run_contig(
         sketch_kmers=int(query["sketch_kmers"]),
         rows=query["rows"],
         options=options,
-        k=state.database.k,
+        k=k,
     )
 
 
@@ -640,9 +676,13 @@ async def _read_contigs(
     The form (and its temporary files) is closed before returning.
     """
     state = request.app.state
+    limit = state.max_contigs
     try:
         async with request.form(
-            max_files=MAX_SKETCHES,
+            # One more than the limit, so the explicit check below gives a
+            # clear message; only a client that ignores it hits Starlette's
+            # "too many files" error (whose count a request must not control).
+            max_files=limit + 1,
             max_fields=16,
             max_part_size=MAX_PARAMS_BYTES,
         ) as form:
@@ -659,6 +699,15 @@ async def _read_contigs(
             sketches = form.getlist("sketch")
             if not sketches:
                 return _error("no 'sketch' part in the request", 400)
+            if len(sketches) > limit:
+                return _error(
+                    f"too many contigs in one request ({len(sketches)} > {limit}); "
+                    f"send at most {limit} sketches per POST /contigs (the "
+                    "server's limits.max_contigs in GET /info) and batch the "
+                    "rest yourself, or use 'sylphd assembly --per-contig', which "
+                    "batches by that limit",
+                    400,
+                )
             for part in sketches:
                 if not isinstance(part, UploadFile):
                     return _error("'sketch' parts must be file uploads", 400)
@@ -863,6 +912,12 @@ async def _run_slot(
 
 
 def _validate_fields(value: Any, metadata: MetadataDB | None) -> Sequence[str] | None | JSONResponse:
+    """Validate ``params.fields``: metadata column names, in request order.
+
+    Duplicates are removed (a repeated column must not duplicate the key of a
+    hit or the work of the metadata join), and the result cannot be longer
+    than the number of columns the server's metadata file has.
+    """
     if value is None:
         return None if metadata is None else tuple(metadata.field_columns)
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
@@ -874,7 +929,14 @@ def _validate_fields(value: Any, metadata: MetadataDB | None) -> Sequence[str] |
     unknown = [column for column in value if column not in metadata.field_columns]
     if unknown:
         return _error(f"unknown metadata column(s): {', '.join(unknown)}", 400)
-    return tuple(value)
+    columns = tuple(dict.fromkeys(value))
+    if len(columns) > len(metadata.field_columns):
+        return _error(
+            f"'params.fields' has {len(columns)} columns; this server's metadata "
+            f"file has only {len(metadata.field_columns)}",
+            400,
+        )
+    return columns
 
 
 def _validate_tax_sources(
@@ -1022,6 +1084,7 @@ def create_app(
     app.state.metadata = metadata_store
     app.state.started = time.monotonic()
     app.state.max_jobs = config.max_jobs
+    app.state.max_contigs = config.max_contigs
     app.state.max_upload_mb = config.max_upload_mb
     app.state.allow_sequences = config.allow_sequences
     app.state.max_sequence_mb = config.max_sequence_mb

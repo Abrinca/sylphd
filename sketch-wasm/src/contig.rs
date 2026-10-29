@@ -39,6 +39,17 @@ use crate::sketch::{count_gc, SketchBuilder, DEFAULT_FPR};
 /// pysylph's `Sketcher` (and sylph's CLI default) minimum spacing.
 pub const DEFAULT_MIN_SPACING: usize = 30;
 
+/// Most records a per-contig run processes in the browser. A fragmented
+/// assembly with millions of records would otherwise hold a tab busy for
+/// hours; `sylphd assembly --per-contig` has no such limit.
+pub const MAX_RECORDS: u64 = 1_000_000;
+
+/// Longest single record (bases) a per-contig run accepts in the browser.
+/// The browser holds the record and its sketch in memory and the wasm heap is
+/// capped at 4 GiB; a longer record (a whole chromosome/genome) belongs to the
+/// CLI. Checked while parsing, before the buffers grow.
+pub const MAX_RECORD_LENGTH: usize = 50_000_000;
+
 /// The `(position, hash)` markers of one sequence, in the order sylph's
 /// seeding emits them. `position` is the end offset of the k-mer in the
 /// sequence (sylph's convention, used by the spacing filter).
@@ -205,6 +216,10 @@ pub struct ContigSketcher {
     min_length: u64,
     min_spacing: usize,
     seeding: Seeding,
+    /// Records this run accepts (`MAX_RECORDS` by default).
+    max_records: u64,
+    /// Longest single record in bases (`MAX_RECORD_LENGTH` by default).
+    max_record_length: usize,
     parser: RecordParser,
     gz: Option<GzipDecoder>,
     queue: VecDeque<ContigRecord>,
@@ -225,6 +240,29 @@ impl ContigSketcher {
         min_spacing: usize,
         seeding: Seeding,
     ) -> Result<Self, String> {
+        Self::with_limits(
+            c,
+            k,
+            min_length,
+            min_spacing,
+            seeding,
+            MAX_RECORDS,
+            MAX_RECORD_LENGTH,
+        )
+    }
+
+    /// Like [`ContigSketcher::new`], with explicit bounds (0 = unlimited).
+    /// The browser passes the defaults; tests use small values.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_limits(
+        c: usize,
+        k: usize,
+        min_length: u64,
+        min_spacing: usize,
+        seeding: Seeding,
+        max_records: u64,
+        max_record_length: usize,
+    ) -> Result<Self, String> {
         // validate through the same constructor the read sketcher uses
         SketchBuilder::new(c, k, true, DEFAULT_FPR, seeding)?;
         Ok(Self {
@@ -233,7 +271,9 @@ impl ContigSketcher {
             min_length,
             min_spacing,
             seeding,
-            parser: RecordParser::new(),
+            max_records,
+            max_record_length,
+            parser: RecordParser::new().with_max_sequence(max_record_length),
             gz: None,
             queue: VecDeque::new(),
             seen: 0,
@@ -295,6 +335,21 @@ impl ContigSketcher {
     }
 
     fn add_record(&mut self, header: &[u8], seq: &[u8]) -> Result<(), String> {
+        if self.max_records > 0 && self.seen >= self.max_records {
+            return Err(format!(
+                "this input has more than {} records, the browser's per-contig limit; \
+                 classify it with the sylphd command line (sylphd assembly FILE --per-contig)",
+                self.max_records
+            ));
+        }
+        if self.max_record_length > 0 && seq.len() > self.max_record_length {
+            return Err(format!(
+                "a record is longer than {} bp, the browser's per-contig limit; \
+                 classify this input with the sylphd command line \
+                 (sylphd assembly FILE --per-contig)",
+                self.max_record_length
+            ));
+        }
         self.seen += 1;
         let length = seq.len() as u64;
         self.bases += length;
@@ -446,6 +501,38 @@ mod tests {
         }
         // reads shorter than 2k produce nothing in the AVX2 path
         assert!(genome_kmers(Seeding::Avx2, &seq[..2 * 21 - 1], 1, 21, 30).is_empty());
+    }
+
+    #[test]
+    fn record_count_and_length_limits_are_enforced() {
+        let fasta = b">a\nACGTACGTACGTACGTACGTACGT\n>b\nACGTACGTACGTACGTACGTACGT\n";
+
+        // one record allowed: the second is refused
+        let mut s =
+            ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Scalar, 1, 0).unwrap();
+        s.push(fasta).unwrap();
+        let error = s.end_file().unwrap_err();
+        assert!(error.contains("more than 1 records"), "{error}");
+        assert!(error.contains("sylphd command line"), "{error}");
+
+        // a record longer than the limit is refused while parsing ...
+        let mut s =
+            ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Scalar, 0, 10).unwrap();
+        let error = s.push(fasta).unwrap_err();
+        assert!(error.contains("per-record limit"), "{error}");
+
+        // ... also when it is split over several FASTA lines
+        let mut s =
+            ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Scalar, 0, 10).unwrap();
+        let error = s.push(b">a\nACGTAC\nGTACGT\n").unwrap_err();
+        assert!(error.contains("per-record limit"), "{error}");
+
+        // 0 means unlimited
+        let mut s =
+            ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Scalar, 0, 0).unwrap();
+        s.push(fasta).unwrap();
+        s.end_file().unwrap();
+        assert_eq!(s.seen, 2);
     }
 
     #[test]

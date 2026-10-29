@@ -228,6 +228,10 @@ impl WasmContigSketcher {
     /// a sketch, like `--min-contig-length` (default 20000).
     /// `min_spacing`: sylph's genome-sketch spacing (default 30).
     /// `scalar_seeding`: as for `WasmSketcher`.
+    /// `max_records`: records this run accepts (`contig::MAX_RECORDS` by
+    /// default; 0 = unlimited). `max_record_length`: longest single record in
+    /// bases (`contig::MAX_RECORD_LENGTH` by default; 0 = unlimited), enforced
+    /// while parsing before a buffer grows.
     #[wasm_bindgen(constructor)]
     pub fn new(
         c: usize,
@@ -235,23 +239,40 @@ impl WasmContigSketcher {
         min_length: Option<f64>,
         min_spacing: Option<usize>,
         scalar_seeding: Option<bool>,
+        max_records: Option<f64>,
+        max_record_length: Option<f64>,
     ) -> Result<WasmContigSketcher, JsError> {
         let min_length = min_length.unwrap_or(20_000.0);
         if !(min_length >= 0.0 && min_length.is_finite()) {
             return Err(js_err(format!("invalid min_length: {min_length}")));
         }
+        let limit = |name: &str, value: Option<f64>, default: u64| -> Result<u64, JsError> {
+            let value = value.unwrap_or(default as f64);
+            if !(value >= 0.0 && value.is_finite() && value.fract() == 0.0) {
+                return Err(js_err(format!("invalid {name}: {value}")));
+            }
+            Ok(value as u64)
+        };
+        let max_records = limit("max_records", max_records, contig::MAX_RECORDS)?;
+        let max_record_length = limit(
+            "max_record_length",
+            max_record_length,
+            contig::MAX_RECORD_LENGTH as u64,
+        )? as usize;
         let seeding = if scalar_seeding.unwrap_or(false) {
             Seeding::Scalar
         } else {
             Seeding::Avx2
         };
         Ok(Self {
-            inner: ContigSketcher::new(
+            inner: ContigSketcher::with_limits(
                 c,
                 k,
                 min_length as u64,
                 min_spacing.unwrap_or(contig::DEFAULT_MIN_SPACING),
                 seeding,
+                max_records,
+                max_record_length,
             )
             .map_err(js_err)?,
         })

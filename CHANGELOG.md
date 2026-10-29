@@ -258,6 +258,37 @@ All notable changes to `sylphd` are documented here. The format follows
   of the six lambda-carrying GTDB genomes at `83/10 271`. The consensus does **not** drop those
   containing genomes: a close set that spans UHGV and GTDB stays `mixed_sources`.
 
+### Security
+
+- **`POST /contigs` is work-bounded.** `serve --max-contigs N` (default 4096) caps the contigs of
+  one request with a `400` that names the limit; `/info` advertises it as `limits.max_contigs`,
+  which the CLI and the web page already use as their batch size. A whole request is one job and a
+  contig costs ~0.6 s on a server with plain databases, so a public instance should run
+  `--max-contigs 100` (now the example policy in `deploy/`): ~40 minutes of a job slot from one
+  ~5 MB upload becomes about a minute. A sketch below the sample k-mer floor (10) is answered as
+  `too_few_kmers` **before** the query runs, so a fragmented assembly full of such records costs
+  no profiling work.
+- **`/contigs` queries and scoring no longer run on the event loop.** The per-contig query *and*
+  the scoring/classification/consensus of `sylphd.per_contig` run in the same worker thread while
+  the job slot is held, so a slow or long request cannot delay `/health` or `/info`.
+- **Repeated `params.fields` are normalised.** Every endpoint that takes `fields` removes
+  duplicates (`tuple(dict.fromkeys(...))`, like `tax_sources`) and cannot return more columns than
+  the metadata file has, so a request cannot make a hit repeat a key or the metadata join do
+  duplicate work.
+- **`/info` no longer exposes absolute paths.** `database`/`databases[]` report the database name
+  and file name only, `metadata` reports `file` (base name), and a taxonomy source's `origin` is
+  its catalogue URL or the base name of a local file. Full paths stay in the server log
+  (`sylphd info` follows the new keys).
+- **The browser per-contig path is bounded.** Record names are made unique only for the contigs
+  actually sent (the `counts`/`used` bookkeeping no longer grows with every record), the wasm
+  sketcher refuses more than 1,000,000 records or a single record longer than 50 Mbp with a
+  message pointing to `sylphd assembly --per-contig` (checked while parsing, before buffers grow).
+- **`deploy/setup-server.sh` validates and escapes what it writes.** Database file names (and
+  `SYLPH_META`) are restricted to `[A-Za-z0-9._+-]+`, not starting with `.` or `-`; empty aliases
+  and multi-line lists are refused; `SYLPH_HTTP_MAX` must be a size. Every value in a systemd
+  drop-in goes through one routine that escapes quotes and backslashes, doubles `%`, and rejects
+  newlines.
+
 ### Changed
 
 - **A `/contigs` request is one job.** Previously every contig counted as one server job, so
@@ -265,7 +296,7 @@ All notable changes to `sylphd` are documented here. The format follows
   run of 100 contigs within a minute hit the rate limit. Now the whole request occupies one job
   slot and runs its contigs sequentially inside it; `--max-jobs`/`--max-queue` bound concurrent
   requests and `--rate-limit` counts one POST. The per-request bound is
-  `limits.max_contigs` (4096, the same as `max_sketches`), advertised by `/info`;
+  `--max-contigs` (4096 by default), advertised by `/info` as `limits.max_contigs`;
   `per_contig_client.chunk_size_for` and the web page use it instead of `max_jobs + max_queue`
   (older servers fall back to `max_sketches`). Queue-full behaviour is unchanged: a second
   request while every job and queue slot is taken is a `503` with `Retry-After: 1`.

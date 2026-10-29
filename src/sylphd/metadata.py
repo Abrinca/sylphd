@@ -173,6 +173,21 @@ def normalize_accession(value: str) -> str:
     return accession.upper()
 
 
+def public_origin(origin: str | None) -> str | None:
+    """The ``origin`` of a taxonomy source as ``/info`` may publish it.
+
+    A catalogue download keeps the URL it came from; anything that is a local
+    path is reduced to its base name, so a public ``/info`` never leaks the
+    server's directory layout.  The full origin stays in the metadata file,
+    and setup logs the paths it read.
+    """
+    if not origin:
+        return None
+    if origin.startswith(("http://", "https://")):
+        return origin
+    return os.path.basename(origin.replace("\\", "/")) or None
+
+
 def accession_from_genome_name(name: str) -> str | None:
     """Map a sylph genome file name to a GTDB accession.
 
@@ -1637,7 +1652,7 @@ class MetadataDB:
             {
                 "name": source.name,
                 "kind": source.kind,
-                "origin": source.origin,
+                "origin": public_origin(source.origin),
                 "md5": source.md5,
                 "keys": source.rows,
                 "has_host": source.has_host,
@@ -1819,9 +1834,15 @@ class MetadataDB:
         }
 
     def summary(self) -> dict[str, object]:
-        """Return a JSON-friendly description of this metadata database."""
+        """Return a JSON-friendly description of this metadata database.
+
+        This is what ``GET /info`` publishes, so it names the file without its
+        directory: the absolute path is not exposed to clients.  Likewise a
+        taxonomy source's ``origin`` is reduced to its base name (or kept as
+        the URL it was downloaded from), never a local path.
+        """
         summary: dict[str, object] = {
-            "path": str(self.path),
+            "file": self.path.name,
             "size": self.path.stat().st_size,
             "columns": list(self.field_columns),
             "rows": None,

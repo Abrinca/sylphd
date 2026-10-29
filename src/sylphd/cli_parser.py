@@ -112,6 +112,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="maximum concurrent profiling jobs [default: 2]",
     )
     serve_parser.add_argument(
+        "--max-contigs",
+        type=_positive,
+        default=4096,
+        metavar="N",
+        help=(
+            "maximum contigs in one POST /contigs request [default: 4096]; "
+            "/info advertises it as limits.max_contigs and clients batch by it. "
+            "A public server should use a small value such as 100, because a "
+            "whole request is one job"
+        ),
+    )
+    serve_parser.add_argument(
         "--max-upload-mb",
         type=_positive,
         default=512,

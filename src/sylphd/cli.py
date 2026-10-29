@@ -145,6 +145,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         db_paths=specs,
         meta_path=Path(args.meta) if args.meta else None,
         max_jobs=args.max_jobs,
+        max_contigs=args.max_contigs,
         max_upload_mb=args.max_upload_mb,
         compute_hash=args.hash,
         allow_sequences=args.allow_sequences,
@@ -173,6 +174,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
         config.socket_path = socket_path
 
     databases = DatabaseSet.load(config.db_paths, compute_hash=config.compute_hash)
+    if config.meta_path is not None:
+        # /info only names the file; the operator's log keeps the full path.
+        log.info("metadata database: %s", config.meta_path)
     # Warm the default profiler: its construction scans every genome when
     # there are two or more databases, which must not happen in a request.
     started = time.perf_counter()
@@ -223,7 +227,11 @@ def _log_startup(
         assert tcp is not None
         address = f"http://{tcp[0]}:{tcp[1]}"
     kind = "two-stage" if databases.two_stage else "plain"
-    extras = [f"max-jobs={config.max_jobs}", f"max-upload={config.max_upload_mb} MB"]
+    extras = [
+        f"max-jobs={config.max_jobs}",
+        f"max-contigs={config.max_contigs}",
+        f"max-upload={config.max_upload_mb} MB",
+    ]
     if config.allow_sequences:
         extras.append(f"raw-sequence-assembly={config.max_sequence_mb} MB")
     if config.max_queue is not None:
@@ -259,7 +267,6 @@ def cmd_info(args: argparse.Namespace) -> int:
 
     database = info.get("database", {})
     print(f"database: {database.get('name')}")
-    print(f"  path: {database.get('path')}")
     print(f"  size: {format_size(int(database.get('size') or 0))}")
     print(f"  genomes: {database.get('genomes')}")
     print(
@@ -293,7 +300,7 @@ def cmd_info(args: argparse.Namespace) -> int:
         print("metadata: none")
     else:
         print(
-            f"metadata: {metadata.get('path')} "
+            f"metadata: {metadata.get('file')} "
             f"(release {metadata.get('release') or '?'}, "
             f"{metadata.get('rows')} rows, built {metadata.get('built') or '?'})"
         )
@@ -330,6 +337,7 @@ def cmd_info(args: argparse.Namespace) -> int:
     )
     print(
         f"limits: max-jobs {limits.get('max_jobs')}, "
+        f"max-contigs {limits.get('max_contigs')}, "
         f"max-upload {limits.get('max_upload_mb')} MB, "
         f"max-sketches {limits.get('max_sketches')}"
     )
@@ -549,7 +557,9 @@ def _resolve_fields(text: str | None, metadata: dict[str, Any] | None) -> list[s
             + ", ".join(unknown)
             + f" (available: {', '.join(available)})"
         )
-    return requested
+    # The server normalises duplicates too; do it here so the TSV header and
+    # the request cannot disagree.
+    return list(dict.fromkeys(requested))
 
 
 def _select_tax_sources(

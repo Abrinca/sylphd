@@ -151,10 +151,13 @@ async function run({ module, ports, paired, interleaved = false, c, k, deduplica
 }
 
 // Contigs mode: one record -> one sample sketch + genome-style k-mer count.
-async function runContigs({ module, port, c, k, minLength, minSpacing }) {
+async function runContigs({ module, port, c, k, minLength, minSpacing, maxRecords, maxRecordLength }) {
   const t0 = performance.now();
   const wasm = await init({ module_or_path: module });
-  const sketcher = new WasmContigSketcher(c, k, minLength, minSpacing);
+  // maxRecords/maxRecordLength come from sketching.js; the wasm defaults apply
+  // when they are absent. Binding the limits makes a pathological input fail
+  // with a message pointing to the CLI instead of hanging the tab.
+  const sketcher = new WasmContigSketcher(c, k, minLength, minSpacing, undefined, maxRecords, maxRecordLength);
   const crc = new WasmCrc();
   const stats = {
     sketchMs: 0, crcMs: 0, idleMs: 0, chunks: 0, decompressedBytes: 0,

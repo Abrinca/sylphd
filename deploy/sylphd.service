@@ -52,6 +52,11 @@ Environment=SYLPH_META=meta-r232-reps.sqlite
 #                            (optional; the server then sketches it itself,
 #                            which costs CPU and RAM, see --max-sequence-mb)
 #   --max-jobs 2             profiling jobs running at once
+#   --max-contigs 100        contigs in one POST /contigs request.  A whole
+#                            request is one job, and on a server with plain
+#                            databases a contig costs ~0.6 s, so 100 keeps one
+#                            client's request near a minute (the 4096 default
+#                            allows ~40 minutes from one small upload)
 #   --max-queue 16           jobs (samples) allowed to wait for a job slot
 #   --rate-limit 10/min      per-client limit on the four POST endpoints
 #   --trusted-proxy unix     believe X-Forwarded-For from the local socket
@@ -59,7 +64,7 @@ Environment=SYLPH_META=meta-r232-reps.sqlite
 # Drop any of them, raise the limits, or narrow CORS to your own page.
 # `--cors-origin *` is written unquoted: systemd splits the value on
 # whitespace and passes the asterisk through literally.
-Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin *"
+Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-contigs 100 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin *"
 
 # The display name has its own variable: SYLPH_SERVE_ARGS is split on
 # whitespace, but ${SYLPH_NAME} stays one argument even with spaces. Unset, it

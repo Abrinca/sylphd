@@ -1263,6 +1263,18 @@
       const pool = uploadSmall ? heapAll : heapLarge;
       const poolTotals = uploadSmall ? sendable : large;
       candidates = pool.slice().sort((a, b) => a.record.index - b.record.index);
+      // Request names must be unique, but only the kept contigs are ever sent:
+      // suffix repeated header ids now (counts/used cover <= 100 records, not
+      // the whole file) instead of doing it per streamed record.
+      const counts = new Map();
+      const used = new Set();
+      for (const item of candidates) {
+        const name = window.SylphdSketch.uniqueContigName(
+          item.record.id, counts, used, item.record.index,
+        );
+        item.record.id = name;
+        item.spec.name = name;
+      }
       toSendTotal = candidates.length;
       if (!uploadSmall) {
         skippedShort.contigs = small.contigs;

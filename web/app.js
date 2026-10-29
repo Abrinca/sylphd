@@ -410,8 +410,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
           const kind = twoStage ? '.syl2db' : '.syldb';
           return el('li', {
             class: 'sp-db',
-            title: `${d.name}${d.file && d.file !== d.name ? ` (${d.file})` : ''}: ${kind === '.syl2db' ? 'two-stage database' : 'plain database'}` +
-              (d.path ? `\n${d.path}` : ''),
+            title: `${d.name}${d.file && d.file !== d.name ? ` (${d.file})` : ''}: ${kind === '.syl2db' ? 'two-stage database' : 'plain database'}`,
           },
           el('span', { class: 'sp-db-name', text: d.name || d.file || '?' }),
           el('span', { class: 'sp-db-kind', text: kind }),
