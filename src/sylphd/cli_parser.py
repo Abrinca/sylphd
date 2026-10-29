@@ -313,11 +313,12 @@ def build_parser() -> argparse.ArgumentParser:
     # download ----------------------------------------------------------
     download_parser = subparsers.add_parser(
         "download",
-        help="download GTDB metadata files or a pre-built sylph database",
+        help="download GTDB metadata, a sylph database or a taxonomy file",
         description=(
             "Download the GTDB metadata files (default), a pre-built sylph "
-            "database from the built-in catalogue (--database), or an "
-            "arbitrary file (--url). See --list-databases for the catalogue."
+            "database from the built-in catalogue (--database), a sylph-tax "
+            "taxonomy file (--taxonomy), or an arbitrary file (--url). See "
+            "--list-databases and --list-taxonomies for the catalogues."
         ),
     )
     download_parser.add_argument(
@@ -340,9 +341,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     download_parser.add_argument(
+        "--taxonomy",
+        action="append",
+        metavar="NAME",
+        help=(
+            "sylph-tax taxonomy file to fetch, e.g. UHGV_default or "
+            "FungiRefSeq-latest (repeatable; 'list' prints the catalogue)"
+        ),
+    )
+    download_parser.add_argument(
         "--list-databases",
         action="store_true",
         help="print the built-in database catalogue and exit",
+    )
+    download_parser.add_argument(
+        "--list-taxonomies",
+        action="store_true",
+        help="print the built-in taxonomy catalogue and exit",
     )
     download_parser.add_argument(
         "--verify",
@@ -380,15 +395,42 @@ def build_parser() -> argparse.ArgumentParser:
 
     # setup -------------------------------------------------------------
     setup_parser = subparsers.add_parser(
-        "setup", help="build the SQLite metadata database from GTDB TSV files"
+        "setup",
+        help="build the SQLite metadata database from GTDB TSV and sylph-tax files",
     )
     setup_parser.add_argument(
         "-m",
         "--metadata",
         nargs="+",
-        required=True,
         metavar="FILE",
-        help="GTDB metadata TSV files (*.tsv.gz)",
+        help=(
+            "GTDB metadata TSV files (*.tsv.gz); with --update, the existing "
+            "metadata SQLite file to copy (default: -o itself)"
+        ),
+    )
+    setup_parser.add_argument(
+        "--taxonomy",
+        action="append",
+        default=[],
+        metavar="SPEC",
+        help=(
+            "taxonomy source, repeatable: a sylph-tax name (UHGV_default, "
+            "FungiRefSeq-latest, ...; downloaded to --cache-dir), NAME=PATH or "
+            "PATH to a local key<TAB>lineage[<TAB>host] file"
+        ),
+    )
+    setup_parser.add_argument(
+        "--update",
+        action="store_true",
+        help=(
+            "add the --taxonomy sources to an existing metadata file instead of "
+            "building one (also migrates a format 2 file to 3); atomic"
+        ),
+    )
+    setup_parser.add_argument(
+        "--cache-dir",
+        metavar="DIR",
+        help="where downloaded taxonomy files are kept [default: <output dir>/taxonomy]",
     )
     setup_parser.add_argument(
         "-o", "--output", required=True, metavar="PATH", help="SQLite file to write"

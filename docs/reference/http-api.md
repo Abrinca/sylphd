@@ -45,7 +45,11 @@ Reports:
   `path`, `size`, `sha256`, `genomes`, `c`, `k`, `screen_c` and `two_stage`. Results carry no
   per-database field: a hit belongs to the database whose taxonomy it has;
 - `metadata`: `path`, `size`, `columns`, `rows`, `release`, `built`, `format_version`, `reps_only`
-  and `sources`, or `null` without `--meta`;
+  and `sources`, or `null` without `--meta`. A format 3 file (taxonomy sources, see
+  [the metadata reference](metadata.md#taxonomy-sources)) adds `taxonomy_sources` — one object per
+  source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`,
+  `md5`, `rows` and `has_host` — and `sylphtax_rules` (the sylph-tax version whose rules apply).
+  A format 2 file has neither key, so its response is unchanged;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
   `name` is the string of `--name` (at most 80 characters, one line); `about` is
   `{"format": "markdown", "text": "..."}` with the contents of the `--about` file (UTF-8, at most

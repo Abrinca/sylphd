@@ -1,15 +1,18 @@
-"""Download GTDB metadata files and pre-built sylph databases.
+"""Download GTDB metadata, sylph databases and sylph-tax taxonomy files.
 
 GTDB metadata is verified against the release ``MD5SUM.txt``; databases are
 checked against the small catalogue below (size always, MD5 on request).
-Transfers go to ``*.part`` files, resume with HTTP ``Range`` and can use
-``aria2c`` to fetch from all mirrors at once.
+Taxonomy files come from the sylph-tax catalogue (Zenodo records and one
+fileshare host) and are always verified against the sizes and MD5 sums that
+the catalogue records.  Transfers go to ``*.part`` files, resume with HTTP
+``Range`` and can use ``aria2c`` to fetch from all mirrors at once.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -120,7 +123,13 @@ def _md5sum(path: Path) -> str:
 
 @dataclass(frozen=True)
 class Database:
-    """A pre-built sylph database and where to get it."""
+    """A pre-built sylph database and where to get it.
+
+    ``taxonomy`` is the sylph-tax catalogue name (``TAXONOMIES``) whose file
+    goes with the genomes of this database; ``taxonomy_alternatives`` are
+    further sources a user may pick instead (UHGV ships a default and an ICTV
+    lineage).  Both are empty when no file is published.
+    """
 
     name: str
     filename: str
@@ -130,6 +139,8 @@ class Database:
     genomes: int | None = None
     c: int | None = None
     description: str = ""
+    taxonomy: str | None = None
+    taxonomy_alternatives: tuple[str, ...] = ()
 
 
 def _database(
@@ -141,6 +152,8 @@ def _database(
     genomes: int | None = None,
     c: int | None = None,
     description: str = "",
+    taxonomy: str | None = None,
+    taxonomy_alternatives: tuple[str, ...] = (),
 ) -> Database:
     return Database(
         name=name,
@@ -151,6 +164,8 @@ def _database(
         genomes=genomes,
         c=c,
         description=description,
+        taxonomy=taxonomy,
+        taxonomy_alternatives=taxonomy_alternatives,
     )
 
 
@@ -176,6 +191,7 @@ DATABASES: dict[str, Database] = {
             genomes=199923,
             c=200,
             description="GTDB r232 species representatives, two-stage (recommended)",
+            taxonomy="GTDB_r232",
         ),
         _database(
             "gtdb-r232-c200-dbv1.syldb",
@@ -185,6 +201,7 @@ DATABASES: dict[str, Database] = {
             genomes=199923,
             c=200,
             description="GTDB r232 species representatives, c200",
+            taxonomy="GTDB_r232",
         ),
         _database(
             "gtdb-r232-c1000-dbv1.syldb",
@@ -194,6 +211,7 @@ DATABASES: dict[str, Database] = {
             genomes=199923,
             c=1000,
             description="GTDB r232 species representatives, c1000",
+            taxonomy="GTDB_r232",
         ),
         _database(
             "gtdb-r226-c200-dbv2.syl2db",
@@ -203,6 +221,7 @@ DATABASES: dict[str, Database] = {
             genomes=143614,
             c=200,
             description="GTDB r226 species representatives, two-stage",
+            taxonomy="GTDB_r226",
         ),
         _database(
             "gtdb-r226-c200-dbv1.syldb",
@@ -212,6 +231,7 @@ DATABASES: dict[str, Database] = {
             genomes=143614,
             c=200,
             description="GTDB r226 species representatives, c200",
+            taxonomy="GTDB_r226",
         ),
         _database(
             "gtdb-r226-c1000-dbv1.syldb",
@@ -221,6 +241,7 @@ DATABASES: dict[str, Database] = {
             genomes=143614,
             c=1000,
             description="GTDB r226 species representatives, c1000",
+            taxonomy="GTDB_r226",
         ),
         _database(
             "gtdb-r220-c200-dbv1.syldb",
@@ -229,6 +250,7 @@ DATABASES: dict[str, Database] = {
             genomes=113104,
             c=200,
             description="GTDB r220 species representatives, c200",
+            taxonomy="GTDB_r220",
         ),
         _database(
             "gtdb-r220-c1000-dbv1.syldb",
@@ -237,6 +259,7 @@ DATABASES: dict[str, Database] = {
             genomes=113104,
             c=1000,
             description="GTDB r220 species representatives, c1000",
+            taxonomy="GTDB_r220",
         ),
         _database(
             "v0.3-c200-gtdb-r214.syldb",
@@ -245,6 +268,7 @@ DATABASES: dict[str, Database] = {
             genomes=85202,
             c=200,
             description="GTDB r214 species representatives, c200",
+            taxonomy="GTDB_r214",
         ),
         _database(
             "v0.3-c1000-gtdb-r214.syldb",
@@ -253,6 +277,7 @@ DATABASES: dict[str, Database] = {
             genomes=85202,
             c=1000,
             description="GTDB r214 species representatives, c1000",
+            taxonomy="GTDB_r214",
         ),
         # -- other prokaryotes -----------------------------------------
         _database(
@@ -262,6 +287,7 @@ DATABASES: dict[str, Database] = {
             genomes=346233,
             c=200,
             description="GlobDB r232, two-stage (no Google mirror)",
+            taxonomy="GlobDB_r232",
         ),
         _database(
             "OceanDNA-c200-v0.3.syldb",
@@ -270,6 +296,7 @@ DATABASES: dict[str, Database] = {
             genomes=8466,
             c=200,
             description="OceanDNA ocean MAGs",
+            taxonomy="OceanDNA",
         ),
         _database(
             "SMAG-c200-v0.3.syldb",
@@ -278,6 +305,7 @@ DATABASES: dict[str, Database] = {
             genomes=21077,
             c=200,
             description="SMAG soil MAGs",
+            taxonomy="SoilSMAG",
         ),
         _database(
             "uhgg_all_c200_v0.3.0.syldb",
@@ -296,6 +324,8 @@ DATABASES: dict[str, Database] = {
             genomes=171338,
             c=100,
             description="UHGV gut vOTUs, c100",
+            taxonomy="UHGV_default",
+            taxonomy_alternatives=("UHGV_ictv",),
         ),
         _database(
             "uhgv_c200_dbv1.syldb",
@@ -306,6 +336,8 @@ DATABASES: dict[str, Database] = {
             genomes=168536,
             c=200,
             description="UHGV gut vOTUs, c200",
+            taxonomy="UHGV_default",
+            taxonomy_alternatives=("UHGV_ictv",),
         ),
         _database(
             "imgvr_c200_v0.3.0.syldb",
@@ -314,6 +346,7 @@ DATABASES: dict[str, Database] = {
             genomes=2917516,
             c=200,
             description="IMG/VR4.1 high-confidence vOTU representatives",
+            taxonomy="IMGVR_4.1",
         ),
         # -- eukaryotes ------------------------------------------------
         _database(
@@ -327,6 +360,7 @@ DATABASES: dict[str, Database] = {
             genomes=661,
             c=200,
             description="RefSeq fungi representatives (2025-10-11)",
+            taxonomy="FungiRefSeq-latest",
         ),
         _database(
             "tara-eukmags-c200-v0.3.syldb",
@@ -335,11 +369,460 @@ DATABASES: dict[str, Database] = {
             genomes=713,
             c=200,
             description="TARA Oceans eukaryotic MAGs/SAGs",
+            taxonomy="TaraEukaryoticSMAG",
         ),
     )
 }
 
 LIST_KEYWORD = "list"
+
+# ---------------------------------------------------------------------------
+# taxonomy catalogue (sylph-tax files)
+# ---------------------------------------------------------------------------
+
+#: Version of sylph-tax whose file list, file formats and key-probing rules
+#: this catalogue was taken from (``sylph_tax/metadata_files.py``, tag v1.9.2,
+#: commit d14f286).  Recorded in the metadata file by ``setup``.
+SYLPHTAX_VERSION = "1.9.2"
+
+_ZENODO_FILE = "https://zenodo.org/records/{record}/files/{filename}"
+_ZENODO_API = "https://zenodo.org/api/records/{record}"
+_GLOBD_R232 = (
+    "https://fileshare.lisc.univie.ac.at/globdb/globdb_r232/globdb_r232_taxonomy.tsv.gz"
+)
+
+
+@dataclass(frozen=True)
+class Taxonomy:
+    """A sylph-tax taxonomy file and where to get it.
+
+    ``size``/``md5`` are recorded at release time (Zenodo publishes both per
+    file); both are verified on download, so a taxonomy file is never used
+    unverified.  ``rows`` is the row count of the published file when it is
+    known, ``None`` otherwise.
+
+    ``size_only`` marks the single entry whose publisher publishes no checksum
+    (GlobDB r232 on the university fileshare).  Every Zenodo entry must end up
+    with an MD5 — from the catalogue or from the Zenodo API — because a size
+    alone cannot tell the published file from a corrupted or replaced one;
+    ``download_taxonomy`` refuses an entry with neither.
+    """
+
+    name: str
+    filename: str
+    mirrors: tuple[str, ...]
+    zenodo: int | None = None
+    size: int | None = None
+    md5: str | None = None
+    rows: int | None = None
+    description: str = ""
+    size_only: bool = False
+
+
+def _taxonomy(
+    name: str,
+    filename: str,
+    *,
+    zenodo: int | None = None,
+    mirror: str | None = None,
+    size: int | None = None,
+    md5: str | None = None,
+    rows: int | None = None,
+    description: str = "",
+    size_only: bool = False,
+) -> Taxonomy:
+    if mirror is not None:
+        mirrors = (mirror,)
+    else:
+        assert zenodo is not None
+        mirrors = (_ZENODO_FILE.format(record=zenodo, filename=filename),)
+    return Taxonomy(
+        name=name,
+        filename=filename,
+        mirrors=mirrors,
+        zenodo=zenodo,
+        size=size,
+        md5=md5,
+        rows=rows,
+        description=description,
+        size_only=size_only,
+    )
+
+
+#: sylph-tax's published taxonomy files, by sylph-tax name.  Sizes and MD5
+#: sums were read from the Zenodo API (``/api/records/<id>``) and are checked
+#: on every download; the GlobDB r232 host publishes no checksum, so only its
+#: size is checked.
+TAXONOMIES: dict[str, Taxonomy] = {
+    taxonomy.name: taxonomy
+    for taxonomy in (
+        _taxonomy(
+            "GTDB_r232",
+            "gtdb_r232_metadata.tsv.gz",
+            zenodo=19646381,
+            size=5474219,
+            md5="0b0732e06de59abb69a135ba6faa8220",
+            rows=199923,
+            description="GTDB r232 species representatives (same rows as -m, no NCBI columns)",
+        ),
+        _taxonomy(
+            "GTDB_r226",
+            "gtdb_r226_metadata.tsv.gz",
+            zenodo=15314244,
+            size=7789225,
+            md5="2df8a49c8a8685cb28b057a39c4a78b1",
+            description="GTDB r226 species representatives",
+        ),
+        _taxonomy(
+            "GTDB_r220",
+            "gtdb_r220_metadata.tsv.gz",
+            zenodo=14320496,
+            size=12587613,
+            md5="ad14ff1636ad93506da1f46b65494fb8",
+            description="GTDB r220 species representatives",
+        ),
+        _taxonomy(
+            "GTDB_r214",
+            "gtdb_r214_metadata.tsv.gz",
+            zenodo=14320496,
+            size=6511799,
+            md5="52905702b85971795cfd432649ca1e65",
+            description="GTDB r214 species representatives",
+        ),
+        _taxonomy(
+            "GlobDB_r232",
+            "globdb_r232_taxonomy.tsv.gz",
+            mirror=_GLOBD_R232,
+            size=8071276,
+            rows=346233,
+            size_only=True,
+            description="GlobDB r232 (fileshare, no published MD5)",
+        ),
+        _taxonomy(
+            "GlobDB_r226",
+            "globdb_r226_sylph_tax.tsv.gz",
+            zenodo=16322879,
+            size=5880768,
+            md5="ee4a813fa71c1d22b3830844646974d2",
+            description="GlobDB r226",
+        ),
+        _taxonomy(
+            "OceanDNA",
+            "ocean_dna_metadata.tsv.gz",
+            zenodo=14320496,
+            size=245487,
+            md5="b0aff88193deefcb5095624fe32bec19",
+            description="OceanDNA ocean MAGs",
+        ),
+        _taxonomy(
+            "SoilSMAG",
+            "soil_smag_metadata.tsv.gz",
+            zenodo=14320496,
+            size=432433,
+            md5="7a31377f2322c843112d60be79ff473d",
+            description="SoilSMAG soil MAGs",
+        ),
+        _taxonomy(
+            "TaraEukaryoticSMAG",
+            "tara_SMAGs_metadata.tsv.gz",
+            zenodo=14320496,
+            size=11837,
+            md5="9994fcbe6e48a31211c119cadb9305c1",
+            description="Tara Oceans eukaryotic MAGs/SAGs",
+        ),
+        _taxonomy(
+            "IMGVR_4.1",
+            "IMGVR_4.1_metadata.tsv.gz",
+            zenodo=14320496,
+            size=27474934,
+            md5="9bf87e0ed0624f6700dfe9c4aa9a0c70",
+            rows=5576197,
+            description="IMG/VR 4.1 (has a header row and virus hosts)",
+        ),
+        _taxonomy(
+            "UHGV_default",
+            "uhgv_default_metadata.tsv.gz",
+            zenodo=15670321,
+            size=4153567,
+            md5="cac9b0e8f34178c01ca73a73590c5182",
+            description="UHGV viral clusters, default lineage (with virus hosts)",
+        ),
+        _taxonomy(
+            "UHGV_ictv",
+            "uhgv_ictv_metadata.tsv.gz",
+            zenodo=15670321,
+            size=2482003,
+            md5="0a1922b612fb7aa1c353e652c001a546",
+            description="UHGV viral clusters, ICTV lineage (with virus hosts)",
+        ),
+        _taxonomy(
+            "FungiRefSeq-latest",
+            "fungi_refseq_2025-10-11_metadata.tsv.gz",
+            zenodo=17330476,
+            size=16698,
+            md5="526eef5b1868f856d90cd71cd7ce7830",
+            rows=661,
+            description="RefSeq fungi representatives (2025-10-11)",
+        ),
+        _taxonomy(
+            "FungiRefSeq-2024-07-25",
+            "fungi_refseq_2024-07-25_metadata.tsv.gz",
+            zenodo=14320496,
+            size=12510,
+            md5="b83f431a3c054be1eaebe12f908ac6c1",
+            description="RefSeq fungi representatives (2024-07-25)",
+        ),
+    )
+}
+
+
+def lookup_taxonomy(name: str) -> Taxonomy:
+    """Return the catalogue entry for the sylph-tax taxonomy ``name``."""
+    try:
+        return TAXONOMIES[name]
+    except KeyError:
+        known = ", ".join(TAXONOMIES)
+        raise ValueError(
+            f"unknown taxonomy {name!r}; known names: {known} "
+            "(run 'sylphd download --list-taxonomies')"
+        ) from None
+
+
+def paired_databases(name: str) -> list[str]:
+    """Return the catalogue databases that use the taxonomy ``name``."""
+    return [
+        database.name
+        for database in DATABASES.values()
+        if database.taxonomy == name or name in database.taxonomy_alternatives
+    ]
+
+
+def taxonomy_table() -> str:
+    """Render the taxonomy catalogue as an aligned text table."""
+    header = ("NAME", "SIZE", "ROWS", "DATABASE", "DESCRIPTION")
+    rows = []
+    for taxonomy in TAXONOMIES.values():
+        paired = paired_databases(taxonomy.name)
+        if len(paired) > 2:
+            paired_text = f"{paired[0]} (+{len(paired) - 1})"
+        else:
+            paired_text = ", ".join(paired)
+        rows.append(
+            (
+                taxonomy.name,
+                format_size(taxonomy.size) if taxonomy.size else "?",
+                f"{taxonomy.rows:,}" if taxonomy.rows else "?",
+                paired_text or "-",
+                taxonomy.description,
+            )
+        )
+    widths = [max(len(row[index]) for row in (*rows, header)) for index in range(4)]
+    lines = [
+        "  ".join(
+            [value.ljust(width) for width, value in zip(widths, row[:4])] + [row[4]]
+        ).rstrip()
+        for row in (header, *rows)
+    ]
+    lines.insert(1, "  ".join("-" * width for width in widths))
+    return "\n".join(lines)
+
+
+#: ``NAME=PATH`` name part: the same characters as a database alias.
+_SPEC_NAME_RE = re.compile(r"[A-Za-z0-9_.-]+")
+_COMPRESSION_SUFFIXES = (".gz", ".bz2", ".xz", ".zst", ".zstd", ".bgz", ".bgzf")
+
+
+@dataclass(frozen=True)
+class TaxonomySpec:
+    """A parsed ``--taxonomy`` value: a catalogue name or a local file.
+
+    ``path`` is ``None`` for a bare sylph-tax name (the file is downloaded).
+    """
+
+    name: str
+    text: str
+    path: Path | None = None
+
+    @property
+    def download(self) -> bool:
+        return self.path is None
+
+
+def taxonomy_source_name(path: Path) -> str:
+    """Default source name for a local taxonomy file: its stem, without ``.gz``."""
+    name = path.name
+    lowered = name.lower()
+    for suffix in _COMPRESSION_SUFFIXES:
+        if lowered.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    stem = Path(name).stem
+    return stem or path.name
+
+
+def parse_taxonomy_spec(text: str) -> TaxonomySpec:
+    """Parse one ``--taxonomy`` value: ``NAME``, ``NAME=PATH`` or ``PATH``.
+
+    A bare value is a sylph-tax name when the catalogue knows it and an
+    existing local file otherwise; a value with a path separator (or ``.``
+    prefix) is always a path.  A local file must exist, so a typo fails at
+    setup time rather than after the GTDB files were read.
+    """
+    value = text.strip()
+    if not value:
+        raise ValueError("empty taxonomy specification")
+    name, separator, rest = value.partition("=")
+    if separator and rest and _SPEC_NAME_RE.fullmatch(name):
+        path = Path(rest)
+        if not path.is_file():
+            raise FileNotFoundError(f"{value}: no such file: {rest}")
+        return TaxonomySpec(name=name, text=value, path=path)
+    candidate = Path(value)
+    looks_like_path = (
+        "/" in value or os.sep in value or value.startswith(".") or candidate.is_file()
+    )
+    if looks_like_path:
+        if not candidate.is_file():
+            raise FileNotFoundError(f"{value}: no such file")
+        return TaxonomySpec(name=taxonomy_source_name(candidate), text=value, path=candidate)
+    if value in TAXONOMIES:
+        return TaxonomySpec(name=value, text=value)
+    known = ", ".join(TAXONOMIES)
+    raise ValueError(
+        f"unknown taxonomy {value!r}; give a sylph-tax name ({known}), "
+        "NAME=PATH or a path to a taxonomy file"
+    )
+
+
+def zenodo_file_info(
+    record: int, filename: str, *, timeout: float = 60.0
+) -> dict[str, object]:
+    """Ask the Zenodo API for the size and MD5 of one file of a record.
+
+    Used to fill in catalogue entries whose size/MD5 were not recorded.  The
+    API returns ``{"files": [{"key": ..., "size": ..., "checksum": "md5:..."}]}``;
+    anything else (no ``files`` list, an entry without a usable size or MD5) is
+    a ``DownloadError`` rather than a silently unverified download.
+    """
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        response = client.get(_ZENODO_API.format(record=record))
+        response.raise_for_status()
+        payload = response.json()
+    if not isinstance(payload, dict):
+        raise DownloadError(
+            f"Zenodo API response for record {record} is not a JSON object"
+        )
+    files = payload.get("files")
+    if not isinstance(files, list):
+        raise DownloadError(
+            f"Zenodo API response for record {record} has no 'files' list"
+        )
+    for entry in files:
+        if not isinstance(entry, dict):
+            raise DownloadError(
+                f"Zenodo API response for record {record} has a malformed file entry"
+            )
+        if entry.get("key") != filename:
+            continue
+        size = entry.get("size")
+        if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+            raise DownloadError(
+                f"Zenodo record {record} reports no usable size for {filename}"
+            )
+        checksum = entry.get("checksum")
+        if not isinstance(checksum, str) or not checksum.startswith("md5:"):
+            raise DownloadError(f"Zenodo record {record} reports no MD5 for {filename}")
+        md5 = checksum.removeprefix("md5:")
+        if len(md5) != 32 or not all(c in "0123456789abcdef" for c in md5):
+            raise DownloadError(
+                f"Zenodo record {record} reports a malformed MD5 for {filename}"
+            )
+        return {"size": size, "md5": md5}
+    raise DownloadError(
+        f"Zenodo record {record} does not publish {filename} "
+        f"(files: {', '.join(str(entry.get('key')) for entry in files)})"
+    )
+
+
+def _taxonomy_expectation(entry: Taxonomy) -> tuple[int | None, str | None]:
+    """Return the ``(size, md5)`` to verify a taxonomy download with.
+
+    Zenodo entries are hydrated from the catalogue or, where it has gaps, from
+    the Zenodo API.  An MD5 is mandatory: it is what makes a taxonomy file the
+    published one, so an entry without one fails instead of being accepted on
+    its size alone.  ``size_only`` is reserved for GlobDB r232, whose publisher
+    publishes no checksum.
+    """
+    size, md5 = entry.size, entry.md5
+    if entry.zenodo is not None and (size is None or md5 is None):
+        try:
+            info = zenodo_file_info(entry.zenodo, entry.filename)
+        except (httpx.HTTPError, DownloadError) as error:
+            print(
+                f"{entry.name}: could not read the Zenodo API ({error}); "
+                "using what the catalogue records",
+                file=sys.stderr,
+            )
+        else:
+            api_size, api_md5 = info.get("size"), info.get("md5")
+            if size is None and isinstance(api_size, int):
+                size = api_size
+            if md5 is None and isinstance(api_md5, str):
+                md5 = api_md5
+    if md5 is not None:
+        return (int(size) if size is not None else None), md5
+    if entry.size_only:
+        if size is None:
+            raise DownloadError(
+                f"{entry.name}: neither a size nor an MD5 is known for "
+                f"{entry.filename}; refusing to download a file that cannot be checked"
+            )
+        return int(size), None
+    raise DownloadError(
+        f"{entry.name}: no MD5 is known for {entry.filename} (the catalogue has "
+        "none and the Zenodo API did not provide one); refusing to accept a file "
+        "that cannot be verified"
+    )
+
+
+def download_taxonomy(
+    taxonomy: str | Taxonomy,
+    outdir: str | os.PathLike[str] = ".",
+    *,
+    force: bool = False,
+    progress: ProgressCallback | None = None,
+    verify_progress: VerifyCallback | None = None,
+) -> Path:
+    """Download one sylph-tax taxonomy file into ``outdir``.
+
+    The size and the MD5 of the published file are always checked (see
+    ``_taxonomy_expectation``); an existing file is reused only when it
+    verifies, and a file that cannot be verified is never accepted.  Downloads
+    are at most 27 MB, so verification is not opt-in as it is for databases.
+    """
+    entry = taxonomy if isinstance(taxonomy, Taxonomy) else lookup_taxonomy(taxonomy)
+    size, md5 = _taxonomy_expectation(entry)
+
+    directory = Path(outdir)
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / entry.filename
+
+    if destination.exists() and not force:
+        same_size = size is None or destination.stat().st_size == size
+        if same_size and (
+            md5 is None or md5_file(destination, progress=verify_progress) == md5
+        ):
+            return destination
+        destination.unlink()
+
+    return download_urls(
+        entry.mirrors,
+        destination,
+        expected_size=size,
+        expected_md5=md5,
+        progress=progress,
+        verify_progress=verify_progress,
+    )
 
 
 def lookup_database(name: str) -> Database:

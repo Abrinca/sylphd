@@ -331,11 +331,23 @@ class TestDictLayout:
 
     def test_info_fields(self, built) -> None:
         with MetadataDB(built) as db:
-            assert db.info["format_version"] == "2"
+            assert db.info["format_version"] == "3"
             assert db.info["reps_only"] == "false"
             assert db.info["release"] == "232"
+            assert db.info["sylphtax_rules"] == "1.9.2"
             assert json.loads(db.info["columns"]) == list(METADATA_COLUMNS)
             summary = db.summary()
-            assert summary["format_version"] == "2"
+            assert summary["format_version"] == "3"
             assert summary["reps_only"] is False
             assert summary["rows"] == 4
+            # the GTDB metadata is registered as one virtual source
+            assert summary["taxonomy_sources"] == [
+                {
+                    "name": "GTDB_r232",
+                    "kind": "metadata",
+                    "origin": "metadata_data",
+                    "md5": None,
+                    "rows": 3,  # one row has no gtdb_taxonomy
+                    "has_host": False,
+                }
+            ]

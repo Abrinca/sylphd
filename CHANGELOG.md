@@ -8,6 +8,44 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **Taxonomy sources in the metadata file (format version 3).** `sylphd setup --taxonomy SPEC`
+  imports [sylph-tax](https://github.com/bluenote-1577/sylph-tax) files (`key<TAB>lineage[<TAB>host]`,
+  gzip or plain, header rows allowed) next to the GTDB metadata, so a server can later give a
+  lineage to hits from UHGV, fungal RefSeq, MAG and GlobDB databases. `SPEC` is a sylph-tax name
+  (`UHGV_default`, `UHGV_ictv`, `FungiRefSeq-latest`, `GTDB_r232`, `GlobDB_r232`, ...), `NAME=PATH`
+  or `PATH`; a bare name is downloaded into `--cache-dir` (default `<output dir>/taxonomy`) with
+  the existing resume/verify engine. `setup -m` is now optional, so a file can hold taxonomy
+  sources alone. Version 3 is **purely additive**: new `taxonomy_source`, `taxonomy_entry`,
+  `dict_tax_lineage` and `dict_tax_host` tables; the `metadata` view and its columns are untouched,
+  version 2 files keep loading and serving exactly as before, and a version 2 reader opens a
+  version 3 file (a test runs a frozen copy of the previous release's reader, taken from commit
+  `e72b807`, against one). The full GTDB metadata is registered as one *virtual* source
+  `GTDB_r<release>` over `metadata_data`, so no lineage is stored twice; the sylph-tax catalogue
+  file of that *same* release is skipped with a message when `-m` already imported it (a different
+  release, e.g. `GTDB_r214` next to r232, and a local file are imported normally). Keys are stored
+  verbatim (case sensitive, as sylph-tax does), lineages and hosts are dictionary-encoded, sources
+  keep the `setup` order (`ord`), and a key repeated within a source keeps its last lineage while a
+  host is only replaced by a row that has one — as in sylph-tax.
+- **`sylphd setup --update`** adds sources to an existing metadata file and doubles as the
+  version 2 → 3 migration (no GTDB TSV files needed). It copies the file next to the output in a
+  uniquely named temporary file (safe with parallel runs and with a source called `*.tmp`), adds
+  the tables/sources and replaces the output only on success — an interrupted update leaves the old
+  file untouched, like `setup --force` — and keeps the permissions of the file it replaces.
+  Re-importing a source name replaces it and keeps its
+  position.
+- **`sylphd download --taxonomy NAME`** and **`--list-taxonomies`** add a second catalogue next to
+  the database one: sylph-tax's files with sizes and MD5 sums read from the Zenodo API (GlobDB r232
+  on the university fileshare has no published MD5, so only its size is checked). Every database in
+  the catalogue now names the taxonomy file it goes with (`Database.taxonomy`, plus UHGV's
+  `UHGV_ictv` alternative), and the taxonomy table lists the paired database. Taxonomy files are
+  small, so their checksum is always verified (no `--verify` switch); if a catalogue entry lacks
+  size/MD5, the Zenodo API is asked at download time, and an entry that still has no MD5 is refused
+  rather than accepted on its size (GlobDB r232, whose publisher publishes no checksum, is the one
+  size-only entry).
+- **`/info` and `sylphd info` report the taxonomy sources** of a format 3 metadata file: name,
+  kind, origin, MD5, key count and whether hosts are present (`metadata.taxonomy_sources`), plus
+  `metadata.sylphtax_rules`, the sylph-tax version whose file formats and rules the build
+  implements (`1.9.2`). Both keys are absent for a format 2 file, so existing output is unchanged.
 - **Several databases in one server.** `sylphd serve --db [NAME=]PATH` is repeatable; `NAME`
   (letters, digits, `_`, `.`, `-`) is the name `/info` reports and defaults to the file name, and
   duplicate names are refused. The databases are loaded in parallel threads and profiled as one

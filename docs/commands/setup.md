@@ -1,27 +1,68 @@
 # setup
 
 ```text
-sylphd setup -m FILE... -o PATH [--release N] [--reps-only] [--force] [-q]
+sylphd setup [-m FILE...] [--taxonomy SPEC...] -o PATH [--release N] [--reps-only]
+             [--update] [--cache-dir DIR] [--force] [-q]
+
+SPEC := NAME | NAME=PATH | PATH
 ```
 
 Streams GTDB metadata TSV files (gzip or plain) into a SQLite file that `sylphd serve --meta` joins
-to every result. The layout and columns are in the [metadata database](../reference/metadata.md)
-reference.
+to every result, and imports [sylph-tax](https://github.com/bluenote-1577/sylph-tax) taxonomy files
+next to it. The imported sources are stored now so that a later release can resolve hits from
+non-GTDB databases (UHGV viruses, fungi, MAGs, ...) to a lineage and a host; `setup` itself only
+stores and reports them. The layout and columns are in the
+[metadata database](../reference/metadata.md) reference.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-m, --metadata FILE ...` | required | GTDB metadata TSV files (`*.tsv.gz`) |
+| `-m, --metadata FILE ...` | none | GTDB metadata TSV files (`*.tsv.gz`) |
+| `--taxonomy SPEC` | none | taxonomy source, repeatable: a sylph-tax name, `NAME=PATH` or `PATH` |
 | `-o, --output PATH` | required | SQLite file to write |
-| `--release N` | none | GTDB release to record in the file |
-| `--reps-only` | off | store only species representatives (`gtdb_representative` true) |
+| `--update` | off | add the sources to an existing file instead of building one (also migrates format 2 → 3) |
+| `--cache-dir DIR` | `<output dir>/taxonomy` | where downloaded taxonomy files are kept |
+| `--release N` | none | GTDB release to record in the file (and the name of the virtual source) |
+| `--reps-only` | off | store only species representatives (`gtdb_representative` true), `-m` only |
 | `--force` | off | replace the output file (only once the new one is built; a failure keeps the old one) |
 | `-q, --quiet` | off | no progress output |
 
+At least one of `-m` and `--taxonomy` is required. `SPEC` is:
+
+- a **sylph-tax name**: `UHGV_default`, `UHGV_ictv`, `FungiRefSeq-latest`, `GTDB_r232`,
+  `GlobDB_r232`, ... (`sylphd download --list-taxonomies` prints all of them with sizes, row counts
+  and the database each one goes with). The file is downloaded into `--cache-dir`, resuming
+  partial transfers and verifying the size (and MD5 when the publisher has one) before it is used;
+- **`NAME=PATH`**: a local file under a chosen source name, read as it is (gzip is detected by
+  content). Useful to override a name or to import your own file;
+- **`PATH`**: a local file; the source name defaults to the file stem
+  (`uhgv_default_metadata.tsv.gz` → `uhgv_default_metadata`).
+
 ```bash
+# GTDB metadata plus UHGV and fungal lineages for the target trio
 sylphd setup -m data/bac120_metadata_r232.tsv.gz data/ar53_metadata_r232.tsv.gz \
-             -o data/gtdb-r232.sqlite --release 232
+             --taxonomy UHGV_default --taxonomy FungiRefSeq-latest \
+             -o data/meta.sqlite --release 232
+
+# a local file under a chosen name
+sylphd setup -m data/*.tsv.gz --taxonomy UHGV=./my_uhgv.tsv.gz -o data/meta.sqlite
+
+# add sources to an existing file (and migrate a format 2 file to 3); atomic
+sylphd setup --update --taxonomy UHGV_ictv -o data/meta.sqlite
 ```
 
 All ~900k GTDB genomes are stored by default (about 200 MB). `--reps-only` stores about 200k
 (about 80 MB); lookups of other accessions then find no metadata. When two input files contain the
-same accession, the later row wins. Without `--force` an existing output file is not replaced.
+same accession, the later row wins.
+
+The GTDB metadata becomes the **virtual** source `GTDB_r<release>`: its lineages are not stored a
+second time, so importing the sylph-tax catalogue file of the *same* release (`GTDB_r232` with
+`--release 232`) is redundant and that source is skipped with a message. A catalogue file of a
+different release (`GTDB_r214`) and a local file of any other name are imported normally; a local
+file named exactly like the virtual source is refused, because importing it would replace it.
+Sources are stored in the order given; for a key found in two sources the later one wins (as the
+later file wins in sylph-tax). Re-importing a source name replaces it.
+
+`--update` copies the existing file (the `-o` path, or `-m` when you want a separate output) and
+adds the sources; it needs no GTDB TSV files. The copy is written next to the output and replaces
+it only on success, so an interrupted or failed update leaves the old file untouched.
+`--release` and `--reps-only` cannot be used with `--update`.

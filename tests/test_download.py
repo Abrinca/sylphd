@@ -10,7 +10,9 @@ import sys
 import threading
 import urllib.parse
 from pathlib import Path
+from typing import Self
 
+import httpx
 import pytest
 
 from sylphd import download
@@ -19,8 +21,10 @@ from sylphd.download import (
     MD5SUMS_FILE,
     Database,
     DownloadError,
+    Taxonomy,
     download_database,
     download_release,
+    download_taxonomy,
     download_urls,
     parse_md5sums,
     release_url,
@@ -535,6 +539,267 @@ def test_cli_lists_databases() -> None:
         assert result.returncode == 0, result.stderr
         assert "gtdb-r232-c200-dbv2.syl2db" in result.stdout
         assert "18.7 GiB" in result.stdout
+
+
+def test_cli_lists_taxonomies() -> None:
+    for flag in ("--list-taxonomies", "--taxonomy=list"):
+        result = _run("download", flag)
+        assert result.returncode == 0, result.stderr
+        assert "UHGV_default" in result.stdout
+        assert "FungiRefSeq-latest" in result.stdout
+        assert "uhgv_c200_dbv1.syldb" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# taxonomy downloads
+# ---------------------------------------------------------------------------
+
+
+def _serve_taxonomy(www: Path, base_url: str, content: bytes, **kwargs) -> object:
+    (www / "uhgv_default_metadata.tsv.gz").write_bytes(content)
+    return Taxonomy(
+        name="UHGV_default",
+        filename="uhgv_default_metadata.tsv.gz",
+        mirrors=(base_url + "uhgv_default_metadata.tsv.gz",),
+        **kwargs,
+    )
+
+
+def test_download_taxonomy_verifies(tmp_path: Path, www: Path, serve) -> None:
+    content = b"UHGV-1\tvFAM-00013;root\tHost\n"
+    base_url = serve(www)
+    entry = _serve_taxonomy(
+        www,
+        base_url,
+        content,
+        size=len(content),
+        md5=hashlib.md5(content).hexdigest(),
+    )
+    path = download_taxonomy(entry, tmp_path / "tax")
+    assert path == tmp_path / "tax" / "uhgv_default_metadata.tsv.gz"
+    assert path.read_bytes() == content
+
+    # A same-size corruption is caught: taxonomy files are always verified.
+    path.write_bytes(b"x" * len(content))
+    download_taxonomy(entry, tmp_path / "tax")
+    assert path.read_bytes() == content
+
+    # A wrong-size file is downloaded again too.
+    path.write_bytes(b"short")
+    download_taxonomy(entry, tmp_path / "tax")
+    assert path.read_bytes() == content
+
+
+def test_download_taxonomy_size_only_entry(
+    tmp_path: Path, www: Path, serve
+) -> None:
+    """Only an entry flagged ``size_only`` (GlobDB r232) may go without an MD5."""
+    content = b"GCF_1\td__Bacteria\n"
+    base_url = serve(www)
+    entry = _serve_taxonomy(
+        www, base_url, content, size=len(content), size_only=True
+    )
+    path = download_taxonomy(entry, tmp_path / "tax")
+    assert path.read_bytes() == content
+
+    # nothing else can be checked, so a same-size file is reused
+    path.write_bytes(b"x" * len(content))
+    assert download_taxonomy(entry, tmp_path / "tax").read_bytes() == b"x" * len(content)
+    # a wrong size is fetched again
+    path.write_bytes(b"short")
+    assert download_taxonomy(entry, tmp_path / "tax").read_bytes() == content
+
+
+def test_download_taxonomy_without_any_expectation_fails(
+    tmp_path: Path, www: Path, serve
+) -> None:
+    content = b"no expectation"
+    base_url = serve(www)
+    entry = _serve_taxonomy(www, base_url, content)
+    directory = tmp_path / "tax"
+    directory.mkdir()
+    (directory / entry.filename).write_bytes(content)
+    with pytest.raises(DownloadError, match="no MD5"):
+        download_taxonomy(entry, directory)
+    # the unverifiable existing file is not silently accepted
+    assert (directory / entry.filename).read_bytes() == content
+
+
+def test_download_taxonomy_checksum_mismatch(
+    tmp_path: Path, www: Path, serve
+) -> None:
+    content = b"good taxonomy"
+    base_url = serve(www)
+    entry = _serve_taxonomy(
+        www, base_url, content, size=len(content), md5="0" * 32
+    )
+    with pytest.raises(DownloadError, match="checksum mismatch"):
+        download_taxonomy(entry, tmp_path)
+
+
+def test_download_taxonomy_asks_the_zenodo_api(
+    tmp_path: Path, www: Path, serve, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"UHGV-1\tvFAM-00013;root\n"
+    base_url = serve(www)
+    entry = _serve_taxonomy(www, base_url, content, zenodo=15670321)
+    asked: list[tuple[int, str]] = []
+
+    def fake_info(record: int, filename: str, **kwargs: object) -> dict[str, object]:
+        asked.append((record, filename))
+        return {"size": len(content) + 1, "md5": hashlib.md5(content).hexdigest()}
+
+    monkeypatch.setattr(download, "zenodo_file_info", fake_info)
+    # The API's size wins over the server's: the download is rejected.
+    with pytest.raises(DownloadError, match="expected .* bytes"):
+        download_taxonomy(entry, tmp_path / "tax")
+    assert asked == [(15670321, "uhgv_default_metadata.tsv.gz")]
+
+    monkeypatch.setattr(
+        download,
+        "zenodo_file_info",
+        lambda *args, **kwargs: {
+            "size": len(content),
+            "md5": hashlib.md5(content).hexdigest(),
+        },
+    )
+    assert download_taxonomy(entry, tmp_path / "tax").read_bytes() == content
+
+
+def test_download_taxonomy_needs_an_md5(
+    tmp_path: Path, www: Path, serve, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Zenodo entry whose API reports no MD5 must not be accepted on size alone."""
+    content = b"UHGV-1\tvFAM-00013;root\n"
+    base_url = serve(www)
+    entry = _serve_taxonomy(www, base_url, content, zenodo=15670321)
+    monkeypatch.setattr(
+        download,
+        "zenodo_file_info",
+        lambda *args, **kwargs: {"size": len(content), "md5": None},
+    )
+    with pytest.raises(DownloadError, match="no MD5"):
+        download_taxonomy(entry, tmp_path / "tax")
+    assert not (tmp_path / "tax" / "uhgv_default_metadata.tsv.gz").exists()
+
+    # nor may an existing, unverifiable file be reused
+    directory = tmp_path / "tax"
+    directory.mkdir()
+    (directory / entry.filename).write_bytes(content)
+    with pytest.raises(DownloadError, match="no MD5"):
+        download_taxonomy(entry, directory)
+
+
+def test_download_taxonomy_survives_a_dead_api(
+    tmp_path: Path, www: Path, serve, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    content = b"UHGV-1\tvFAM-00013;root\n"
+    base_url = serve(www)
+    unpinned = _serve_taxonomy(www, base_url, content, zenodo=15670321)
+
+    def boom(*args: object, **kwargs: object) -> dict[str, object]:
+        raise httpx.ConnectError("no network")
+
+    monkeypatch.setattr(download, "zenodo_file_info", boom)
+    # No catalogue MD5 either: a dead API means the file cannot be verified.
+    with pytest.raises(DownloadError, match="no MD5"):
+        download_taxonomy(unpinned, tmp_path / "tax")
+    assert "could not read the Zenodo API" in capsys.readouterr().err
+
+    # A catalogue-pinned entry still downloads and verifies without the API.
+    pinned = _serve_taxonomy(
+        www,
+        base_url,
+        content,
+        zenodo=15670321,
+        size=len(content),
+        md5=hashlib.md5(content).hexdigest(),
+    )
+    assert download_taxonomy(pinned, tmp_path / "tax").read_bytes() == content
+
+
+def test_download_taxonomy_unknown_name(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown taxonomy"):
+        download_taxonomy("nope", tmp_path)
+
+
+def test_zenodo_file_info_parses_the_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "files": [
+            {"key": "other.tsv.gz", "size": 1, "checksum": "md5:" + "1" * 32},
+            {"key": "x.tsv.gz", "size": 42, "checksum": "md5:" + "2" * 32},
+        ]
+    }
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return payload
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *exc_info: object) -> None:
+            pass
+
+        def get(self, url: str) -> FakeResponse:
+            assert url.endswith("/api/records/15670321")
+            return FakeResponse()
+
+    monkeypatch.setattr(download.httpx, "Client", FakeClient)
+    info = download.zenodo_file_info(15670321, "x.tsv.gz")
+    assert info == {"size": 42, "md5": "2" * 32}
+    with pytest.raises(DownloadError, match="does not publish"):
+        download.zenodo_file_info(15670321, "gone.tsv.gz")
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        ({"files": [{"key": "x.tsv.gz", "size": 42}]}, "no MD5"),
+        ({"files": [{"key": "x.tsv.gz", "size": "42", "checksum": "md5:" + "2" * 32}]}, "no usable size"),
+        ({"files": [{"key": "x.tsv.gz", "size": 0, "checksum": "md5:" + "2" * 32}]}, "no usable size"),
+        ({"files": [{"key": "x.tsv.gz", "size": 42, "checksum": "sha1:" + "2" * 32}]}, "no MD5"),
+        ({"files": [{"key": "x.tsv.gz", "size": 42, "checksum": "md5:nope"}]}, "malformed MD5"),
+        ({"files": "nope"}, "no 'files' list"),
+        ({}, "no 'files' list"),
+        (["nope"], "not a JSON object"),
+    ],
+)
+def test_zenodo_file_info_rejects_a_bad_response(
+    monkeypatch: pytest.MonkeyPatch, payload: object, message: str
+) -> None:
+    """A structurally wrong API answer is an error, not an unverified download."""
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> object:
+            return payload
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *exc_info: object) -> None:
+            pass
+
+        def get(self, url: str) -> FakeResponse:
+            return FakeResponse()
+
+    monkeypatch.setattr(download.httpx, "Client", FakeClient)
+    with pytest.raises(DownloadError, match=message):
+        download.zenodo_file_info(15670321, "x.tsv.gz")
 
 
 def test_cli_downloads_database_from_url(tmp_path: Path, www: Path, serve) -> None:

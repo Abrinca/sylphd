@@ -35,9 +35,13 @@ from .download import (
     database_table,
     download_database,
     download_release,
+    download_taxonomy,
     format_size,
+    lookup_taxonomy,
+    parse_taxonomy_spec,
+    taxonomy_table,
 )
-from .metadata import build_metadata_db
+from .metadata import TaxonomySource, build_metadata_db, update_metadata_db
 from .paths import check_socket_path, default_socket_path, parse_tcp
 from .profiling import DatabaseSet, DatabaseSpec
 from .protocol import ProfileParams, ProtocolError, rows_to_tsv_lines
@@ -293,6 +297,19 @@ def cmd_info(args: argparse.Namespace) -> int:
             f"{metadata.get('rows')} rows, built {metadata.get('built') or '?'})"
         )
         print(f"  columns: {len(metadata.get('columns') or [])}")
+        sources = metadata.get("taxonomy_sources") or []
+        if sources:
+            print(f"  taxonomy sources: {len(sources)}")
+            for source in sources:
+                rows = source.get("rows")
+                details = [f"{rows:,} keys" if rows is not None else "key count unknown"]
+                if source.get("kind") == "metadata":
+                    details.append("virtual, from -m")
+                if source.get("has_host"):
+                    details.append("with hosts")
+                if source.get("md5"):
+                    details.append(f"md5 {source['md5']}")
+                print(f"    {source.get('name')}: " + ", ".join(details))
 
     limits = info.get("limits", {})
     print(
@@ -722,9 +739,17 @@ def _cmd_assembly_per_contig(args: argparse.Namespace, path: Path) -> int:
 
 def cmd_download(args: argparse.Namespace) -> int:
     databases: list[str] = list(args.database or [])
+    taxonomies: list[str] = list(getattr(args, "taxonomy", None) or [])
     urls: list[str] = list(args.url or [])
-    if args.list_databases or LIST_KEYWORD in databases:
-        print(database_table())
+    list_databases = args.list_databases or LIST_KEYWORD in databases
+    list_taxonomies = getattr(args, "list_taxonomies", False) or LIST_KEYWORD in taxonomies
+    if list_databases or list_taxonomies:
+        if list_databases:
+            print(database_table())
+        if list_taxonomies:
+            if list_databases:
+                print()
+            print(taxonomy_table())
         return 0
     if urls and len(databases) > 1:
         _print_error("--url can only be combined with a single --database")
@@ -733,12 +758,12 @@ def cmd_download(args: argparse.Namespace) -> int:
     progress = ProgressPrinter(sys.stderr)
     paths: list[Path] = []
 
-    if databases or urls:
+    if databases or urls or taxonomies:
         use_aria2c = args.aria2c and aria2c_path() is not None
         jobs: list[tuple[str, tuple[str, ...]]] = []
         if databases:
             jobs = [(name, tuple(urls)) for name in databases]
-        else:
+        elif urls:
             for url in urls:
                 name = os.path.basename(urlparse(url).path)
                 if not name:
@@ -764,7 +789,16 @@ def cmd_download(args: argparse.Namespace) -> int:
                         verify_progress=VerifyPrinter(sys.stderr),
                     )
                 )
-        except (DownloadError, ValueError, OSError) as error:
+            for name in taxonomies:
+                paths.append(
+                    download_taxonomy(
+                        name,
+                        args.outdir,
+                        force=args.force,
+                        progress=progress,
+                    )
+                )
+        except (DownloadError, ValueError, OSError, httpx.HTTPError) as error:
             _print_error(str(error))
             return 1
     else:
@@ -787,6 +821,46 @@ def cmd_download(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_taxonomy_specs(
+    values: Sequence[str],
+    *,
+    cache_dir: str | None,
+    output: str,
+    quiet: bool,
+) -> list[TaxonomySource]:
+    """Turn ``--taxonomy`` values into sources, downloading bare names."""
+    specs = [parse_taxonomy_spec(value) for value in values]
+    seen: dict[str, str] = {}
+    for spec in specs:
+        if spec.name in seen:
+            raise ValueError(
+                f"two taxonomy sources are both named {spec.name!r} "
+                f"({seen[spec.name]} and {spec.text})"
+            )
+        seen[spec.name] = spec.text
+
+    sources: list[TaxonomySource] = []
+    directory = Path(cache_dir) if cache_dir else Path(output).parent / "taxonomy"
+    for spec in specs:
+        if spec.path is not None:
+            sources.append(
+                TaxonomySource(name=spec.name, path=spec.path, origin=str(spec.path))
+            )
+            continue
+        entry = lookup_taxonomy(spec.name)
+        path = download_taxonomy(
+            entry,
+            directory,
+            progress=None if quiet else ProgressPrinter(sys.stderr),
+        )
+        sources.append(
+            TaxonomySource(
+                name=entry.name, path=path, origin=entry.mirrors[0], from_catalogue=True
+            )
+        )
+    return sources
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     printed = {"last": ""}
 
@@ -796,33 +870,80 @@ def cmd_setup(args: argparse.Namespace) -> int:
             printed["last"] = line
             print(f"\r{line}", end="", file=sys.stderr, flush=True)
 
-    if not args.quiet:
-        callback = progress
-    else:
-        callback = None
+    callback = None if args.quiet else progress
+    taxonomy_values = list(getattr(args, "taxonomy", None) or [])
+    update = getattr(args, "update", False)
     try:
-        stats = build_metadata_db(
-            files=args.metadata,
-            output=args.output,
-            release=args.release,
-            force=args.force,
-            reps_only=args.reps_only,
-            progress=callback,
-        )
-    except (OSError, ValueError) as error:
+        if update:
+            if args.reps_only:
+                raise ValueError("--reps-only cannot be used with --update")
+            if args.release is not None:
+                raise ValueError("--release cannot be used with --update")
+            if args.metadata and len(args.metadata) > 1:
+                raise ValueError("--update copies exactly one metadata database")
+            source = args.metadata[0] if args.metadata else args.output
+            sources = _resolve_taxonomy_specs(
+                taxonomy_values,
+                cache_dir=args.cache_dir,
+                output=args.output,
+                quiet=args.quiet,
+            )
+            stats = update_metadata_db(
+                source,
+                args.output,
+                taxonomy=sources,
+                force=args.force,
+                progress=callback,
+            )
+        else:
+            if not args.metadata and not taxonomy_values:
+                raise ValueError("at least one of -m/--metadata and --taxonomy is required")
+            sources = _resolve_taxonomy_specs(
+                taxonomy_values,
+                cache_dir=args.cache_dir,
+                output=args.output,
+                quiet=args.quiet,
+            )
+            stats = build_metadata_db(
+                files=args.metadata or (),
+                output=args.output,
+                release=args.release,
+                force=args.force,
+                reps_only=args.reps_only,
+                progress=callback,
+                taxonomy=sources,
+            )
+    except (DownloadError, OSError, ValueError, httpx.HTTPError) as error:
         _print_error(str(error))
         return 1
     if not args.quiet:
         print(file=sys.stderr)
-    suffix = ", species representatives only" if args.reps_only else ""
+    taxonomy_sources = stats["taxonomy_sources"]  # type: ignore[union-attr]
+    details = [f"{int(stats['rows']):,} genomes"]  # type: ignore[call-overload]
+    if taxonomy_sources:
+        details.append(f"{len(taxonomy_sources)} taxonomy source(s)")
+    if args.reps_only and not update:
+        details.append("species representatives only")
     print(
-        f"wrote {stats['path']} ({format_size(int(stats['size']))}, "
-        f"{stats['rows']:,} genomes{suffix})",
+        f"wrote {stats['path']} ({format_size(int(stats['size']))}, "  # type: ignore[call-overload]
+        f"format {stats.get('format_version', 3)}, " + ", ".join(details) + ")",
         file=sys.stderr,
     )
     for source in stats["sources"]:  # type: ignore[union-attr]
         print(
             f"  {source['file']}: {source['rows']:,} rows",
+            file=sys.stderr,
+        )
+    for name in stats.get("skipped_taxonomy", ()):  # type: ignore[union-attr]
+        print(
+            f"  {name}: skipped, the metadata of this GTDB release is already "
+            "the virtual source (the sylph-tax file has the same lineages)",
+            file=sys.stderr,
+        )
+    for source in stats["taxonomy_sources"]:  # type: ignore[union-attr]
+        host = ", with hosts" if source["has_host"] else ""
+        print(
+            f"  {source['name']}: {source['rows']:,} keys{host} ({source['kind']})",
             file=sys.stderr,
         )
     return 0

@@ -6,9 +6,10 @@ fungal, MAG and GlobDB databases get a lineage. They were coupled by one questio
 *which database* and *which taxonomy* does it belong to. The first half is settled without code —
 the taxonomy itself says where a hit came from (Decisions).
 
-**Status 2026-10-29: phase 1 (A core) is implemented**; phases 2–4 (all of B, plus the extras) are
-not. The implementation measurements are in `scratch/multi-db/REPORT.md` and are folded into the
-sections marked *measured*.
+**Status 2026-10-29: phases 1 (A core) and 2 (B schema and `setup`) are implemented**; phases 3–4
+(`resolve` and the `tax` profile, plus the extras) are not. The implementation measurements are in
+`scratch/multi-db/REPORT.md` (phase 1) and `scratch/taxonomy/REPORT.md` (phase 2) and are folded
+into the sections marked *measured*.
 
 Primary use is the owner's own backend through the CLI. The public web app stays on one database;
 it must keep working but gets no multi-database features here.
@@ -365,9 +366,12 @@ dict_tax_host    (id INTEGER PRIMARY KEY, value TEXT NOT NULL)
   stays dominated by GTDB metadata (198 MiB). Keys are the bulk.
 - **GTDB stays where it is.** Full GTDB metadata imported with `-m` is registered as a *virtual*
   source (`kind='metadata'`, name `GTDB_r<release>`) whose entries are `metadata_data.accession`
-  and `gtdb_taxonomy`, so lineages are not stored twice. Importing the sylph-tax `GTDB_rNNN` file
-  *and* `-m` is redundant: warn and skip the former. (The sylph-tax GTDB files are
-  representatives-only: 199,923 rows for r232.)
+  and `gtdb_taxonomy`, so lineages are not stored twice. Importing the sylph-tax catalogue file of
+  that *same* release (`GTDB_r232` with r232 metadata) *and* `-m` is redundant: log it and skip the
+  former. Only that combination is redundant — a catalogue file for a different release
+  (`GTDB_r214` next to r232) is a different taxonomy and is imported, and so is any local file
+  (`NAME=PATH`, `PATH`) under a name of its own: a local file is never taken for sylph-tax's own
+  file. (The sylph-tax GTDB files are representatives-only: 199,923 rows for r232.)
 - `ord` is the order given to `setup`; for an identical key in two sources the larger `ord` wins,
   as the later file wins in sylph-tax.
 - `info` gets `format_version = "3"`, `taxonomy_sources` (JSON list with name, rows, md5, origin)
@@ -400,10 +404,14 @@ FungiRefSeq-latest -o ...`; the GTDB source is the virtual `GTDB_r232` created b
   (default `<output dir>/taxonomy/`) with the existing engine in `download.py` (`download_urls`:
   mirrors, `.part`, resume, size and MD5). A local `PATH` is read as it is (gzip detected by magic
   as in `open_text`), with `NAME` defaulting to the file stem.
-- Parsing mirrors sylph-tax: `line.rstrip().split("\t")`; key `spl[0]` verbatim; lineage `spl[1]`
-  right-stripped; optional host `spl[2]`; a header row is just an entry that never matches
-  (IMG/VR). Keys are **case sensitive and not normalised**; only the GTDB virtual source keeps
-  `normalize_accession`.
+- Parsing mirrors sylph-tax: `line.rstrip().split("\t")`; key `spl[0]` verbatim (an empty key is
+  accepted, as sylph-tax accepts it); lineage `spl[1]` right-stripped; optional host `spl[2]`; a
+  header row is just an entry that never matches (IMG/VR). A blank line or a line without a tab is
+  an error naming the file and the line — sylph-tax raises `IndexError` there, and a silent skip
+  would hide a truncated file. A trailing tab is not an empty host column: `rstrip()` runs before
+  the split, so it means "no host". Keys are **case sensitive and not normalised**; only the GTDB
+  virtual source keeps `normalize_accession`. Within one file a repeated key keeps the last lineage
+  and only replaces its host when the later row has a third column; across files see B3.
 - Sources and their order are listed by `sylphd info` (metadata line), so the owner can see what a
   server will resolve against.
 - `--reps-only` applies to `-m` only.
@@ -440,6 +448,22 @@ Probing is on `Genome_file` and `Contig_name` as pysylph reports them (`GenomeSk
 `test_files/e.coli-K12.fasta.gz`, so file names are whatever the database builder passed; the
 probes exist for that reason. How the prebuilt databases name genomes is inferred from sylph-tax's
 rules only **(unverified: no prebuilt database was opened)**.
+
+**Hosts across sources (phase 3 must replicate this exactly).** sylph-tax does not keep hosts
+per file: `sylph_to_taxprof.py` creates `genome_to_taxonomy` and `genome_to_additional_data` once,
+*before* the loop over metadata files, and fills both from every file in the order given. So for a
+key that occurs in several files the final state is:
+
+- **lineage**: from the *last* file that contains the key (assigned on every row);
+- **host**: from the last row *that had a third column*, which may be a different, earlier file —
+  a later file's row without a host column leaves the earlier host in place, while its lineage
+  still wins.
+
+The database stores one row per `(source_id, key)`, which is the honest representation and what
+`info`/per-source dumps need, so `resolve` must combine them the same way: for each matched key
+take the lineage from the largest `ord` whose source has the key, and the host from the largest
+`ord` whose source has that key *and* a host. (For the target trio the key spaces do not overlap,
+so this only matters for GlobDB/UHGV-style multi-source setups; it is cheap to get right.)
 
 ### B4. Mixed-taxonomy profiles
 
@@ -599,9 +623,12 @@ before step 0:
    `FungiRefSeq-latest` for the target), `--update`, reader for v2/v3, `download
    --taxonomy`/`--list-taxonomies` (httpx mocked as in `test_download.py`). Tests: v2 file loads
    and serves; v3 built from small synthetic files (header row, gzip, 3 columns, duplicate keys
-   across sources); old reader code path opens v3.
+   across sources and across the 20,000-row batch split); the frozen v2 reader
+   (`tests/compat/metadata_v2_reader.py`, commit `e72b807`) opens a v3 file. **Done 2026-10-29**:
+   real-data run in `scratch/taxonomy/REPORT.md` (v3 file +25.8 MiB, `--update` 1.4–1.9 s).
 3. **B resolution and the `tax` profile.** `sylphtax_probes`, `MetadataDB.resolve`, `tax_*`
-   columns, `--taxonomy tax`, `--tax-source`, exact-sylph-tax aggregation. Tests: the parity plan,
+   columns, `--taxonomy tax`, `--tax-source`, exact-sylph-tax aggregation (hosts resolved by `ord`
+   independently of lineages, see B3). Tests: the parity plan,
    including the `--taxmatrix` output that phase -1 already fixed.
 4. **Extras.** `--taxprof-virus-hosts`, per-database association (`?tax=`; needs A7 to come back),
    generic lineage in `classify_hits`, `download --with-taxonomy`, web label from `databases`.

@@ -53,3 +53,73 @@ All ~900k GTDB genomes are stored by default. `--reps-only` stores only rows who
 `gtdb_representative` is true (~200k, about **78 MiB**). The server then finds no metadata for
 other accessions, which is fine for a sylph database that contains only species
 representatives. When two input files contain the same accession, the later row wins.
+
+## Taxonomy sources (format version 3) { #taxonomy-sources }
+
+Format version 3 adds [sylph-tax](https://github.com/bluenote-1577/sylph-tax) taxonomy files to the
+file, so hits from non-GTDB databases (UHGV viruses, fungi, MAGs, ...) can be given a lineage. The
+`metadata` view and every metadata column are unchanged: version 3 is a superset of version 2.
+
+A taxonomy file is plain text, one row per line, tab-separated, optionally gzip-compressed
+(detected by magic bytes, not by the name):
+
+```text
+key<TAB>lineage[<TAB>host]
+UHGV-0405173	vFAM-00013;root;Monodnaviria	Homo sapiens
+```
+
+Parsing follows sylph-tax (`sylph_to_taxprof.py`, v1.9.2): `line.rstrip().split("\t")`, the key
+**verbatim** (case sensitive, never normalised, unlike GTDB accessions), the lineage an opaque `;`
+string, and an optional third column with the virus host. A header row, as IMG/VR 4.1 has, is
+stored like any other row and simply never matches a hit; an empty key is stored too (sylph-tax
+accepts it). A blank line or a line without a tab is an error naming the file and the line, as it is
+in sylph-tax (which would raise there) — a broken source never half-imports.
+
+A key repeated within one file keeps the **last** lineage but only takes a new host from a row that
+has a third column, so a later row without a host leaves the earlier host in place (this is exactly
+sylph-tax's two-dict behaviour). Note that a trailing tab is *not* an empty host: `rstrip()` runs
+before the split, so it counts as no host column. Across files sylph-tax keeps one host dictionary,
+so for a key in several sources its lineage comes from the last file and its host from the last file
+*that had a host column*; the database keeps one row per source, so a future resolution step must
+pick the two by `ord` independently.
+
+The file contains:
+
+- **`taxonomy_source`** — one row per source: `ord` (the order given to `setup`; a key found in two
+  sources resolves to the larger `ord`, as the later file wins in sylph-tax; the virtual GTDB
+  source has `ord` 0), `name`, `kind`, `origin`, `md5`, `rows` (stored keys; duplicate keys within
+  a source collapse), `has_host` and `built`;
+- **`taxonomy_entry`** — `(source_id, key)` → `lineage`/`host`, dictionary ids, `WITHOUT ROWID`,
+  with an index on `key` for batched lookups;
+- **`dict_tax_lineage`**, **`dict_tax_host`** — `id`, `value`, like the other dictionary tables;
+- the `info` keys `sylphtax_rules` (the sylph-tax version whose file formats and rules were
+  implemented, currently `1.9.2`) and `taxonomy_sources` (a JSON copy of `taxonomy_source`).
+
+Two kinds of source exist:
+
+| `kind` | Meaning |
+|---|---|
+| `metadata` | the **virtual GTDB source** over `metadata_data`: its keys are `metadata_data.accession` and its lineages `gtdb_taxonomy`, so no lineage is stored twice. It is created from `-m` and named `GTDB_r<release>` (`GTDB` without `--release`). Importing the sylph-tax catalogue file of the *same* release (`GTDB_r232` with `--release 232`) and `-m` would duplicate it, so that source is skipped with a message; a different release or a local file is imported. |
+| `sylphtax` | one imported file; `md5` is always computed from the file, `origin` is the path or the download URL |
+
+`GET /info` reports the sources under `metadata.taxonomy_sources` (name, kind, origin, md5, rows,
+has_host) and `metadata.sylphtax_rules`; `sylphd info` prints one line per source. A format 2
+file reports neither key, so its output is unchanged.
+
+### Compatibility and `--update`
+
+A version 2 file keeps loading and serving exactly as before; `MetadataDB` accepts
+`format_version` 2 and 3 and a version 2 reader ignores the new tables. Upgrading a version 2 file
+copies it and adds the tables without the GTDB TSV files:
+
+```bash
+sylphd setup --update -m old.sqlite --taxonomy UHGV_default -o new.sqlite  # copy
+sylphd setup --update --taxonomy UHGV_default -o old.sqlite                # in place
+```
+
+The copy is built next to the output, in a uniquely named temporary file (so parallel runs and a
+source named `*.tmp` are safe), and replaces the output only on success, exactly like
+`setup --force`, so a failed update leaves the old file untouched. The copy keeps the permission
+bits of the file it replaces; a build to a new path uses the normal umask-derived mode.
+`--update` can also add sources to an existing version 3 file; a source with an existing name is
+replaced (its `ord` is kept).

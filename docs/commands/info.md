@@ -14,7 +14,9 @@ Prints what the server reports about itself:
   `--db NAME=PATH` alias, else the file name), file, genome count, `c` and `k`. A single-database
   server prints nothing extra, so the output does not change;
 - the metadata database (path, GTDB release, row count, build date, number of columns) or
-  `metadata: none`;
+  `metadata: none`; when it has taxonomy sources (format 3), `taxonomy sources:` with one line per
+  source (name, number of keys, whether it is the virtual GTDB source or an imported file, whether
+  it carries virus hosts, MD5);
 - versions of sylphd, pysylph and Python;
 - limits: jobs, upload size, sketch count, and a `web:` line with the raw-sequence assembly
   (`--allow-sequences`), rate-limit and queue settings.
