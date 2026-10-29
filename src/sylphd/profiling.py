@@ -566,7 +566,7 @@ def _assembly_hits(
     )
     results = results[:top]
 
-    columns = tuple(metadata.columns) if metadata is not None else METADATA_COLUMNS
+    columns = tuple(metadata.field_columns) if metadata is not None else METADATA_COLUMNS
     accessions = [
         accession_from_genome_name(result.genome_sketch.name) for result in results
     ]
@@ -574,6 +574,16 @@ def _assembly_hits(
         metadata.lookup(accession for accession in accessions if accession)
         if metadata is not None
         else {}
+    )
+    resolved = (
+        metadata.resolve(
+            [
+                (result.genome_sketch.name, result.genome_sketch.description)
+                for result in results
+            ]
+        )
+        if metadata is not None
+        else []
     )
 
     hits: list[dict[str, Any]] = []
@@ -589,7 +599,9 @@ def _assembly_hits(
             "genome_file": genome.name,
             "accession": accession,
         }
-        record = found.get(accession, {}) if accession else {}
+        record: dict[str, Any] = dict(found.get(accession, {})) if accession else {}
+        if resolved:
+            record.update(resolved[rank - 1].columns())
         for column in columns:
             row[column] = record.get(column)
         hits.append(row)
@@ -607,8 +619,13 @@ def run_sample(
     name: str,
     payload: bytes,
     hide_ani_ci: bool = False,
+    tax_sources: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """Deserialize, validate and profile one sketch.  Runs in a worker thread."""
+    """Deserialize, validate and profile one sketch.  Runs in a worker thread.
+
+    ``tax_sources`` restricts hit resolution to those taxonomy sources
+    (``--tax-source``); it is ignored without a metadata database.
+    """
     sketch, _ = _decode_sketch(databases, name, payload)
 
     profiler = databases.profiler(params)
@@ -621,13 +638,22 @@ def run_sample(
     else:
         accessions = [accession_from_genome_name(result.genome_sketch.name) for result in results]
         found = metadata.lookup(accession for accession in accessions if accession)
-        for result, accession in zip(results, accessions):
+        resolved = metadata.resolve(
+            [
+                (result.genome_sketch.name, result.genome_sketch.description)
+                for result in results
+            ],
+            sources=tax_sources,
+        )
+        for result, accession, taxonomy in zip(results, accessions, resolved):
+            record: dict[str, Any] = dict(found.get(accession, {})) if accession else {}
+            record.update(taxonomy.columns())
             rows.append(
                 result_row(
                     result,
                     name,
                     mode=mode,
-                    metadata=found.get(accession, {}) if accession else {},
+                    metadata=record,
                     fields=fields,
                     hide_ani_ci=hide_ani_ci,
                 )

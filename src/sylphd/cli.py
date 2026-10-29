@@ -57,6 +57,7 @@ from .sketching import (
 )
 from .taxonomy import (
     TaxonomyError,
+    default_taxonomies,
     parse_taxonomies,
     resolve_taxonomy_columns,
     write_outputs,
@@ -388,14 +389,26 @@ def cmd_contain(args: argparse.Namespace) -> int:
         taxonomy_prefix is not None or matrix_prefix is not None
     )
     taxonomies: tuple[str, ...] = ()
+    tax_sources: tuple[str, ...] = ()
 
     # Everything that can fail without the server is checked before sketching.
     _check_output_file(args.output)
     try:
+        if getattr(args, "tax_source", None) and not write_taxonomy:
+            raise TaxonomyError(
+                "--tax-source needs --taxprof or --taxmatrix: it restricts the "
+                "sources of the aggregated 'tax' profile"
+            )
         if write_taxonomy:
-            taxonomies = parse_taxonomies(args.taxonomy)
+            # A bad --taxonomy must fail before the server is contacted; only
+            # the *default* depends on what the server has.
+            requested_taxonomies = (
+                None if args.taxonomy is None else parse_taxonomies(args.taxonomy)
+            )
             _check_output_prefix(taxonomy_prefix)
             _check_output_prefix(matrix_prefix)
+        else:
+            requested_taxonomies = None
         with _client_from_args(args) as client:
             info = client.info()
             database = info["database"]
@@ -403,6 +416,14 @@ def cmd_contain(args: argparse.Namespace) -> int:
             fields = _resolve_fields(args.fields, metadata)
             metadata_columns = list((metadata or {}).get("columns") or [])
             if write_taxonomy:
+                taxonomies = (
+                    requested_taxonomies
+                    if requested_taxonomies is not None
+                    else default_taxonomies(metadata)
+                )
+                tax_sources = _select_tax_sources(
+                    getattr(args, "tax_source", None) or (), taxonomies, metadata
+                )
                 request_fields = _request_fields(fields, taxonomies, metadata)
             else:
                 request_fields = fields
@@ -431,7 +452,12 @@ def cmd_contain(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
             if mode == "profile":
-                result = client.profile(sketches, params=params, fields=request_fields)
+                result = client.profile(
+                    sketches,
+                    params=params,
+                    fields=request_fields,
+                    tax_sources=tax_sources or None,
+                )
             else:
                 result = client.query(sketches, params=params, fields=request_fields)
     except (ClientError, InputError, ProtocolError, TaxonomyError) as error:
@@ -446,6 +472,7 @@ def cmd_contain(args: argparse.Namespace) -> int:
             taxprof_prefix=taxonomy_prefix,
             taxmatrix_prefix=matrix_prefix,
             matrix_value=getattr(args, "taxmatrix_value", "relative"),
+            tax_sources=tax_sources,
         )
         for path in written:
             print(f"{PROG}: wrote {path}", file=sys.stderr)
@@ -490,6 +517,42 @@ def _resolve_fields(text: str | None, metadata: dict[str, Any] | None) -> list[s
             + f" (available: {', '.join(available)})"
         )
     return requested
+
+
+def _select_tax_sources(
+    values: Sequence[str],
+    taxonomies: Sequence[str],
+    metadata: dict[str, Any] | None,
+) -> tuple[str, ...]:
+    """The sources ``--tax-source`` restricts to, in the file's ``ord`` order.
+
+    Without the flag that is every source (sylph-tax given every file).  The
+    order is not the order of the flags: sylph-tax resolves a key found in
+    several files by the order it was given them, which here is the ``setup``
+    order of the metadata file, so that is what the header must list too.
+    """
+    if "tax" not in taxonomies:
+        if values:
+            raise TaxonomyError(
+                "--tax-source only applies to '--taxonomy tax' (it restricts "
+                "which sources the merged profile uses)"
+            )
+        return ()
+    available = [
+        str(source["name"])
+        for source in (metadata or {}).get("taxonomy_sources") or ()
+    ]
+    if not values:
+        return tuple(available)
+    unknown = [name for name in values if name not in available]
+    if unknown:
+        raise TaxonomyError(
+            "unknown taxonomy source(s): "
+            + ", ".join(unknown)
+            + f" (available: {', '.join(available) or 'none'})"
+        )
+    selected = set(values)
+    return tuple(name for name in available if name in selected)
 
 
 def _request_fields(

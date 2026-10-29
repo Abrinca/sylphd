@@ -129,8 +129,9 @@ class SylphClient:
         *,
         params: ProfileParams | None = None,
         fields: Sequence[str] | None = None,
+        tax_sources: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        return self._post("profile", samples, params, fields)
+        return self._post("profile", samples, params, fields, tax_sources)
 
     def query(
         self,
@@ -138,8 +139,9 @@ class SylphClient:
         *,
         params: ProfileParams | None = None,
         fields: Sequence[str] | None = None,
+        tax_sources: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        return self._post("query", samples, params, fields)
+        return self._post("query", samples, params, fields, tax_sources)
 
     def assembly(
         self,
@@ -238,6 +240,7 @@ class SylphClient:
         samples: Sequence[tuple[str, bytes]],
         params: ProfileParams | None,
         fields: Sequence[str] | None,
+        tax_sources: Sequence[str] | None = None,
     ) -> httpx.Request:
         """Build the multipart request ``_post`` sends (shared with ``query_size``)."""
         names = [name for name, _ in samples]
@@ -251,7 +254,7 @@ class SylphClient:
         return self._client.build_request(
             "POST",
             mode,
-            data={"params": params_json(mode, params, names, fields)},
+            data={"params": params_json(mode, params, names, fields, tax_sources)},
             files=files,
         )
 
@@ -261,10 +264,13 @@ class SylphClient:
         samples: Sequence[tuple[str, bytes]],
         params: ProfileParams | None,
         fields: Sequence[str] | None,
+        tax_sources: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         if not samples:
             raise ValueError("no samples to send")
-        response = self._send(self._prepare_post(mode, samples, params, fields))
+        response = self._send(
+            self._prepare_post(mode, samples, params, fields, tax_sources)
+        )
         result = response.json()
         if not isinstance(result, list):
             raise ClientError(f"unexpected response from /{mode}: not a JSON list")

@@ -49,7 +49,8 @@ Reports:
   [the metadata reference](metadata.md#taxonomy-sources)) adds `taxonomy_sources` — one object per
   source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`,
   `md5`, `rows` and `has_host` — and `sylphtax_rules` (the sylph-tax version whose rules apply).
-  A format 2 file has neither key, so its response is unchanged;
+  Its `columns` also list the four `tax_*` columns, which `fields` can then select. A format 2 file
+  has none of this, so its response is unchanged;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
   `name` is the string of `--name` (at most 80 characters, one line); `about` is
   `{"format": "markdown", "text": "..."}` with the contents of the `--about` file (UTF-8, at most
@@ -86,6 +87,7 @@ At most 4096 sketches fit in one request. Non-file form fields such as `params` 
 | `no_adjust` | boolean, report the naive ANI |
 | `names` | list with one name per sketch (defaults to the part file names, else `sample-N`) |
 | `fields` | list of metadata columns; omitted means all, `[]` means none; needs a metadata database |
+| `tax_sources` | list of taxonomy source names: resolve hits against these sources only (default: all of them; an empty list is the same). Unknown names, or a server without sylph-tax sources, are a 400 |
 | `mode` | optional, must match the endpoint (`query` or `profile`) |
 
 Unknown keys are rejected with a 400. The client sketches with `database.c` and `database.k` from
@@ -119,6 +121,21 @@ follow `accession`. Rows keep sylph's column names; in JSON `Eff_cov` is never r
 `True_cov` (that is a TSV header), and `Lambda_status` is an extra field not present in the TSV.
 With `no_adjust`, `Adjusted_ANI` is the naive containment ANI and `ANI_5-95_percentile` is `null`:
 the interval still describes the disabled adjustment.
+
+A metadata file with sylph-tax taxonomy sources (format 3) adds four columns to every row, and
+they are listed in `metadata.columns` so `fields` can select them:
+
+| Column | Meaning |
+|---|---|
+| `tax_source` | name of the taxonomy source whose lineage was used (the largest `ord` that has the hit's key), or `null` |
+| `tax_key` | the key sylph-tax matched (verbatim: an accession, a file name, a contig id, ...), or `null` |
+| `tax_lineage` | the source's lineage string, opaque (`vFAM-…;vOTU-…`, `d__…;s__…`), or `null` for a hit without any taxonomy |
+| `tax_host` | the virus host of that key, from the largest `ord` whose source has one, or `null` |
+
+The server resolves them with sylph-tax's own probe rules over the hit's `Genome_file` and
+`Contig_name` (see [the metadata reference](metadata.md#resolving-a-hit)), so `query` and
+`profile` rows carry them too. Their presence is additive: a format 2 file reports exactly the old
+columns and rows. `/assembly` hits carry the same four fields.
 
 ## `POST /assembly` { #post-assembly }
 

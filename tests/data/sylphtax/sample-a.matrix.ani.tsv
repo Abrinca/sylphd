@@ -1,0 +1,22 @@
+clade_name	sample-a
+NO_TAXONOMY|t__unknown.fna.gz:ctg	90.0
+weird|contains_t__here	92.0
+d__Bacteria|p__GlobDB_only|t__GCF_003697165	97.25
+d__Bacteria|p__ASM|t__GCF_999999999.1	96.0
+legacy|gz|t__legacy.fa.gz	95.0
+pass1|wins|t__P_ASM9_genomic.fna.gz	93.5
+level1|level2|t__split.v1	94.0
+root|empty-key|t__	90.5
+tie|alpha|t__TIE-1	93.0
+tie2|beta|t__TIE-2	93.0
+weird|contains_t__here|last	92.0
+vFAM-rep|vOTU-rep|t__REPEAT-1	92.5
+asm|path-kept-the-basename|t__fungi_genomic.fna	89.5
+vFAM-2|vOTU-2|t__UHGV-0000002	91.0
+d__Bacteria|p__SecondFile|s__Second file|t__GCA_000005845.2	99.5
+vFAM-00001|vSUBFAM-1|vOTU-1|t__UHGV-0000001	98.0
+weird|contains_t__here|last|t__WEIRD-1	92.0
+later|lineage|ms|t__MS-1	90.0
+root|UNKNOWN|k__Viruses|UNKNOWN|t__EMPTY-1	91.5
+k__Fungi|p__Ascomycota|c__|o__Eurotiales|f__|g__|s__|t__GCF_010093815.1_Psehy1	99.0
+r__Viruses|k__|p__|c__|o__|f__|g__|s__|t__IMGVR_UViG_1	93.0

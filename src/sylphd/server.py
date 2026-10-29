@@ -466,7 +466,7 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
     upload = await _read_upload(request, mode)
     if isinstance(upload, JSONResponse):
         return upload
-    params, fields, names, payloads = upload
+    params, fields, names, payloads, tax_sources = upload
 
     samples: list[dict[str, Any] | None] = [None] * len(payloads)
     try:
@@ -474,7 +474,16 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
             async with anyio.create_task_group() as task_group:
                 for index, (name, payload) in enumerate(zip(names, payloads)):
                     task_group.start_soon(
-                        _run_slot, state, mode, params, fields, name, payload, samples, index
+                        _run_slot,
+                        state,
+                        mode,
+                        params,
+                        fields,
+                        name,
+                        payload,
+                        samples,
+                        index,
+                        tax_sources,
                     )
     except QueueFullError:
         return _busy()
@@ -494,8 +503,10 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
 
 async def _read_upload(
     request: Request, mode: str
-) -> tuple[ProfileParams, Sequence[str] | None, list[str], list[bytes]] | JSONResponse:
-    """Parse the multipart form into ``(params, fields, names, payloads)``.
+) -> tuple[
+    ProfileParams, Sequence[str] | None, list[str], list[bytes], Sequence[str] | None
+] | JSONResponse:
+    """Parse the multipart form into ``(params, fields, names, payloads, tax_sources)``.
 
     Returns the error response instead when the request is invalid.  The form
     (and its temporary files) is closed before returning.
@@ -531,6 +542,12 @@ async def _read_upload(
             if isinstance(fields, JSONResponse):
                 return fields
 
+            tax_sources = _validate_tax_sources(
+                params_data.get("tax_sources"), state.metadata
+            )
+            if isinstance(tax_sources, JSONResponse):
+                return tax_sources
+
             sketches = form.getlist("sketch")
             if not sketches:
                 return _error("no 'sketch' part in the request", 400)
@@ -547,7 +564,7 @@ async def _read_upload(
             except Exception:
                 log.exception("failed to read an uploaded sketch part")
                 return _error("failed to read a 'sketch' part", 500)
-            return params, fields, names, payloads
+            return params, fields, names, payloads, tax_sources
     except StarletteHTTPException as error:
         return _error(str(error.detail), error.status_code)
 
@@ -569,6 +586,7 @@ async def _run_slot(
     payload: bytes,
     samples: list[dict[str, Any] | None],
     index: int,
+    tax_sources: Sequence[str] | None = None,
 ) -> None:
     async with state.jobs.slot():
         samples[index] = await anyio.to_thread.run_sync(
@@ -581,22 +599,56 @@ async def _run_slot(
             name,
             payload,
             params.no_adjust,
+            tax_sources,
         )
 
 
 def _validate_fields(value: Any, metadata: MetadataDB | None) -> Sequence[str] | None | JSONResponse:
     if value is None:
-        return None if metadata is None else tuple(metadata.columns)
+        return None if metadata is None else tuple(metadata.field_columns)
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         return _error("'params.fields' must be a list of column names", 400)
     if not value:
         return ()
     if metadata is None:
         return _error("this server has no metadata database; --fields is not available", 400)
-    unknown = [column for column in value if column not in metadata.columns]
+    unknown = [column for column in value if column not in metadata.field_columns]
     if unknown:
         return _error(f"unknown metadata column(s): {', '.join(unknown)}", 400)
     return tuple(value)
+
+
+def _validate_tax_sources(
+    value: Any, metadata: MetadataDB | None
+) -> Sequence[str] | None | JSONResponse:
+    """Validate ``params.tax_sources``: source names of the metadata file.
+
+    ``None`` means all sources (sylph-tax given every file).  A name the file
+    does not have is a 400, since silently resolving against another source
+    would produce a profile that looks right and is not.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return _error("'params.tax_sources' must be a list of source names", 400)
+    if not value:  # an empty list is "no restriction", like an omitted field
+        return None
+    available = metadata.source_names() if metadata is not None else []
+    if not available:
+        return _error(
+            "this server has no sylph-tax taxonomy sources; "
+            "'params.tax_sources' is not available",
+            400,
+        )
+    unknown = [name for name in value if name not in available]
+    if unknown:
+        return _error(
+            "unknown taxonomy source(s): "
+            + ", ".join(unknown)
+            + f" (available: {', '.join(available)})",
+            400,
+        )
+    return tuple(dict.fromkeys(value))
 
 
 def _resolve_names(value: Any, sketches: Sequence[Any]) -> list[str] | JSONResponse:

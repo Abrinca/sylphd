@@ -187,6 +187,143 @@ def accession_from_genome_name(name: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# sylph-tax probing: hit -> key
+# ---------------------------------------------------------------------------
+
+#: The order in which sylph-tax tries the probes of one pass, after the four
+#: ``gf``/``gf + ".gz"``/``glob``/``contig`` probes: the suffix splits.
+_PROBE_SPLITS: tuple[str, ...] = (".fa", ".fasta", ".fna")
+
+
+def _sylphtax_gf_pass0(file_name: str) -> str:
+    """Pass 0's ``gf`` probe: the basename, cut at ``_ASM`` or ``_genomic``.
+
+    ``sylph_to_taxprof.genome_file_to_gcf_acc``: the ``"ASM"`` test looks at
+    the **whole path**, the split at the basename.  A path with ``ASM`` in a
+    directory therefore cuts the basename at ``_ASM`` even when the basename
+    has no such part (the split then returns the basename unchanged).
+    """
+    if "ASM" in file_name:
+        return file_name.split("/")[-1].split("_ASM")[0]
+    return file_name.split("/")[-1].split("_genomic")[0]
+
+
+def _probe_keys(gf: str, glob: str, contig: str) -> tuple[str, ...]:
+    """One pass's probes in sylph-tax's order (``gf``, ``.gz``, ``glob``, ...)."""
+    keys = [gf, gf + ".gz", glob, contig]
+    keys.extend(gf.split(suffix)[0] for suffix in _PROBE_SPLITS)
+    return tuple(keys)
+
+
+@dataclass(frozen=True)
+class SylphTaxProbes:
+    """The keys sylph-tax probes for one hit, in its order and precedence.
+
+    ``pass0`` is tried first, then ``pass1``; a pass-1 match **overrides** a
+    pass-0 match (``sylph_to_taxprof.main`` has no ``break``).  ``genome_file``
+    and ``contig_name`` are the pass-1 values, which sylph-tax uses to name an
+    unresolved hit (``NO_TAXONOMY;t__<genome_file>:<contig_name>``).
+    """
+
+    pass0: tuple[str, ...]
+    pass1: tuple[str, ...]
+    genome_file: str
+    contig_name: str
+
+    def probe_keys(self) -> tuple[str, ...]:
+        """Every probe key, both passes, without repeats (for one lookup)."""
+        return tuple(dict.fromkeys((*self.pass0, *self.pass1)))
+
+    @property
+    def no_taxonomy(self) -> str:
+        """sylph-tax's default lineage for a hit without any taxonomy."""
+        return f"NO_TAXONOMY;t__{self.genome_file}:{self.contig_name}"
+
+
+def sylphtax_probes(genome_file: str, contig_name: str) -> SylphTaxProbes:
+    """The probe keys of one hit, exactly as ``sylph-to-taxprof`` builds them.
+
+    Replicates ``sylph_to_taxprof.py`` (v1.9.2) rule for rule::
+
+        pass 0  gf     basename, split at "_ASM" if "ASM" is in the full path,
+                       else at "_genomic"
+                glob   basename.split(".")[0]
+                contig Contig_name.split(" ")[0].split("|")[0]   (space only)
+        pass 1  gf     basename
+                glob   gf
+                contig Contig_name.split()[0]                   (any whitespace)
+
+    and per pass the probes ``gf``, ``gf + ".gz"``, ``glob``, ``contig``, then
+    ``gf.split(".fa")[0]``, ``gf.split(".fasta")[0]`` and
+    ``gf.split(".fna")[0]``.  Keys are **not** normalised: sylph-tax stores
+    them verbatim, so ``GCF_010093815.1_Psehy1`` and ``GCF_010093815.1`` are
+    different keys.  The rules are verified against the real sylph-tax in
+    ``tests/test_sylphtax_parity.py``.
+
+    >>> probes = sylphtax_probes(
+    ...     "gtdb_reps/database/GCA/047/199/115/GCA_047199115.1_genomic.fna.gz",
+    ...     "GCA_047199115.1 contig 1",
+    ... )
+    >>> probes.pass0[0], probes.pass0[2]
+    ('GCA_047199115.1', 'GCA_047199115')
+    >>> sylphtax_probes("votus_full.fna.gz", "UHGV-0320751 species=vOTU-125334").pass1
+    ('votus_full.fna.gz', 'votus_full.fna.gz.gz', 'votus_full.fna.gz',
+     'UHGV-0320751', 'votus_full.fna.gz', 'votus_full.fna.gz',
+     'votus_full')
+    """
+    basename = genome_file.split("/")[-1]
+    gf0 = _sylphtax_gf_pass0(genome_file)
+    contig0 = contig_name.split(" ")[0].split("|")[0]
+    glob0 = basename.split(".")[0]
+
+    # ``str.split()`` drops leading whitespace and returns [] for an empty or
+    # blank name, where sylph-tax would raise IndexError; "no contig name" is a
+    # miss, not a crash.
+    words = contig_name.split()
+    contig1 = words[0] if words else ""
+
+    return SylphTaxProbes(
+        pass0=_probe_keys(gf0, glob0, contig0),
+        pass1=_probe_keys(basename, basename, contig1),
+        genome_file=basename,
+        contig_name=contig1,
+    )
+
+
+#: The columns a resolved hit carries (format 3).  They are *virtual*: they are
+#: not in the ``metadata`` view, ``resolve`` fills them.
+HIT_TAXONOMY_COLUMNS: tuple[str, ...] = (
+    "tax_source",
+    "tax_key",
+    "tax_lineage",
+    "tax_host",
+)
+
+
+@dataclass(frozen=True)
+class HitTaxonomy:
+    """The taxonomy ``resolve`` found for one hit (all ``None`` for a miss)."""
+
+    source: str | None = None
+    key: str | None = None
+    lineage: str | None = None
+    host: str | None = None
+
+    def columns(self) -> dict[str, str | None]:
+        """The four ``tax_*`` values, keyed like the metadata columns."""
+        return {
+            "tax_source": self.source,
+            "tax_key": self.key,
+            "tax_lineage": self.lineage,
+            "tax_host": self.host,
+        }
+
+
+#: What ``resolve`` returns for a hit without any taxonomy.
+NO_HIT_TAXONOMY = HitTaxonomy()
+
+
 def _parse_value(raw: str, kind: str) -> object:
     """Convert a raw TSV cell to the SQLite representation."""
     value = raw.strip()
@@ -380,6 +517,20 @@ class TaxonomySource:
     path: Path
     origin: str | None = None
     from_catalogue: bool = False
+
+
+@dataclass(frozen=True)
+class TaxonomySourceRow:
+    """One row of ``taxonomy_source`` as read by :class:`MetadataDB`."""
+
+    id: int
+    ord: int
+    name: str
+    kind: str
+    origin: str | None
+    md5: str | None
+    rows: int | None
+    has_host: bool
 
 
 def iter_taxonomy_rows(
@@ -1072,26 +1223,62 @@ class MetadataDB:
         self.format_version: str = version
         #: True when the file carries the format 3 taxonomy tables.
         self.has_taxonomy: bool = "taxonomy_source" in tables
+        #: The sources, in ``ord`` order (empty for a version 2 file).
+        self._sources: tuple[TaxonomySourceRow, ...] = self._read_sources()
+        #: The virtual GTDB source, if the file has one.
+        self._virtual_source: TaxonomySourceRow | None = next(
+            (source for source in self._sources if source.kind == "metadata"), None
+        )
+
+    def _read_sources(self) -> tuple[TaxonomySourceRow, ...]:
+        if not self.has_taxonomy:
+            return ()
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT id, ord, name, kind, origin, md5, rows, has_host "
+                "FROM taxonomy_source ORDER BY ord, id"
+            ).fetchall()
+        return tuple(
+            TaxonomySourceRow(
+                id=int(row["id"]),
+                ord=int(row["ord"]),
+                name=str(row["name"]),
+                kind=str(row["kind"]),
+                origin=row["origin"],
+                md5=row["md5"],
+                rows=row["rows"],
+                has_host=bool(row["has_host"]),
+            )
+            for row in rows
+        )
+
+    @property
+    def taxonomy_columns(self) -> tuple[str, ...]:
+        """The ``tax_*`` columns a row can carry (empty without sources)."""
+        return HIT_TAXONOMY_COLUMNS if self._sources else ()
+
+    @property
+    def field_columns(self) -> tuple[str, ...]:
+        """Every column a client may request: metadata plus ``tax_*``."""
+        return self.columns + self.taxonomy_columns
 
     def taxonomy_sources(self) -> list[dict[str, object]]:
         """The taxonomy sources of the file, in ``ord`` order (empty for v2)."""
-        if not self.has_taxonomy:
-            return []
-        with self._lock:
-            return [
-                {
-                    "name": row["name"],
-                    "kind": row["kind"],
-                    "origin": row["origin"],
-                    "md5": row["md5"],
-                    "rows": row["rows"],
-                    "has_host": bool(row["has_host"]),
-                }
-                for row in self._connection.execute(
-                    "SELECT name, kind, origin, md5, rows, has_host "
-                    "FROM taxonomy_source ORDER BY ord"
-                )
-            ]
+        return [
+            {
+                "name": source.name,
+                "kind": source.kind,
+                "origin": source.origin,
+                "md5": source.md5,
+                "rows": source.rows,
+                "has_host": source.has_host,
+            }
+            for source in self._sources
+        ]
+
+    def source_names(self) -> list[str]:
+        """Names of the taxonomy sources, in ``ord`` order."""
+        return [source.name for source in self._sources]
 
     def _chunked_lookup(self, accessions: Sequence[str]) -> dict[str, dict[str, object]]:
         unique = list(dict.fromkeys(accession for accession in accessions if accession))
@@ -1111,12 +1298,137 @@ class MetadataDB:
         """Return metadata rows keyed by accession, for the accessions found."""
         return self._chunked_lookup(list(accessions))
 
+    # -- hit -> taxonomy -------------------------------------------------
+
+    def resolve(
+        self,
+        hits: Iterable[tuple[str, str]],
+        *,
+        sources: Sequence[str] | None = None,
+    ) -> list[HitTaxonomy]:
+        """Map each ``(Genome_file, Contig_name)`` hit to its taxonomy.
+
+        Replicates ``sylph-tax taxprof`` (see :func:`sylphtax_probes`): the
+        probe keys of both passes are fetched in one batch, and per hit the
+        first key of pass 1 wins over the first key of pass 0.  ``sources``
+        restricts the search to those source names (``--tax-source``), as if
+        sylph-tax had been given only those files: a key that exists only in an
+        excluded source is a miss.
+
+        For a key found in several sources the **lineage** comes from the
+        largest ``ord`` and the **host** from the largest ``ord`` whose row has
+        one — two different sources, possibly, exactly like sylph-tax's two
+        dicts (docs/project/multi-db-design.md B3).  The returned
+        :class:`HitTaxonomy` is all ``None`` for a hit without any taxonomy.
+        """
+        pairs = [
+            (str(genome or ""), str(contig or "")) for genome, contig in hits
+        ]
+        if not pairs:
+            return []
+        if not self._sources:
+            return [NO_HIT_TAXONOMY] * len(pairs)
+        allowed = None if sources is None else set(sources)
+        probes = [sylphtax_probes(genome, contig) for genome, contig in pairs]
+        keys = {key for probe in probes for key in probe.probe_keys()}
+        entries = self._taxonomy_entries(keys, allowed)
+
+        resolved: list[HitTaxonomy] = []
+        for probe in probes:
+            taxonomy = NO_HIT_TAXONOMY
+            for pass_keys in (probe.pass0, probe.pass1):
+                for key in pass_keys:
+                    entry = entries.get(key)
+                    if entry is not None:
+                        taxonomy = HitTaxonomy(
+                            source=entry[0], key=key, lineage=entry[1], host=entry[2]
+                        )
+                        break
+            resolved.append(taxonomy)
+        return resolved
+
+    def _taxonomy_entries(
+        self, keys: Iterable[str], allowed: set[str] | None
+    ) -> dict[str, tuple[str, str, str | None]]:
+        """``key -> (source name, lineage, host)`` merged across sources by ``ord``.
+
+        Two dictionaries, as sylph-tax has: the lineage from the largest
+        ``ord`` that has the key, the host from the largest ``ord`` that has the
+        key *and* a host.
+        """
+        # The empty key is a valid key: setup stores it (sylph-tax accepts it)
+        # and a pass-0 contig probe is "" for a contig such as "|extra".
+        unique = list(dict.fromkeys(keys))
+        lineages: dict[str, tuple[int, str, str]] = {}
+        hosts: dict[str, tuple[int, str]] = {}
+
+        def add(key: str, ord_value: int, name: str, lineage: str, host: str | None,
+                ) -> None:
+            best = lineages.get(key)
+            if best is None or ord_value >= best[0]:
+                lineages[key] = (ord_value, name, lineage)
+            if host is not None:
+                previous = hosts.get(key)
+                if previous is None or ord_value >= previous[0]:
+                    hosts[key] = (ord_value, host)
+
+        # 500 parameters per statement stays well below SQLite's variable limit.
+        for start in range(0, len(unique), 500):
+            chunk = unique[start : start + 500]
+            placeholders = ", ".join("?" * len(chunk))
+            query = (
+                "SELECT e.key AS key, s.ord AS ord, s.name AS name, "
+                "l.value AS lineage, h.value AS host "
+                "FROM taxonomy_entry AS e "
+                "JOIN taxonomy_source AS s ON s.id = e.source_id "
+                "LEFT JOIN dict_tax_lineage AS l ON l.id = e.lineage "
+                "LEFT JOIN dict_tax_host AS h ON h.id = e.host "
+                f"WHERE e.key IN ({placeholders})"
+            )
+            with self._lock:
+                rows = self._connection.execute(query, chunk).fetchall()
+            for row in rows:
+                name = str(row["name"])
+                if allowed is not None and name not in allowed:
+                    continue
+                lineage = row["lineage"]
+                if lineage is None:  # pragma: no cover - the builder always sets it
+                    continue
+                add(str(row["key"]), int(row["ord"]), name, str(lineage), row["host"])
+
+        virtual = self._virtual_source
+        if virtual is not None and (allowed is None or virtual.name in allowed):
+            for start in range(0, len(unique), 500):
+                chunk = unique[start : start + 500]
+                placeholders = ", ".join("?" * len(chunk))
+                query = (
+                    "SELECT m.accession AS key, d.value AS lineage "
+                    "FROM metadata_data AS m "
+                    "JOIN dict_gtdb_taxonomy AS d ON d.id = m.gtdb_taxonomy "
+                    f"WHERE m.accession IN ({placeholders})"
+                )
+                with self._lock:
+                    rows = self._connection.execute(query, chunk).fetchall()
+                for row in rows:
+                    add(
+                        str(row["key"]),
+                        virtual.ord,
+                        virtual.name,
+                        str(row["lineage"]),
+                        None,
+                    )
+
+        return {
+            key: (name, lineage, hosts[key][1] if key in hosts else None)
+            for key, (_, name, lineage) in lineages.items()
+        }
+
     def summary(self) -> dict[str, object]:
         """Return a JSON-friendly description of this metadata database."""
         summary: dict[str, object] = {
             "path": str(self.path),
             "size": self.path.stat().st_size,
-            "columns": list(self.columns),
+            "columns": list(self.field_columns),
             "rows": None,
             "release": self.info.get("release") or None,
             "built": self.info.get("built") or None,

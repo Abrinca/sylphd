@@ -6,10 +6,11 @@ fungal, MAG and GlobDB databases get a lineage. They were coupled by one questio
 *which database* and *which taxonomy* does it belong to. The first half is settled without code —
 the taxonomy itself says where a hit came from (Decisions).
 
-**Status 2026-10-29: phases 1 (A core) and 2 (B schema and `setup`) are implemented**; phases 3–4
-(`resolve` and the `tax` profile, plus the extras) are not. The implementation measurements are in
-`scratch/multi-db/REPORT.md` (phase 1) and `scratch/taxonomy/REPORT.md` (phase 2) and are folded
-into the sections marked *measured*.
+**Status 2026-10-29: phases 1 (A core), 2 (B schema and `setup`) and 3 (B resolution and the `tax`
+profile) are implemented**; phase 4 (the extras) is not. The implementation measurements are in
+`scratch/multi-db/REPORT.md` (phase 1), `scratch/taxonomy/REPORT.md` (phase 2) and
+`scratch/taxonomy/PHASE3.md` (phase 3, including the real-data parity run) and are folded into the
+sections marked *measured*.
 
 Primary use is the owner's own backend through the CLI. The public web app stays on one database;
 it must keep working but gets no multi-database features here.
@@ -491,6 +492,8 @@ so this only matters for GlobDB/UHGV-style multi-source setups; it is cheap to g
   file, like `sylph-tax taxprof -t A B C`; file `PREFIX<sample>.tax.sylphmpa`, matrix
   `PREFIXtax.tsv`. `--tax-source NAME` (repeatable) restricts the sources; default is all. The
   default of `--taxonomy` stays `gtdb,ncbi`, plus `tax` when the server has sylph-tax sources.
+  (Implemented as an optional `params.tax_sources` request field, because the restriction has to
+  apply to the server-side resolution, not to the returned rows.)
 - `tax` is **exact sylph-tax**: opaque tokens, empty token to `UNKNOWN`, `NO_TAXONOMY`, ordering
   by number of levels then abundance (stable), `t__<tax_key>`, header
   `Taxonomies_used:['GTDB_r232', 'UHGV_default']` (source names, list repr), full float
@@ -629,7 +632,14 @@ before step 0:
 3. **B resolution and the `tax` profile.** `sylphtax_probes`, `MetadataDB.resolve`, `tax_*`
    columns, `--taxonomy tax`, `--tax-source`, exact-sylph-tax aggregation (hosts resolved by `ord`
    independently of lineages, see B3). Tests: the parity plan,
-   including the `--taxmatrix` output that phase -1 already fixed.
+   including the `--taxmatrix` output that phase -1 already fixed. **Done 2026-10-29**: synthetic
+   goldens from the real sylph-tax (byte for byte, plus live parity when it is installed) and a
+   real-data run in `scratch/taxonomy/PHASE3.md` — three samples (GTDB, UHGV, a fungal genome's
+   tiled reads) byte-identical to `sylph-tax taxprof` and `merge` on the TSV-derived path, 100 %
+   of the hits and 100 % of the 168,536 UHGV and 661 fungal genomes resolved, `resolve` 3.7 ms
+   for 362 hits. One configuration finding: with both `UHGV_default` (ord 1) and `UHGV_ictv`
+   (ord 2) imported, every UHGV key resolves through **ICTV**; `--tax-source UHGV_default`
+   selects the other one.
 4. **Extras.** `--taxprof-virus-hosts`, per-database association (`?tax=`; needs A7 to come back),
    generic lineage in `classify_hits`, `download --with-taxonomy`, web label from `databases`.
 

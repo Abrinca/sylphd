@@ -623,11 +623,24 @@ def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
         )
         parser.add_argument(
             "--taxonomy",
-            default=",".join(TAXONOMIES),
+            default=None,
             metavar="LIST",
             help=(
                 "taxonomies to aggregate, comma-separated from "
-                f"{', '.join(TAXONOMIES)} [default: {','.join(TAXONOMIES)}]"
+                f"{', '.join(TAXONOMIES)} [default: "
+                + ", ".join(TAXONOMIES[:2])
+                + f", plus {TAXONOMIES[-1]} when the server has taxonomy sources]"
+            ),
+        )
+        parser.add_argument(
+            "--tax-source",
+            action="append",
+            default=[],
+            metavar="NAME",
+            help=(
+                "with --taxonomy tax: restrict the merged profile to these "
+                "taxonomy sources of the server's metadata file (repeatable; "
+                "default: all of them)"
             ),
         )
         parser.add_argument(

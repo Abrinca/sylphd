@@ -23,7 +23,10 @@ Eff_lambda Lambda_5-95_percentile Median_cov Mean_cov_geq1
 Containment_ind Naive_ANI Contig_name  accession <metadata...>
 ```
 
-See [Profiling reads](../guides/profiling-reads.md) for what they mean.
+`<metadata...>` is the server's metadata columns; with the default `--fields all` a server whose
+metadata file has sylph-tax taxonomy sources appends `tax_source`, `tax_key`, `tax_lineage` and
+`tax_host` after them (the existing columns keep their order, and an explicit `--fields` list is
+unchanged). See [Profiling reads](../guides/profiling-reads.md) for what they mean.
 
 ```bash
 sylphd query -1 sample_R1.fq.gz -2 sample_R2.fq.gz

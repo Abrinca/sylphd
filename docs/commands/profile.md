@@ -2,7 +2,7 @@
 
 ```text
 sylphd profile [inputs] [options] [--estimate-read-counts] [--taxonomy LIST]
-               [--taxprof PREFIX] [--taxmatrix PREFIX]
+               [--tax-source NAME] [--taxprof PREFIX] [--taxmatrix PREFIX]
                [--taxmatrix-value {relative,sequence,ani,coverage}]
 ```
 
@@ -32,7 +32,7 @@ the sketches to the server. For the ANI hits without abundances see [`query`](qu
 |---|---|---|
 | `-o, --output FILE` | stdout | write the table here |
 | `--format {tsv,json}` | `tsv` | output format |
-| `--fields COLUMNS` | `all` | metadata columns to add, comma-separated, or `all` / `none` |
+| `--fields COLUMNS` | `all` | metadata columns to add, comma-separated, or `all` / `none`; `all` is every column the server exposes, which on a server with sylph-tax sources **appends the four `tax_*` columns** after the existing ones (an explicit list is unchanged) |
 | `-v, --verbose` | off | progress messages on stderr |
 
 ## Thresholds
@@ -52,13 +52,17 @@ the sketches to the server. For the ANI hits without abundances see [`query`](qu
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--taxonomy LIST` | `gtdb,ncbi` | taxonomies to aggregate, comma-separated from `gtdb`, `ncbi` |
+| `--taxonomy LIST` | `gtdb,ncbi` (+ `tax`) | taxonomies to aggregate, comma-separated from `gtdb`, `ncbi`, `tax`; `tax` is added to the default when the server's metadata file has sylph-tax sources |
+| `--tax-source NAME` | all sources | with `--taxonomy tax`: resolve against these taxonomy sources only (repeatable, in `setup` order) |
 | `--taxprof PREFIX` | none | write one sylph-tax-style `.sylphmpa` per sample and taxonomy as `PREFIX<sample>.<taxonomy>.sylphmpa` |
 | `--taxmatrix PREFIX` | none | write one clade × sample matrix per taxonomy as `PREFIX<taxonomy>.tsv` |
 | `--taxmatrix-value {relative,sequence,ani,coverage}` | `relative` | value used in `--taxmatrix`: `relative` (`Taxonomic_abundance`) or `sequence` (`Sequence_abundance`), or `ani`/`coverage` for the strain-level columns, as `sylph-tax merge --column ANI\|Coverage` |
 
-These need a server with `--meta`. With two or more samples the matrix rows are sorted
-lexicographically, like `sylph-tax merge`. See
+These need a server with `--meta`; `tax` additionally needs a metadata file with sylph-tax
+sources, where the **default `--taxprof` writes three files per sample** (`.gtdb`, `.ncbi`, `.tax`)
+instead of two — pass `--taxonomy gtdb,ncbi` for the old set. `tax` is bit-exact `sylph-tax taxprof` over all sources (opaque lineages, `UNKNOWN`,
+`NO_TAXONOMY`, level-based ordering); `gtdb` and `ncbi` keep sylphd's own normalisation. With two
+or more samples the matrix rows are sorted lexicographically, like `sylph-tax merge`. See
 [Taxonomic profiles](../guides/taxonomic-profiles.md).
 
 ## Server

@@ -1,8 +1,10 @@
-"""Per-rank taxonomic aggregation for ``sylphd profile``.
+"""Taxonomic aggregation for ``sylphd profile``.
 
 The server returns one row per ANI hit, with the metadata taxonomy strings
-(``gtdb_taxonomy``/``ncbi_taxonomy``) joined in.  This module folds those rows
-into the clade tables that ``sylph-tax`` writes, without any server support:
+(``gtdb_taxonomy``/``ncbi_taxonomy``) or the resolved sylph-tax taxonomy
+(``tax_lineage``/``tax_key``/``tax_source``) joined in.  This module folds
+those rows into the clade tables that ``sylph-tax`` writes, without any
+server-side aggregation:
 
 * :func:`aggregate_rows` sums ``Taxonomic_abundance`` and
   ``Sequence_abundance`` up every lineage, so each ancestor clade gets the sum
@@ -20,9 +22,9 @@ two small ``write_*`` helpers.
 
 Lineage rules
 -------------
-Taxonomy strings are split on ``;`` and keep their ``d__``...``s__`` prefixes.
-GTDB strings name every rank; NCBI strings may have empty ranks in the middle
-(``o__;f__;g__Name``) or at the end (``g__;s__``).  Therefore:
+``gtdb`` and ``ncbi`` split the string on ``;`` and keep their ``d__``...``s__``
+prefixes.  GTDB strings name every rank; NCBI strings may have empty ranks in
+the middle (``o__;f__;g__Name``) or at the end (``g__;s__``).  Therefore:
 
 * leading/trailing whitespace is stripped and tokens without a known rank
   prefix (``t__``, ``b__``, ...) are ignored;
@@ -38,6 +40,18 @@ The strain level is ``t__<accession>`` when the row has an accession (the
 server derives it from ``Genome_file``), otherwise ``t__<file name>``.
 ``sylph-tax`` uses the accessions from its taxonomy files, which is the same
 thing for GTDB.
+
+The ``tax`` taxonomy
+--------------------
+``--taxonomy tax`` is **exact sylph-tax** over all imported sources of the
+metadata file (``sylph-tax taxprof -t A B C``): lineages are opaque tokens,
+split on ``;`` exactly as stored; an empty token becomes ``UNKNOWN``; the label
+of the last level is ``t__<tax_key>``, the key sylph-tax matched in its
+dictionary; a hit without any taxonomy becomes ``NO_TAXONOMY;t__<file>:<contig>``
+(pass-1 probes, as sylph-tax writes it); rows are ordered by number of levels
+and then by decreasing relative abundance (stable); empty tokens / no
+``unclassified X`` filling.  Nothing is normalised here — the server did the
+resolution and this module only aggregates.
 """
 
 from __future__ import annotations
@@ -53,14 +67,28 @@ RANKS: tuple[str, ...] = ("d", "p", "c", "o", "f", "g", "s")
 #: Name of the pseudo-clade used for rows without any taxonomy.
 UNCLASSIFIED = "unclassified"
 
-#: Metadata column holding the lineage for each supported taxonomy.
+#: sylph-tax's placeholder for an empty lineage token.
+UNKNOWN = "UNKNOWN"
+
+#: sylph-tax's default lineage when no taxonomy file matches a hit.
+NO_TAXONOMY = "NO_TAXONOMY"
+
+#: The taxonomy name for the exact-sylph-tax merged profile.
+SYLPHTAX = "tax"
+
+#: Metadata column holding the lineage for each rank-based taxonomy.
 TAXONOMY_COLUMNS: dict[str, str] = {
     "gtdb": "gtdb_taxonomy",
     "ncbi": "ncbi_taxonomy",
 }
 
 #: Supported taxonomy identifiers, in default order.
-TAXONOMIES: tuple[str, ...] = tuple(TAXONOMY_COLUMNS)
+TAXONOMIES: tuple[str, ...] = (*TAXONOMY_COLUMNS, SYLPHTAX)
+
+#: Columns the ``tax`` profile needs from the server.  ``tax_host`` is
+#: resolved server-side too, but the sixth output column is a later phase, so
+#: it is deliberately not requested.
+SYLPHTAX_PROFILE_COLUMNS: tuple[str, ...] = ("tax_source", "tax_key", "tax_lineage")
 
 #: Column headers written by ``sylph-tax taxprof`` (without virus annotation).
 TAXPROF_COLUMNS: tuple[str, ...] = (
@@ -91,6 +119,10 @@ class CladeAbundance:
     sequence: float
     ani: float | None = None
     coverage: float | None = None
+    #: Whether the five-column line carries the strain statistics.  ``None``
+    #: means "the last level is ``t__``", which is sylphd's rule; the ``tax``
+    #: profile sets it from sylph-tax's own (substring) rule.
+    strain_stats: bool | None = None
 
     @property
     def depth(self) -> int:
@@ -101,6 +133,10 @@ class CladeAbundance:
     def is_strain(self) -> bool:
         return self.clade.rsplit("|", 1)[-1].startswith("t__")
 
+    @property
+    def has_strain_stats(self) -> bool:
+        return self.is_strain if self.strain_stats is None else self.strain_stats
+
 
 # ---------------------------------------------------------------------------
 # flags
@@ -108,20 +144,22 @@ class CladeAbundance:
 
 
 def parse_taxonomies(text: str | Sequence[str] | None) -> tuple[str, ...]:
-    """Parse ``--taxonomy`` (``"gtdb,ncbi"``, ``"gtdb"``, ...).
+    """Parse ``--taxonomy`` (``"gtdb,ncbi"``, ``"gtdb"``, ``"tax"``, ...).
 
-    The default (``None``) is both taxonomies.  Unknown names raise
-    :class:`TaxonomyError`; duplicates are collapsed, first mention wins.
+    ``None`` is the rank-based default (``gtdb,ncbi``); the command line
+    decides separately whether ``tax`` belongs to the default, because that
+    depends on the server (see :func:`default_taxonomies`).  Unknown names
+    raise :class:`TaxonomyError`; duplicates are collapsed, first mention wins.
     """
     if text is None:
-        return TAXONOMIES
+        return tuple(TAXONOMY_COLUMNS)
     parts = text.split(",") if isinstance(text, str) else [str(part) for part in text]
     selected: list[str] = []
     for part in parts:
         name = part.strip().lower()
         if not name:
             continue
-        if name not in TAXONOMY_COLUMNS:
+        if name not in TAXONOMIES:
             raise TaxonomyError(
                 f"unknown taxonomy {part.strip()!r} "
                 f"(choose from: {', '.join(TAXONOMIES)})"
@@ -135,6 +173,23 @@ def parse_taxonomies(text: str | Sequence[str] | None) -> tuple[str, ...]:
     return tuple(selected)
 
 
+def has_taxonomy_sources(metadata: Mapping[str, Any] | None) -> bool:
+    """True when the server's metadata has sylph-tax taxonomy sources."""
+    return bool((metadata or {}).get("taxonomy_sources"))
+
+
+def default_taxonomies(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
+    """The taxonomies to write when ``--taxonomy`` is not given.
+
+    ``gtdb,ncbi`` as always, plus ``tax`` when the server has sylph-tax
+    sources (``docs/project/multi-db-design.md`` B4).
+    """
+    names = list(TAXONOMY_COLUMNS)
+    if has_taxonomy_sources(metadata):
+        names.append(SYLPHTAX)
+    return tuple(names)
+
+
 def resolve_taxonomy_columns(
     taxonomies: Sequence[str], metadata: Mapping[str, Any] | None
 ) -> list[str]:
@@ -142,22 +197,34 @@ def resolve_taxonomy_columns(
 
     Raises :class:`TaxonomyError` when the server has no metadata database or
     when its metadata lacks one of the columns (e.g. a database built from
-    files without ``ncbi_taxonomy``).
+    files without ``ncbi_taxonomy``).  ``tax`` needs the ``tax_*`` columns,
+    which only a metadata file with sylph-tax sources carries.
     """
     if metadata is None:
         raise TaxonomyError(
             "the server has no metadata database; --taxprof/--taxmatrix need "
             "'gtdb_taxonomy'/'ncbi_taxonomy' (start it with 'sylphd serve --meta')"
         )
+    if SYLPHTAX in taxonomies and not has_taxonomy_sources(metadata):
+        raise TaxonomyError(
+            "the server has no sylph-tax taxonomy sources, so there is nothing "
+            "for '--taxonomy tax' to aggregate; add sources with "
+            "'sylphd setup --taxonomy' and restart the server"
+        )
     available = [str(column) for column in metadata.get("columns") or ()]
     columns: list[str] = []
     missing: list[str] = []
     for taxonomy in taxonomies:
-        column = TAXONOMY_COLUMNS[taxonomy]
-        if column not in available:
-            missing.append(f"{column} ({taxonomy})")
-        elif column not in columns:
-            columns.append(column)
+        needed: Sequence[str] = (
+            SYLPHTAX_PROFILE_COLUMNS
+            if taxonomy == SYLPHTAX
+            else (TAXONOMY_COLUMNS[taxonomy],)
+        )
+        for column in needed:
+            if column not in available:
+                missing.append(f"{column} ({taxonomy})")
+            elif column not in columns:
+                columns.append(column)
     if missing:
         raise TaxonomyError(
             "the server metadata has no "
@@ -268,8 +335,12 @@ def aggregate_rows(
     with ``--estimate-unknown`` the root clade can stay below 100.
 
     The order mirrors ``sylph-tax taxprof``: rank by rank, and within a rank by
-    decreasing relative abundance, keeping first-seen order for ties.
+    decreasing relative abundance, keeping first-seen order for ties.  ``tax``
+    is aggregated by :func:`aggregate_sylphtax_rows`, which is sylph-tax's own
+    rule (opaque tokens, ``UNKNOWN``, ``NO_TAXONOMY``).
     """
+    if taxonomy == SYLPHTAX:
+        return aggregate_sylphtax_rows(rows)
     try:
         column = TAXONOMY_COLUMNS[taxonomy]
     except KeyError:
@@ -319,6 +390,81 @@ def aggregate_rows(
     return clades
 
 
+def hit_taxonomy_string(row: Mapping[str, Any]) -> str:
+    """The lineage string sylph-tax builds for one hit.
+
+    Resolved hits are ``<tax_lineage>;t__<tax_key>`` — the key is what
+    sylph-tax looked up in its dictionary, so it is also the ``t__`` label.
+    A hit without a taxonomy is ``NO_TAXONOMY;t__<genome file>:<contig>`` with
+    sylph-tax's **pass-1** probe values.
+    """
+    lineage = row.get("tax_lineage")
+    if isinstance(lineage, str):
+        key = row.get("tax_key")
+        return f"{lineage};t__{'' if key is None else key}"
+
+    # Local import: keeps this module importable without sylphd's HTTP stack
+    # (the golden scripts run with the sylph-tax venv, which lacks httpx).
+    from .metadata import sylphtax_probes
+
+    probes = sylphtax_probes(
+        str(row.get("Genome_file") or ""), str(row.get("Contig_name") or "")
+    )
+    return probes.no_taxonomy
+
+
+def aggregate_sylphtax_rows(rows: Iterable[Mapping[str, Any]]) -> list[CladeAbundance]:
+    """Aggregate one sample exactly as ``sylph-tax taxprof`` does.
+
+    Differs from :func:`aggregate_rows` on purpose, because sylph-tax does:
+
+    * the lineage is opaque, split on ``;`` as stored; no rank prefixes are
+      interpreted and nothing is dropped or filled in;
+    * an **empty** token becomes ``UNKNOWN`` (a token such as ``o__`` is not
+      empty and stays as it is);
+    * the last level is ``t__<tax_key>`` (or the ``NO_TAXONOMY`` default);
+    * a clade carries ANI and coverage when ``"t__"`` occurs anywhere in its
+      path — sylph-tax's substring test, normally exactly the strain rows;
+    * rows are ordered by number of levels, then by decreasing relative
+      abundance (stable), so a short strain sorts before a deeper clade.
+    """
+    relative: dict[str, float] = {}
+    sequence: dict[str, float] = {}
+    strain_stats: dict[str, tuple[float | None, float | None]] = {}
+
+    for row in rows:
+        tax_str = hit_taxonomy_string(row)
+        row_relative = _number(row.get("Taxonomic_abundance"))
+        row_sequence = _number(row.get("Sequence_abundance"))
+        coverage = row.get("Eff_cov")
+        if coverage is None:
+            coverage = row.get("True_cov")
+        stats = (_optional_number(row.get("Adjusted_ANI")), _optional_number(coverage))
+
+        clade = ""
+        for token in tax_str.split(";"):
+            token = token if token else UNKNOWN
+            clade = token if not clade else f"{clade}|{token}"
+            relative[clade] = relative.get(clade, 0.0) + row_relative
+            sequence[clade] = sequence.get(clade, 0.0) + row_sequence
+            if "t__" in clade:
+                strain_stats[clade] = stats
+
+    clades = [
+        CladeAbundance(
+            clade=clade,
+            relative=value,
+            sequence=sequence[clade],
+            ani=strain_stats.get(clade, (None, None))[0],
+            coverage=strain_stats.get(clade, (None, None))[1],
+            strain_stats=clade in strain_stats,
+        )
+        for clade, value in relative.items()
+    ]
+    clades.sort(key=lambda item: (item.depth, -item.relative))
+    return clades
+
+
 def aggregate_samples(
     samples: Iterable[Mapping[str, Any]], taxonomy: str = "gtdb"
 ) -> list[tuple[str, list[CladeAbundance]]]:
@@ -359,13 +505,23 @@ def _safe_name(name: str) -> str:
 
 
 def taxprof_lines(
-    name: str, taxonomy: str, clades: Sequence[CladeAbundance]
+    name: str,
+    taxonomy: str,
+    clades: Sequence[CladeAbundance],
+    *,
+    taxonomies_used: Sequence[str] | None = None,
 ) -> Iterator[str]:
-    """Yield one ``.sylphmpa`` document, as ``sylph-tax taxprof`` writes it."""
-    yield f"#SampleID\t{name}\tTaxonomies_used:{[taxonomy]!r}"
+    """Yield one ``.sylphmpa`` document, as ``sylph-tax taxprof`` writes it.
+
+    ``taxonomies_used`` is the list in the ``Taxonomies_used:`` comment.  For
+    ``gtdb``/``ncbi`` it is the taxonomy name; for ``tax`` it is the names of
+    the metadata file's sources, as sylph-tax prints the files it was given.
+    """
+    used = [taxonomy] if taxonomies_used is None else list(taxonomies_used)
+    yield f"#SampleID\t{name}\tTaxonomies_used:{used!r}"
     yield "\t".join(TAXPROF_COLUMNS)
     for item in clades:
-        if item.is_strain:
+        if item.has_strain_stats:
             yield (
                 f"{item.clade}\t{_cell(item.relative)}\t{_cell(item.sequence)}\t"
                 f"{_cell(item.ani)}\t{_cell(item.coverage)}"
@@ -379,11 +535,15 @@ def write_taxprof(
     name: str,
     taxonomy: str,
     clades: Sequence[CladeAbundance],
+    *,
+    taxonomies_used: Sequence[str] | None = None,
 ) -> Path:
     """Write one ``.sylphmpa`` file and return its path."""
     output = Path(path)
     with open(output, "w", encoding="utf-8", newline="\n") as handle:
-        for line in taxprof_lines(name, taxonomy, clades):
+        for line in taxprof_lines(
+            name, taxonomy, clades, taxonomies_used=taxonomies_used
+        ):
             handle.write(line + "\n")
     return output
 
@@ -457,6 +617,7 @@ def write_outputs(
     taxprof_prefix: str | None = None,
     taxmatrix_prefix: str | None = None,
     matrix_value: str = "relative",
+    tax_sources: Sequence[str] = (),
 ) -> list[Path]:
     """Write the requested taxonomy files for a profile response.
 
@@ -465,9 +626,18 @@ def write_outputs(
     A prefix that is an existing directory is treated as ``directory/``.
     Returns the paths written, taxonomy by taxonomy (each taxonomy writes its
     per-sample files first, then its matrix).
+
+    ``tax_sources`` names the taxonomy sources the ``tax`` profile was resolved
+    against, in ``ord`` order; it becomes the ``Taxonomies_used:`` list of a
+    ``tax`` ``.sylphmpa``, so it must be given when ``tax`` is written.
     """
     if taxprof_prefix is None and taxmatrix_prefix is None:
         return []
+    if SYLPHTAX in taxonomies and not tax_sources:
+        raise TaxonomyError(
+            "the 'tax' profile needs the names of the taxonomy sources it was "
+            "resolved against"
+        )
 
     # A prefix naming an existing directory writes into it, like one ending in "/".
     if taxprof_prefix is not None and os.path.isdir(taxprof_prefix):
@@ -491,6 +661,7 @@ def write_outputs(
     written: list[Path] = []
     for taxonomy in taxonomies:
         table = aggregate_samples(samples, taxonomy)
+        used = list(tax_sources) if taxonomy == SYLPHTAX else [taxonomy]
         if taxprof_prefix is not None:
             for name, clades in table:
                 written.append(
@@ -499,6 +670,7 @@ def write_outputs(
                         name,
                         taxonomy,
                         clades,
+                        taxonomies_used=used,
                     )
                 )
         if taxmatrix_prefix is not None:

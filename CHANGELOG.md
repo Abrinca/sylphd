@@ -113,6 +113,42 @@ All notable changes to `sylphd` are documented here. The format follows
   `no_hit` instead of a spurious match. Duplicate record ids get a deterministic `_2`, `_3` suffix.
 - `--quiet` suppresses the (new or existing) stderr summary of `sylphd assembly`.
 
+- **Hit → lineage resolution and the merged `tax` profile.** Every row of `/query`, `/profile`
+  and `/assembly` now carries `tax_source`, `tax_key`, `tax_lineage` and `tax_host` when the
+  server's metadata file has sylph-tax taxonomy sources (format 3); the columns are listed in
+  `metadata.columns` and can be selected with `--fields`. `MetadataDB.resolve` maps a hit's
+  `Genome_file`/`Contig_name` to a key exactly as `sylph-to-taxprof` v1.9.2 does: two passes of
+  the probes `gf`, `gf + ".gz"`, `glob`, `contig` and the `.fa`/`.fasta`/`.fna` splits, pass 1
+  overriding pass 0, keys compared verbatim (UHGV's contig ids and GlobDB's version-stripped keys
+  need exactly that). For a key in several sources the **source imported later wins** (the larger
+  `ord`, exactly like passing the files later to `sylph-tax -t`): the lineage comes from the
+  largest `ord`, and the host from the largest `ord` that has one for that key — so the lineage and
+  the host can come from two different files, like sylph-tax's two dictionaries.
+  `--tax-source` picks the sources per request when that is not what you want. The keys are looked
+  up in batches of 500 unique probe keys (both passes combined) per `IN` query over
+  `taxonomy_entry`, plus the same batched lookups over the virtual GTDB rows when the file has one;
+  for a typical sample that is one query per 500 keys, not per hit. A hit without any taxonomy has
+  `null` in all four columns and never breaks a request. On such a server the default `--fields
+  all` TSV appends the four `tax_*` columns after the existing metadata columns (their order is
+  unchanged; an explicit `--fields` list is unchanged).
+- **`sylphd profile --taxonomy tax`** writes one merged, **sylph-tax-exact** profile per sample
+  (`.tax.sylphmpa`) and, with `--taxmatrix`, `tax.tsv`: opaque lineages (no rank parsing), an empty
+  token to `UNKNOWN`, `NO_TAXONOMY;t__<file>:<contig>` for unresolved hits, `t__<key>` as the last
+  level, rows ordered by number of levels and then by decreasing abundance, and
+  `Taxonomies_used:['GTDB_r232', 'UHGV_default']` naming the sources in `setup` order.
+  `gtdb` and `ncbi` keep sylphd's own normalisation. `tax` joins the default `--taxonomy` when the
+  server has taxonomy sources, so the default `--taxprof` then writes **three** files per sample
+  (`.gtdb`, `.ncbi`, `.tax`) instead of two; `--taxonomy gtdb,ncbi` restores the old set.
+  `--tax-source NAME` (repeatable) restricts the profile to some of them — server-side, as a new
+  optional `params.tax_sources` request field, so a key found only in an excluded source is a miss;
+  it is the way to choose between sources that share keys (e.g. `UHGV_default` versus
+  `UHGV_ictv`, where the later-imported source otherwise wins). Parity: synthetic goldens covering
+  every probe rule — including an empty key, truly empty lineage tokens, a header row, hosts
+  resolved across sources (checked against a real `taxprof -a` run), an equal-abundance tie and
+  repeated strain rows — are committed and always compared byte for byte, for all four
+  `--taxmatrix-value`s and the one-sample path; the same comparisons rerun against the real
+  sylph-tax when it is installed.
+
 ### Changed
 
 - `sylphd serve` logs each database it loads (name, kind, genomes, `c`, `k`, load time) and the

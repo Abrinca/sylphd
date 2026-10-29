@@ -1,0 +1,8 @@
+#SampleID	sample-b	Taxonomies_used:['SyntheticA', 'SyntheticB']
+clade_name	relative_abundance	sequence_abundance	ANI (if strain-level)	Coverage (if strain-level)	Virus_host (if viral)
+d__Bacteria	60.0	55.0	NA	NA	NA
+NO_TAXONOMY	40.0	45.0	NA	NA	NA
+d__Bacteria|p__SecondFile	60.0	55.0	NA	NA	NA
+NO_TAXONOMY|t__nothing_here.fna.gz:ctg9	40.0	45.0	88.5	0.25	NA
+d__Bacteria|p__SecondFile|s__Second file	60.0	55.0	NA	NA	NA
+d__Bacteria|p__SecondFile|s__Second file|t__GCA_000005845.2	60.0	55.0	99.75	6.0	Homo sapiens

@@ -7,11 +7,13 @@ from pathlib import Path
 import pytest
 
 from sylphd.taxonomy import (
+    TAXONOMIES,
     TAXPROF_COLUMNS,
     TaxonomyError,
     aggregate_rows,
     aggregate_samples,
     clade_matrix_lines,
+    default_taxonomies,
     parse_lineage,
     parse_taxonomies,
     resolve_taxonomy_columns,
@@ -505,3 +507,198 @@ class TestWriteOutputs:
 
     def test_no_prefixes(self) -> None:
         assert write_outputs([], taxonomies=("gtdb",)) == []
+
+
+def _tax_row(
+    *,
+    lineage: str | None = None,
+    key: str | None = None,
+    source: str | None = None,
+    relative: float = 100.0,
+    sequence: float = 100.0,
+    ani: float = 99.0,
+    coverage: float = 1.0,
+    genome: str = "votus_full.fna.gz",
+    contig: str = "UHGV-0000001 species=vOTU-1",
+) -> dict[str, object]:
+    return {
+        "Genome_file": genome,
+        "Contig_name": contig,
+        "Taxonomic_abundance": relative,
+        "Sequence_abundance": sequence,
+        "Adjusted_ANI": ani,
+        "Eff_cov": coverage,
+        "tax_lineage": lineage,
+        "tax_key": key,
+        "tax_source": source,
+    }
+
+
+class TestSylphTaxAggregation:
+    """``tax`` is sylph-tax's own rule: opaque tokens, ``UNKNOWN``, no filling."""
+
+    def test_lineage_is_opaque_and_empty_tokens_become_unknown(self) -> None:
+        rows = [
+            _tax_row(
+                lineage="k__Fungi;p__Ascomycota;c__;o__Eurotiales;f__;g__;s__",
+                key="GCF_010093815.1_Psehy1",
+                source="FungiRefSeq-latest",
+            )
+        ]
+        clades = aggregate_rows(rows, "tax")
+        names = [item.clade for item in clades]
+        assert names[:4] == [
+            "k__Fungi",
+            "k__Fungi|p__Ascomycota",
+            "k__Fungi|p__Ascomycota|c__",
+            "k__Fungi|p__Ascomycota|c__|o__Eurotiales",
+        ]
+        # Empty *tokens* inside the path are UNKNOWN; "c__" is not empty.
+        assert "k__Fungi|p__Ascomycota|c__|o__Eurotiales|f__" in names
+        assert names[-1] == (
+            "k__Fungi|p__Ascomycota|c__|o__Eurotiales|f__|g__|s__"
+            "|t__GCF_010093815.1_Psehy1"
+        )
+
+    def test_a_miss_gets_no_taxonomy(self) -> None:
+        clades = aggregate_rows(
+            [_tax_row(genome="unknown.fna.gz", contig="ctg 7")], "tax"
+        )
+        assert [item.clade for item in clades] == [
+            "NO_TAXONOMY",
+            "NO_TAXONOMY|t__unknown.fna.gz:ctg",
+        ]
+        assert clades[-1].ani == pytest.approx(99.0)
+
+    def test_prefix_less_lineage(self) -> None:
+        clades = aggregate_rows(
+            [_tax_row(lineage="vFAM-00001;vSUBFAM-1;vOTU-1", key="UHGV-1")], "tax"
+        )
+        assert [item.clade for item in clades] == [
+            "vFAM-00001",
+            "vFAM-00001|vSUBFAM-1",
+            "vFAM-00001|vSUBFAM-1|vOTU-1",
+            "vFAM-00001|vSUBFAM-1|vOTU-1|t__UHGV-1",
+        ]
+
+    def test_order_is_levels_then_abundance(self) -> None:
+        """A short strain sorts before a deeper clade, as in sylph-tax."""
+        rows = [
+            _tax_row(
+                lineage="a;b",
+                key="K1",
+                relative=10.0,
+            ),
+            _tax_row(
+                lineage="long;lineage;with;many;levels;and;more",
+                key="K2",
+                relative=90.0,
+            ),
+        ]
+        depths = [item.depth for item in aggregate_rows(rows, "tax")]
+        assert depths == sorted(depths)
+        clades = aggregate_rows(rows, "tax")
+        # depth 3: "a|b|t__K1" comes before the depth-4 clade
+        assert clades.index(
+            next(item for item in clades if item.clade == "a|b|t__K1")
+        ) < clades.index(
+            next(item for item in clades if item.depth == 4)
+        )
+
+    def test_ani_is_attached_by_the_substring_rule(self) -> None:
+        """sylph-tax tests ``"t__" in clade``, not the last token."""
+        clades = aggregate_rows(
+            [_tax_row(lineage="weird;contains_t__here;last", key="K")], "tax"
+        )
+        by_name = {item.clade: item for item in clades}
+        assert by_name["weird|contains_t__here"].ani == pytest.approx(99.0)
+        assert by_name["weird"].ani is None
+        assert by_name["weird|contains_t__here|last"].ani == pytest.approx(99.0)
+
+    def test_taxprof_header_lists_the_sources(self) -> None:
+        clades = aggregate_rows([_tax_row(lineage="a;b", key="K")], "tax")
+        lines = list(
+            taxprof_lines(
+                "s",
+                "tax",
+                clades,
+                taxonomies_used=["GTDB_r232", "UHGV_default"],
+            )
+        )
+        assert lines[0] == (
+            "#SampleID\ts\tTaxonomies_used:['GTDB_r232', 'UHGV_default']"
+        )
+        assert lines[1].split("\t") == list(TAXPROF_COLUMNS)
+        strain = lines[-1].split("\t")
+        assert strain[0] == "a|b|t__K"
+        assert float(strain[3]) == pytest.approx(99.0)
+
+    def test_zero_abundance_rows_are_kept(self) -> None:
+        """Nothing is renormalised; a zero row still contributes its clade."""
+        clades = aggregate_rows(
+            [_tax_row(lineage="x", key="K", relative=0.0, sequence=0.0)], "tax"
+        )
+        assert clades[0].relative == 0.0
+        assert clades[0].sequence == 0.0
+
+
+class TestSylphTaxFlags:
+    def test_parse_tax(self) -> None:
+        assert parse_taxonomies("tax") == ("tax",)
+        assert parse_taxonomies("gtdb,tax") == ("gtdb", "tax")
+        assert "tax" in TAXONOMIES
+
+    def test_default_depends_on_the_server(self) -> None:
+        assert default_taxonomies(None) == ("gtdb", "ncbi")
+        assert default_taxonomies({"columns": [], "taxonomy_sources": []}) == (
+            "gtdb",
+            "ncbi",
+        )
+        assert default_taxonomies({"taxonomy_sources": [{"name": "UHGV"}]}) == (
+            "gtdb",
+            "ncbi",
+            "tax",
+        )
+
+    def test_resolve_columns_for_tax(self) -> None:
+        metadata = {
+            "columns": ["gtdb_taxonomy", "tax_source", "tax_key", "tax_lineage"],
+            "taxonomy_sources": [{"name": "UHGV"}],
+        }
+        assert resolve_taxonomy_columns(("tax",), metadata) == [
+            "tax_source",
+            "tax_key",
+            "tax_lineage",
+        ]
+
+    def test_tax_needs_sources(self) -> None:
+        with pytest.raises(TaxonomyError, match="no sylph-tax taxonomy sources"):
+            resolve_taxonomy_columns(
+                ("tax",), {"columns": ["gtdb_taxonomy"], "taxonomy_sources": []}
+            )
+
+    def test_write_outputs_needs_source_names(self, tmp_path: Path) -> None:
+        with pytest.raises(TaxonomyError, match="taxonomy sources"):
+            write_outputs(
+                [{"name": "one", "rows": []}],
+                taxonomies=("tax",),
+                taxprof_prefix=str(tmp_path / "p-"),
+            )
+
+    def test_tax_file_names(self, tmp_path: Path) -> None:
+        samples = [
+            {"name": "one", "rows": [_tax_row(lineage="a;b", key="K")]},
+        ]
+        written = write_outputs(
+            samples,
+            taxonomies=("tax",),
+            taxprof_prefix=str(tmp_path / "p-"),
+            taxmatrix_prefix=str(tmp_path / "m-"),
+            tax_sources=["UHGV_default"],
+        )
+        assert {path.name for path in written} == {
+            "p-one.tax.sylphmpa",
+            "m-tax.tsv",
+        }
+        header = (tmp_path / "m-tax.tsv").read_text().splitlines()[0]
+        assert header == "clade_name\tone"

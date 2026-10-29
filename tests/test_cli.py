@@ -19,7 +19,7 @@ import pytest
 
 from sylphd import cli
 from sylphd.client import ClientError, connect
-from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
+from sylphd.metadata import METADATA_COLUMNS, TaxonomySource, build_metadata_db
 
 from conftest import (
     CLODF13_FASTA,
@@ -209,7 +209,20 @@ def _build_taxonomy_db(directory: Path) -> None:
         )
     source = directory / "taxonomy-meta.tsv"
     source.write_text("\n".join(lines) + "\n")
-    build_metadata_db([source], directory / "taxonomy-meta.sqlite", release=232)
+    # One sylph-tax source keyed by the whole genome file name: it overrides
+    # the virtual GTDB lineage of the first genome (a later ord), so the
+    # 'tax' profile has something to show that gtdb/ncbi do not.
+    uhgv = directory / "uhgv.tsv"
+    uhgv.write_text(
+        "GCA_111111111.1_genomic.fna.gz\tvFAM-1;vOTU-1\tHostus testus\n",
+        newline="",
+    )
+    build_metadata_db(
+        [source],
+        directory / "taxonomy-meta.sqlite",
+        release=232,
+        taxonomy=[TaxonomySource("UHGV", uhgv)],
+    )
 
 
 @pytest.fixture(scope="module")
@@ -628,6 +641,81 @@ class TestTaxonomyOutputs:
         # ``one`` only holds the first genome: the second strain is 0 there.
         assert any(0.0 in cells for cells in values)
         assert all(max(cells) > 0.0 for cells in values)
+
+    def test_tax_profile(self, taxonomy_server) -> None:
+        """``--taxonomy tax`` writes the merged, sylph-tax-exact profile."""
+        _, directory = taxonomy_server
+        result = self._profile(
+            taxonomy_server,
+            "--taxonomy",
+            "tax",
+            "--taxprof",
+            str(directory / "tax-"),
+            "--taxmatrix",
+            str(directory / "tax-"),
+            "--fields",
+            "none",
+        )
+        assert result.returncode == 0, result.stderr
+        lines = (directory / "tax-one.tax.sylphmpa").read_text().splitlines()
+        assert lines[0] == (
+            "#SampleID\tone\tTaxonomies_used:['GTDB_r232', 'UHGV']"
+        )
+        rows = {line.split("\t")[0]: line.split("\t") for line in lines[2:]}
+        # The UHGV key is the whole genome file name, so pass 1 wins over the
+        # virtual GTDB accession.
+        assert "vFAM-1|vOTU-1" in rows
+        strain = "vFAM-1|vOTU-1|t__GCA_111111111.1_genomic.fna.gz"
+        assert strain in rows
+        assert float(rows[strain][3]) > 90.0
+        assert (directory / "tax-tax.tsv").is_file()
+
+    def test_tax_source_restricts_the_sources(self, taxonomy_server) -> None:
+        _, directory = taxonomy_server
+        result = self._profile(
+            taxonomy_server,
+            "--taxonomy",
+            "tax",
+            "--tax-source",
+            "GTDB_r232",
+            "--taxprof",
+            str(directory / "src-"),
+            "--fields",
+            "none",
+        )
+        assert result.returncode == 0, result.stderr
+        lines = (directory / "src-one.tax.sylphmpa").read_text().splitlines()
+        assert lines[0] == "#SampleID\tone\tTaxonomies_used:['GTDB_r232']"
+        assert any(line.startswith("d__Bacteria|") for line in lines[2:])
+        assert not any("vFAM-1" in line for line in lines[2:])
+
+    def test_unknown_tax_source(self, taxonomy_server) -> None:
+        _, directory = taxonomy_server
+        result = self._profile(
+            taxonomy_server,
+            "--taxonomy",
+            "tax",
+            "--tax-source",
+            "nope",
+            "--taxprof",
+            str(directory / "x-"),
+        )
+        assert result.returncode == 1
+        assert "unknown taxonomy source" in result.stderr
+
+    def test_tax_source_needs_tax(self, taxonomy_server) -> None:
+        _, directory = taxonomy_server
+        result = self._profile(
+            taxonomy_server,
+            "--taxonomy",
+            "gtdb",
+            "--tax-source",
+            "GTDB_r232",
+            "--taxprof",
+            str(directory / "x-"),
+        )
+        assert result.returncode == 1
+        assert "--tax-source" in result.stderr
 
     def test_unknown_taxonomy(self, taxonomy_server) -> None:
         _, directory = taxonomy_server

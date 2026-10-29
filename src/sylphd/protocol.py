@@ -116,6 +116,7 @@ class ProfileParams:
             "fields",
             "mode",
             "no_adjust",
+            "tax_sources",
         }
         unknown = sorted(set(data) - known)
         if unknown:
@@ -159,6 +160,7 @@ def params_payload(
     params: ProfileParams | None,
     names: Sequence[str],
     fields: Sequence[str] | None = None,
+    tax_sources: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """The JSON object sent as the ``params`` form field of ``/query``/``/profile``."""
     payload: dict[str, Any] = {
@@ -168,6 +170,8 @@ def params_payload(
     }
     if fields is not None:
         payload["fields"] = list(fields)
+    if tax_sources is not None:
+        payload["tax_sources"] = list(tax_sources)
     return payload
 
 
@@ -176,9 +180,10 @@ def params_json(
     params: ProfileParams | None,
     names: Sequence[str],
     fields: Sequence[str] | None = None,
+    tax_sources: Sequence[str] | None = None,
 ) -> str:
     """The exact ``params`` value the client sends (default ``json.dumps`` separators)."""
-    return json.dumps(params_payload(mode, params, names, fields))
+    return json.dumps(params_payload(mode, params, names, fields, tax_sources))
 
 
 def params_json_size(
@@ -186,13 +191,14 @@ def params_json_size(
     params: ProfileParams | None,
     names: Sequence[str],
     fields: Sequence[str] | None = None,
+    tax_sources: Sequence[str] | None = None,
 ) -> int:
     """Length of :func:`params_json` in characters (one char is one UTF-8 byte here).
 
     ``json.dumps`` escapes non-ASCII characters (``ensure_ascii``), so the
     result is also the byte length of the ``params`` form part.
     """
-    return len(params_json(mode, params, names, fields))
+    return len(params_json(mode, params, names, fields, tax_sources))
 
 
 def _is_number(value: object) -> bool:

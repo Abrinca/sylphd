@@ -1,0 +1,72 @@
+{
+  "_comment": "Input of the sylph-tax parity tests. The sources are taxonomies of the form key<TAB>lineage[<TAB>host]; the samples are sylphd /profile rows. Every probe rule of sylph_to_taxprof.py (v1.9.2) is covered at least once, plus empty keys and empty lineage tokens, a multi-source key whose lineage is later than its host, an equal-abundance tie and repeated strain rows; see tests/test_sylphtax_parity.py.",
+  "sources": [
+    {
+      "name": "SyntheticA",
+      "rows": [
+        ["GCA_000005845.2", "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli", null],
+        ["GCF_003697165", "d__Bacteria;p__GlobDB_only", null],
+        ["UHGV-0000001", "vFAM-00001;vSUBFAM-1;vOTU-1", null],
+        ["GCF_010093815.1_Psehy1", "k__Fungi;p__Ascomycota;c__;o__Eurotiales;f__;g__;s__", null],
+        ["GCF_999999999.1", "d__Bacteria;p__ASM", null],
+        ["legacy.fa.gz", "legacy;gz", null],
+        ["split.v1", "level1;level2", null],
+        ["IMGVR_UViG_1", "r__Viruses;k__;p__;c__;o__;f__;g__;s__", null],
+        ["P", "pass0;only", null],
+        ["P_ASM9_genomic.fna.gz", "pass1;wins", null],
+        ["WEIRD-1", "weird;contains_t__here;last", null],
+        ["", "root;empty-key", "Host-empty"],
+        ["EMPTY-1", "root;;k__Viruses;", null],
+        ["MS-1", "vFAM-ms;vOTU-ms", "Earlier host"],
+        ["TIE-1", "tie;alpha", null],
+        ["TIE-2", "tie2;beta", null],
+        ["fungi_genomic.fna", "asm;path-kept-the-basename", null],
+        ["fungi", "asm;wrong-decoy", null],
+        ["REPEAT-1", "vFAM-rep;vOTU-rep", null]
+      ]
+    },
+    {
+      "name": "SyntheticB",
+      "rows": [
+        ["key", "lineage", "host"],
+        ["GCA_000005845.2", "d__Bacteria;p__SecondFile;s__Second file", "Homo sapiens"],
+        ["UHGV-0000002", "vFAM-2;vOTU-2", "Mus musculus"],
+        ["MS-1", "later;lineage;ms", null]
+      ]
+    }
+  ],
+  "samples": [
+    {
+      "name": "sample-a",
+      "rows": [
+        {"Genome_file": "gtdb_reps/database/GCA/000/005/845/GCA_000005845.2_genomic.fna.gz", "Contig_name": "NC_000913.3", "Taxonomic_abundance": 40.0, "Sequence_abundance": 40.0, "Adjusted_ANI": 99.5, "Eff_cov": 4.0},
+        {"Genome_file": "globdb/GCF_003697165.2_genomic.fna.gz", "Contig_name": "ctg1", "Taxonomic_abundance": 10.0, "Sequence_abundance": 8.0, "Adjusted_ANI": 97.25, "Eff_cov": 1.5},
+        {"Genome_file": "votus_full.fna.gz", "Contig_name": "UHGV-0000001 species=vOTU-1", "Taxonomic_abundance": 30.0, "Sequence_abundance": 25.0, "Adjusted_ANI": 98.0, "Eff_cov": 2.5},
+        {"Genome_file": "ncbi_dataset/data/GCF_010093815.1/GCF_010093815.1_Psehy1_genomic.fna", "Contig_name": "NW_024067585.1", "Taxonomic_abundance": 5.0, "Sequence_abundance": 4.0, "Adjusted_ANI": 99.0, "Eff_cov": 3.0},
+        {"Genome_file": "unknown.fna.gz", "Contig_name": "ctg 7", "Taxonomic_abundance": 2.0, "Sequence_abundance": 1.0, "Adjusted_ANI": 90.0, "Eff_cov": 0.5},
+        {"Genome_file": "GCF_999999999.1_ASM123v1_genomic.fna.gz", "Contig_name": "c", "Taxonomic_abundance": 4.0, "Sequence_abundance": 3.0, "Adjusted_ANI": 96.0, "Eff_cov": 1.0},
+        {"Genome_file": "legacy.fa", "Contig_name": "c", "Taxonomic_abundance": 3.0, "Sequence_abundance": 2.0, "Adjusted_ANI": 95.0, "Eff_cov": 0.75},
+        {"Genome_file": "split.v1.fna", "Contig_name": "c", "Taxonomic_abundance": 1.5, "Sequence_abundance": 1.0, "Adjusted_ANI": 94.0, "Eff_cov": 0.25},
+        {"Genome_file": "IMGVR_UViG_1.fna", "Contig_name": "IMGVR_UViG_1|Ga1", "Taxonomic_abundance": 1.25, "Sequence_abundance": 1.0, "Adjusted_ANI": 93.0, "Eff_cov": 0.5},
+        {"Genome_file": "P_ASM9_genomic.fna.gz", "Contig_name": "c", "Taxonomic_abundance": 2.5, "Sequence_abundance": 2.0, "Adjusted_ANI": 93.5, "Eff_cov": 0.5},
+        {"Genome_file": "weird_genomic.fna.gz", "Contig_name": "WEIRD-1|x", "Taxonomic_abundance": 1.0, "Sequence_abundance": 0.75, "Adjusted_ANI": 92.0, "Eff_cov": 0.25},
+        {"Genome_file": "votus_full.fna.gz", "Contig_name": "UHGV-0000002 species=vOTU-2", "Taxonomic_abundance": 0.5, "Sequence_abundance": 0.5, "Adjusted_ANI": 91.0, "Eff_cov": 0.1},
+        {"Genome_file": "unknown2.fna", "Contig_name": "EMPTY-1|c", "Taxonomic_abundance": 1.2, "Sequence_abundance": 1.0, "Adjusted_ANI": 91.5, "Eff_cov": 0.3},
+        {"Genome_file": "unknown.fna", "Contig_name": "|extra", "Taxonomic_abundance": 1.1, "Sequence_abundance": 0.9, "Adjusted_ANI": 90.5, "Eff_cov": 0.2},
+        {"Genome_file": "votus_full.fna.gz", "Contig_name": "MS-1|x", "Taxonomic_abundance": 0.9, "Sequence_abundance": 0.8, "Adjusted_ANI": 90.0, "Eff_cov": 0.2},
+        {"Genome_file": "/db/ASM/fungi_genomic.fna", "Contig_name": "c", "Taxonomic_abundance": 0.8, "Sequence_abundance": 0.7, "Adjusted_ANI": 89.5, "Eff_cov": 0.15},
+        {"Genome_file": "tie1.fna", "Contig_name": "TIE-1|x", "Taxonomic_abundance": 1.1, "Sequence_abundance": 1.1, "Adjusted_ANI": 93.0, "Eff_cov": 0.4},
+        {"Genome_file": "tie2.fna", "Contig_name": "TIE-2|x", "Taxonomic_abundance": 1.1, "Sequence_abundance": 1.1, "Adjusted_ANI": 93.0, "Eff_cov": 0.4},
+        {"Genome_file": "repeat.fna", "Contig_name": "REPEAT-1|x", "Taxonomic_abundance": 0.4, "Sequence_abundance": 0.3, "Adjusted_ANI": 91.0, "Eff_cov": 0.2},
+        {"Genome_file": "repeat2.fna", "Contig_name": "REPEAT-1|y", "Taxonomic_abundance": 0.6, "Sequence_abundance": 0.5, "Adjusted_ANI": 92.5, "Eff_cov": 0.3}
+      ]
+    },
+    {
+      "name": "sample-b",
+      "rows": [
+        {"Genome_file": "gtdb_reps/database/GCA/000/005/845/GCA_000005845.2_genomic.fna.gz", "Contig_name": "NC_000913.3", "Taxonomic_abundance": 60.0, "Sequence_abundance": 55.0, "Adjusted_ANI": 99.75, "Eff_cov": 6.0},
+        {"Genome_file": "nothing_here.fna.gz", "Contig_name": "ctg9", "Taxonomic_abundance": 40.0, "Sequence_abundance": 45.0, "Adjusted_ANI": 88.5, "Eff_cov": 0.25}
+      ]
+    }
+  ]
+}

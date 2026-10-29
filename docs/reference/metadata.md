@@ -106,6 +106,46 @@ Two kinds of source exist:
 has_host) and `metadata.sylphtax_rules`; `sylphd info` prints one line per source. A format 2
 file reports neither key, so its output is unchanged.
 
+### Resolving a hit { #resolving-a-hit }
+
+The server gives every hit of `query`, `profile` and `/assembly` four extra columns, and lists
+them in `metadata.columns`:
+
+| Column | Meaning |
+|---|---|
+| `tax_source` | the source whose lineage was used, or `null` |
+| `tax_key` | the key that matched, verbatim, or `null` |
+| `tax_lineage` | that source's lineage string (opaque), or `null` |
+| `tax_host` | the host of the key, or `null` |
+
+Resolution replicates `sylph-to-taxprof` (sylph-tax 1.9.2) key for key over all sources, using
+the hit's `Genome_file` and `Contig_name` exactly as sylph reports them:
+
+| | pass 0 | pass 1 |
+|---|---|---|
+| `gf` | basename, cut at `_ASM` when `ASM` occurs anywhere in the full path, else at `_genomic` | basename |
+| `glob` | `basename.split(".")[0]` | `gf` |
+| `contig` | `Contig_name.split(" ")[0].split("\|")[0]` (space only) | `Contig_name.split()[0]` (any whitespace) |
+
+Per pass the probes are `gf`, `gf + ".gz"`, `glob`, `contig`, then `gf.split(".fa")[0]`,
+`gf.split(".fasta")[0]` and `gf.split(".fna")[0]`; the first key that exists wins, and a **pass-1
+match overrides a pass-0 match**. Keys are compared verbatim: never normalised, never
+version-stripped (the GTDB *accession* column is a different thing, and stays as it was).
+
+When several sources contain the same key, **the source imported later wins** (the larger `ord`,
+as if its file had been passed later to `sylph-tax -t`): the **lineage** comes from the largest
+`ord` and the **host** from the largest `ord` whose source has a host column for that key — two
+different sources, possibly, exactly like the two dictionaries sylph-tax fills while reading its
+files. `sylphd profile --tax-source NAME` selects the sources per request when both files hold the
+same keys (e.g. `UHGV_default` next to `UHGV_ictv`). A hit that matches nothing has `null` in all
+four columns; `sylphd profile --taxonomy tax` then writes sylph-tax's
+`NO_TAXONOMY;t__<genome file>:<contig>`.
+
+Keys are not tied to a database: the probe list is what makes UHGV (`UHGV-0320751` in the contig
+name) and GlobDB (`GCF_003697165` without the version) resolve from the same table. The rules are
+in one function, `sylphd.metadata.sylphtax_probes`, and `tests/test_sylphtax_parity.py` compares
+the whole path with the real sylph-tax.
+
 ### Compatibility and `--update`
 
 A version 2 file keeps loading and serving exactly as before; `MetadataDB` accepts
