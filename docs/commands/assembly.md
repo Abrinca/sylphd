@@ -279,14 +279,15 @@ not detected: k-mer counts cannot tell them from a uniformly divergent contig.
 ### Requests, classification and cost
 
 - **Requests are chunked.** Contigs are sent as batches to `POST /contigs`, each with the
-  contig's genome-style k-mer count, length and GC content. The chunk size is the smaller of the
-  server's `limits.max_sketches` (4096) and `max_jobs + max_queue` when the server caps its queue;
-  it is also cut when the JSON `params` part (which repeats every contig name, length and k-mer
-  count; names may be up to 1024 characters) would exceed 90 % of `limits.max_params_bytes`
-  (900 KiB at most), and when the *measured* multipart body would exceed `max_upload_mb`. A
-  request that is still too large is split in half. Every chunk is one POST and counts against
-  `--rate-limit`. The per-request summaries are added up, so the output is the same however the
-  contigs were chunked.
+  contig's genome-style k-mer count, length and GC content. A whole request is **one server job**,
+  so the chunk size is the server's `limits.max_contigs` (`max_sketches` on an older server;
+  4096 on both), not `max_jobs + max_queue`; it is also cut when the JSON `params` part (which
+  repeats every contig name, length and k-mer count; names may be up to 1024 characters) would
+  exceed 90 % of `limits.max_params_bytes` (900 KiB at most), and when the *measured* multipart
+  body would exceed `max_upload_mb`. A request that is still too large is split in half. Every
+  chunk is one POST and counts once against `--rate-limit`; 100 contigs are one request, not six.
+  The per-request summaries are added up, so the output is the same however the contigs were
+  chunked.
 - **Classification** is identical to the single-assembly path, but with the contig-relative ANI,
   and happens on the server with the same metadata: the 95 % species assignment (`assignment`),
   the closest relative, and the `relation`/`shared_rank` from the hit's lineage (generic, within
@@ -296,7 +297,8 @@ not detected: k-mer counts cannot tell them from a uniformly divergent contig.
   consensus columns repeated on each row. The consensus always uses every hit the server returns,
   whatever `--top` **and `--min-ani`** are: `--min-ani` only hides rows, it cannot change the
   consensus. A contig whose best hit is below `--min-ani` is `no_hit` with a `null` consensus.
-- **Cost.** Every contig is a separate job in the same request, but the two-stage screen keeps the
+- **Cost.** All contigs of one request run one after the other inside a single job slot (a
+  request holds one of `--max-jobs`), but the two-stage screen keeps the
   dense pass cheap: against a 200 000-genome `.syl2db`, 38 contigs (1.87 Mb of 5-300 kb windows)
   took 0.4 s end-to-end and 236 short contigs (4.75 Mb) 0.24 s, i.e. roughly 0.3-6 ms of server
   time per contig (more for large contigs that admit many candidate genomes) plus 0.1-0.3 ms of

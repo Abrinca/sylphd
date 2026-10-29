@@ -10,12 +10,14 @@ requests, merges the answers and writes the table / JSON / stderr summary.
 
 Batching
 --------
-Every contig is one server job, so a batch is bounded by the server's
-``limits.max_jobs + max_queue`` and ``max_sketches``, by the advertised size of
-the JSON ``params`` part (it repeats every contig name, length and k-mer
-count), and by the *measured* multipart body against ``max_upload_mb``.  A
-batch that is still too large is split in half, and a single sketch that cannot
-fit fails before it is sent.
+One ``POST /contigs`` request is one server job, whatever the number of contigs
+it carries (the server runs them one after the other inside that job), so a
+batch is bounded by the server's advertised ``limits.max_contigs``
+(``max_sketches`` on older servers), by the advertised size of the JSON
+``params`` part (it repeats every contig name, length and k-mer count), and by
+the *measured* multipart body against ``max_upload_mb``.  A batch that is still
+too large is split in half, and a single sketch that cannot fit fails before it
+is sent.
 """
 
 from __future__ import annotations
@@ -407,17 +409,13 @@ class _Batch:
 def chunk_size_for(info: dict[str, Any]) -> int:
     """How many contig sketches to send per ``POST /contigs`` request.
 
-    Each sketch is one job, so a server with ``--max-queue`` refuses a request
-    larger than ``max_jobs + max_queue`` as a whole (503); every server also
-    caps a request at ``limits.max_sketches`` (4096).  Use the smaller bound so
-    that a fragmented assembly works against a server with default limits.
+    A ``/contigs`` request is one job on the server, so neither ``max_jobs``
+    nor ``max_queue`` limits its size: only the per-request contig cap does.
+    Use the advertised ``limits.max_contigs``; an older server without it
+    falls back to ``limits.max_sketches`` (4096, and the same hard bound).
     """
     limits = info.get("limits") or {}
-    size = int(limits.get("max_sketches") or 4096)
-    max_jobs = limits.get("max_jobs")
-    max_queue = limits.get("max_queue")
-    if max_jobs and max_queue is not None:
-        size = min(size, max(1, int(max_jobs) + int(max_queue)))
+    size = int(limits.get("max_contigs") or limits.get("max_sketches") or 4096)
     return max(1, size)
 
 

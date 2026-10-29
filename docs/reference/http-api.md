@@ -67,7 +67,8 @@ Reports:
   `markdown`. The web page renders a safe subset (marked + DOMPurify, never HTML), see
   [Describing your instance](../guides/public-server.md#describing-your-instance). Clients must
   treat `text` as untrusted;
-- `limits`: `max_jobs`, `max_upload_mb`, `max_sketches`, `max_params_bytes` (the largest non-file
+- `limits`: `max_jobs`, `max_upload_mb`, `max_sketches`, `max_contigs` (the largest `/contigs`
+  batch; a whole `/contigs` request is one job), `max_params_bytes` (the largest non-file
   form field, i.e. how large the JSON `params` of one request may grow), `allow_sequences`,
   `max_sequence_mb` (`null` unless sequences are allowed), `rate_limit` (`{"count",
   "window_seconds"}` or `null`) and `max_queue` (`null` means unlimited);
@@ -390,11 +391,14 @@ The body is `multipart/form-data`:
 | `fields` | metadata columns added flat to every hit; omitted means all, `[]` means none; needs a metadata database |
 | `tax_sources` | like `/query`: resolve hits against these taxonomy sources only |
 
-Unknown keys are a 400. Every contig is one job (one sample), so `--max-queue` and `--rate-limit`
-see one request with as many jobs as it has sketches, and each sketch is validated like a `/query`
-sketch (`k` must match, `c` must not be sparser than the database's). The whole request is refused
-with a 400 if any entry is invalid (a count that does not match the sketch parts, a `contig_kmers`
-no sequence of that length can have, a duplicate name, ...).
+Unknown keys are a 400. **A whole request is one job**, whatever its number of contigs: its
+contigs are queried one after the other inside that single job slot, so `--max-jobs` and
+`--max-queue` bound concurrent requests (a second request beyond the capacity is refused whole
+with `503`), and `--rate-limit` sees one request. The per-request bound is
+`limits.max_contigs` (4096, the same as `max_sketches`). Each sketch is validated like a `/query`
+sketch (`k` must match, `c` must not be sparser than the database's), and the whole request is
+refused with a 400 if any entry is invalid (a count that does not match the sketch parts, a
+`contig_kmers` no sequence of that length can have, a duplicate name, ...).
 
 The response carries one result per contig, in request order, plus a summary of the request:
 

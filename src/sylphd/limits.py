@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, AsyncIterator, Callable, Iterator
+from typing import Any
 
 import anyio
 
@@ -165,8 +166,9 @@ class RateLimitMiddleware:
 class JobSlots:
     """A semaphore for profiling jobs plus a cap on the jobs waiting for it.
 
-    A job is one sample of a ``/profile`` or ``/query`` request, or one
-    ``/assembly`` upload.  ``max_queue=None`` means unlimited (the default).
+    A job is one sample of a ``/profile`` or ``/query`` request, one
+    ``/assembly`` upload, or one whole ``/contigs`` request (however many
+    contigs it carries).  ``max_queue=None`` means unlimited (the default).
     With a cap, at most ``max_jobs + max_queue`` jobs are admitted at a time;
     a request that does not fit is refused as a whole, so the queue cannot
     grow without bound.

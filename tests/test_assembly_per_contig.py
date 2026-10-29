@@ -28,7 +28,9 @@ import random
 import socket
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -504,16 +506,20 @@ def test_json_document(server, fragmented, tmp_path, capsys) -> None:
 
 
 def test_chunk_size_for() -> None:
+    """A /contigs request is one job, so jobs/queue no longer bound a batch."""
     limits = {
         "max_sketches": 4096,
+        "max_contigs": 4096,
         "max_jobs": 2,
-        "max_queue": None,
+        "max_queue": 0,
     }
     assert per_contig_client.chunk_size_for({"limits": limits}) == 4096
-    limits["max_queue"] = 3
-    assert per_contig_client.chunk_size_for({"limits": limits}) == 5
-    limits.update(max_sketches=4, max_jobs=1, max_queue=0)
-    assert per_contig_client.chunk_size_for({"limits": limits}) == 1
+    limits["max_contigs"] = 500
+    assert per_contig_client.chunk_size_for({"limits": limits}) == 500
+    # A server that predates max_contigs still caps a request at max_sketches.
+    limits.pop("max_contigs")
+    limits["max_sketches"] = 4
+    assert per_contig_client.chunk_size_for({"limits": limits}) == 4
     assert per_contig_client.chunk_size_for({}) == 4096
 
 
@@ -540,10 +546,10 @@ def test_params_budget_follows_the_server_limit() -> None:
     assert per_contig_client.params_budget(roomy) == per_contig_client.DEFAULT_PARAMS_BUDGET
 
 
-def test_requests_follow_the_servers_queue_limit(
+def test_requests_are_one_job_regardless_of_the_queue_limit(
     queue_server, fragmented, monkeypatch, capsys
 ) -> None:
-    """--max-jobs 1 --max-queue 1 means two contigs per POST, by real limits."""
+    """--max-jobs 1 --max-queue 1 still takes all contigs in one POST."""
     calls: list[list[str]] = []
     original = SylphClient.contigs
 
@@ -565,7 +571,8 @@ def test_requests_follow_the_servers_queue_limit(
         "--quiet",
     )
     rows = _rows(capsys)[1]
-    assert [len(batch) for batch in calls] == [2, 1]
+    # One request is one job now; jobs and queue slots no longer cut the batch.
+    assert [len(batch) for batch in calls] == [3]
     sent = [name for batch in calls for name in batch]
     assert sent == ["c1", "c2", "c1_2"]  # request order is record order
     assert {row["contig"] for row in rows} == {"c1", "c2", "c1_2"}
@@ -1472,6 +1479,7 @@ def test_info_advertises_the_contigs_endpoint(endpoint_app: TestClient) -> None:
     info = endpoint_app.get("/info").json()
     assert "/contigs" in info["endpoints"]
     assert info["limits"]["max_params_bytes"] == 1024 * 1024
+    assert info["limits"]["max_contigs"] == 4096
 
 
 def test_contigs_endpoint_response(endpoint_app, endpoint_data) -> None:
@@ -1637,31 +1645,83 @@ def test_contigs_endpoint_rejects_duplicate_names(
     assert "repeats 'contig1'" in response.json()["error"]
 
 
-def test_contigs_endpoint_admits_each_contig_as_one_job(
-    ani_data: AniData, endpoint_data
-) -> None:
-    """--max-jobs 1 --max-queue 1: two contigs fit, three are refused whole."""
+def test_contigs_request_is_one_job(ani_data: AniData, endpoint_data) -> None:
+    """--max-jobs 1 --max-queue 1 admits a whole request, not one job per contig."""
     payload, spec = endpoint_data
-    second = dict(spec, name="contig2")
-    third = dict(spec, name="contig3")
+    specs = [dict(spec, name=f"contig{index}") for index in range(1, 6)]
     app = create_app(ServerConfig(db_path=ani_data.database, max_jobs=1, max_queue=1))
     with TestClient(app) as client:
-        ok = _post_contigs(
-            client, [("contig1", payload), ("contig2", payload)], {"contigs": [spec, second]}
-        )
-        assert ok.status_code == 200
-        assert [result["name"] for result in ok.json()["contigs"]] == [
-            "contig1",
-            "contig2",
-        ]
-        busy = _post_contigs(
+        response = _post_contigs(
             client,
-            [("contig1", payload), ("contig2", payload), ("contig3", payload)],
-            {"contigs": [spec, second, third]},
+            [(item["name"], payload) for item in specs],
+            {"contigs": specs},
         )
-        assert busy.status_code == 503
-        assert busy.headers["retry-after"] == "1"
-        assert "busy" in busy.json()["error"]
+        assert response.status_code == 200, response.text
+        assert [result["name"] for result in response.json()["contigs"]] == [
+            item["name"] for item in specs
+        ]
+
+
+def test_100_contigs_are_one_admitted_request(
+    ani_data: AniData, endpoint_data
+) -> None:
+    """The public policy (--max-jobs 2 --max-queue 16) takes 100 contigs at once."""
+    payload, spec = endpoint_data
+    specs = [dict(spec, name=f"contig{index}") for index in range(1, 101)]
+    app = create_app(
+        ServerConfig(
+            db_path=ani_data.database,
+            max_jobs=2,
+            max_queue=16,
+            rate_limit=(1, 60.0),
+        )
+    )
+    with TestClient(app) as client:
+        response = _post_contigs(
+            client,
+            [(item["name"], payload) for item in specs],
+            {"contigs": specs},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert len(body["contigs"]) == 100
+        assert body["summary"]["contigs"] == 100
+        # The whole request was one rate-limited POST: a second one is refused.
+        assert client.get("/info").status_code == 200
+        limited = _post_contigs(client, [("contig1", payload)], {"contigs": [spec]})
+        assert limited.status_code == 429
+
+
+def test_queue_full_refuses_a_concurrent_contigs_request(
+    ani_data: AniData, endpoint_data, monkeypatch
+) -> None:
+    """A second request while the one job slot is busy is a 503."""
+    payload, spec = endpoint_data
+    second = dict(spec, name="contig2")
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_query(*args, **kwargs):
+        started.set()
+        release.wait(timeout=10)
+        return {"sketch_kmers": 10, "rows": []}
+
+    monkeypatch.setattr("sylphd.server.run_contig_query", blocking_query)
+    app = create_app(ServerConfig(db_path=ani_data.database, max_jobs=1, max_queue=0))
+    with TestClient(app) as client, ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _post_contigs,
+            client,
+            [("contig1", payload), ("contig2", payload)],
+            {"contigs": [spec, second]},
+        )
+        assert started.wait(timeout=5)
+        rejected = _post_contigs(client, [("contig1", payload)], {"contigs": [spec]})
+        assert rejected.status_code == 503
+        assert rejected.headers["retry-after"] == "1"
+        assert "busy" in rejected.json()["error"]
+        release.set()
+        assert future.result(timeout=10).status_code == 200
 
 
 # ---------------------------------------------------------------------------

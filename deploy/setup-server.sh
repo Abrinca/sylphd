@@ -29,7 +29,7 @@ UV=/usr/local/bin/uv
 log() { printf '%s setup-server: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
 die() { log "error: $*"; exit 1; }
 
-[[ $EUID -eq 0 ]] || die "run as root (sudo $0)"
+[[ ${SYLPHD_DRY_RUN:-0} == 1 || $EUID -eq 0 ]] || die "run as root (sudo $0)"
 
 # ---------------------------------------------------------------------------
 # 0. site settings
@@ -39,7 +39,9 @@ die() { log "error: $*"; exit 1; }
 #
 #   DOMAIN=            public name Caddy serves and gets a certificate for
 #                      (several names: comma-separated, quote the value)
-#   SYLPH_DB=          database file name in /srv/sylphd/db
+#   SYLPH_DB=          database file name(s) in /srv/sylphd/db, space-separated;
+#                      each entry is FILE or NAME=FILE (NAME is the display name
+#                      of that database).  One `--db` argument per entry.
 #   SYLPH_META=        metadata SQLite file name in /srv/sylphd/db
 #   SYLPH_SERVE_ARGS=  site policy flags appended to `sylphd serve`, one
 #                      whitespace-separated string (see deploy/sylphd.service)
@@ -59,6 +61,58 @@ DOMAIN=${DOMAIN:-${1:-}}
 name_re='[A-Za-z0-9.-]+(:[0-9]+)?'
 [[ $DOMAIN =~ ^$name_re(,\ *$name_re)*$ ]] ||
     die "DOMAIN does not look like a host name or a comma-separated list: $DOMAIN (quote a comma-separated value: DOMAIN=\"a.org,b.org\")"
+
+# Build the `--db` arguments from SYLPH_DB (one entry per database).  systemd
+# cannot loop over a list itself: `${VAR}` is one word, `$VAR` is split on
+# whitespace, so neither can turn "a b" into "--db dir/a --db dir/b".  The
+# arguments are therefore rendered here, into SYLPH_DB_ARGS, which the unit
+# expands unquoted.  Names and file names are validated to carry no whitespace
+# (which would corrupt that expansion) and must name files in /srv/sylphd/db.
+db_dir=${SYLPH_DB_DIR:-$ROOT/db}
+db_args=()
+if [[ -n ${SYLPH_DB:-} ]]; then
+    read -r -a db_entries <<<"$SYLPH_DB"
+    for entry in "${db_entries[@]}"; do
+        name=""
+        file=$entry
+        if [[ $entry == *=* ]]; then
+            name=${entry%%=*}
+            file=${entry#*=}
+        fi
+        [[ -n $file ]] || die "SYLPH_DB entry '$entry' has no file name"
+        [[ $file != */* ]] ||
+            die "SYLPH_DB entry '$entry': give a file name in $db_dir, not a path"
+        if [[ -n $name && ! $name =~ ^[A-Za-z0-9_.-]+$ ]]; then
+            die "SYLPH_DB entry '$entry': the NAME before '=' may only contain letters, digits, '_', '.' and '-'"
+        fi
+        [[ -f $db_dir/$file ]] ||
+            die "SYLPH_DB file not found: $db_dir/$file (copy the database first)"
+        if [[ -n $name ]]; then
+            db_args+=(--db "$name=$db_dir/$file")
+        else
+            db_args+=(--db "$db_dir/$file")
+        fi
+    done
+    log "databases: ${#db_entries[@]} from SYLPH_DB"
+fi
+# Space-joined on purpose: the unit passes SYLPH_DB_ARGS to systemd unquoted so
+# it is split back into arguments.  No entry can contain whitespace (checked).
+db_args_text="${db_args[*]}"
+
+# `SYLPHD_DRY_RUN=1 ./setup-server.sh` validates site.env and prints the unit
+# fragment it would install, without touching the host (no root needed; set
+# SYLPH_DB_DIR to check against a directory other than /srv/sylphd/db).
+if [[ ${SYLPHD_DRY_RUN:-0} == 1 ]]; then
+    echo "# sylphd.service.d/10-site.conf (dry run)"
+    echo "[Service]"
+    [[ -n $db_args_text ]] && echo "Environment=\"SYLPH_DB_ARGS=$db_args_text\""
+    [[ -n ${SYLPH_META:-} ]] && echo "Environment=\"SYLPH_META=$SYLPH_META\""
+    [[ -n ${SYLPH_NAME:-} ]] && echo "Environment=\"SYLPH_NAME=$SYLPH_NAME\""
+    [[ -n ${SYLPH_SERVE_ARGS:-} ]] && echo "Environment=\"SYLPH_SERVE_ARGS=$SYLPH_SERVE_ARGS\""
+    echo "# ExecStart arguments: $db_args_text"
+    echo "# (+ --meta $db_dir/${SYLPH_META:-}, --socket $ROOT/run/sylphd.sock, --name=${SYLPH_NAME:-}, ${SYLPH_SERVE_ARGS:-})"
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # 1. service account and directory layout
@@ -204,7 +258,9 @@ site_conf=$(mktemp)
     echo "# Managed by sylphd setup-server.sh from $site_env."
     echo "# Edit site.env and re-run setup-server.sh instead of this file."
     echo "[Service]"
-    [[ -n ${SYLPH_DB:-} ]] && echo "Environment=\"SYLPH_DB=$SYLPH_DB\""
+    # The database list is rendered into one string of --db arguments; the
+    # unit expands $SYLPH_DB_ARGS (unquoted) into separate arguments.
+    [[ -n $db_args_text ]] && echo "Environment=\"SYLPH_DB_ARGS=$db_args_text\""
     [[ -n ${SYLPH_META:-} ]] && echo "Environment=\"SYLPH_META=$SYLPH_META\""
     [[ -n ${SYLPH_NAME:-} ]] && echo "Environment=\"SYLPH_NAME=$SYLPH_NAME\""
     [[ -n ${SYLPH_SERVE_ARGS:-} ]] && echo "Environment=\"SYLPH_SERVE_ARGS=$SYLPH_SERVE_ARGS\""

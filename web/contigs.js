@@ -303,10 +303,8 @@
     // How many contig sketches to send per POST /contigs (chunk_size_for).
     function chunkSizeFor(info) {
       const limits = (info && info.limits) || {};
-      let size = Number(limits.max_sketches || 4096);
-      const maxJobs = limits.max_jobs;
-      const maxQueue = limits.max_queue;
-      if (maxJobs && maxQueue != null) size = Math.min(size, Math.max(1, Number(maxJobs) + Number(maxQueue)));
+      // A /contigs request is one job on the server, so only the per-request bound applies.
+      const size = Number(limits.max_contigs || limits.max_sketches || 4096);
       return Math.max(1, size);
     }
 

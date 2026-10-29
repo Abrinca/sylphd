@@ -50,6 +50,13 @@ The scripts are the mechanism; these are the knobs you choose:
   if you have any, go into the `--about` text. See
   [Running a public server](../docs/guides/public-server.md) and the
   [security notes](../docs/reference/security.md).
+- **Databases** — `SYLPH_DB` in `site.env`: one file name in `/srv/sylphd/db`,
+  or a space-separated list of them, each `FILE` or `NAME=FILE`. Each entry
+  becomes one `--db` argument (with the alias, `--db NAME=FILE`), so several
+  databases are profiled as one pool. `SYLPH_META` names the metadata SQLite
+  file. `setup-server.sh` renders the list into `SYLPH_DB_ARGS` in the unit's
+  drop-in, because systemd cannot turn one variable into several argument
+  pairs on its own.
 - **Upload ceiling** — `SYLPH_HTTP_MAX` (Caddy `request_body max_size`).
 - **Allowed ports** — TCP 80 and 443 for ACME and HTTPS, 22 for administration.
 
@@ -58,10 +65,22 @@ Keep a copy wherever you keep operational notes.
 
 ## First-time setup
 
-The database files are not part of this repository. Put them on the host first
-(or afterwards) under `/srv/sylphd/db/`, named as `SYLPH_DB` / `SYLPH_META`
-say (`gtdb-r232-c200-dbv2.syl2db` and `meta-r232-reps.sqlite` by default),
-owned by `sylphd:sylphd`.
+The database files are not part of this repository. Put them on the host before
+running `setup-server.sh` (re-run it after adding a database) under
+`/srv/sylphd/db/`, named as `SYLPH_DB` / `SYLPH_META` say
+(`gtdb-r232-c200-dbv2.syl2db` and `meta-r232-reps.sqlite` by default), owned by
+`sylphd:sylphd`. The script checks that every database named in `SYLPH_DB`
+exists and stops with the missing path otherwise.
+
+For a pooled server, list the databases in `site.env`:
+
+```bash
+SYLPH_DB="gtdb=gtdb-r232-c200-dbv2.syl2db uhgv=uhgv_c200_dbv1.syldb fungi=fungi-refseq-2025-10-11-c200-dbv1.syldb"
+SYLPH_META=meta-r232-reps.sqlite
+```
+
+`NAME=FILE` is optional; without it the file name is the display name. One
+database is written exactly as before (`SYLPH_DB=single.syldb`).
 
 1. Open TCP 80 and 443 in the cloud firewall / security list. Caddy needs them
    for the ACME HTTP-01 challenge and for HTTPS.
@@ -125,9 +144,19 @@ sudo systemctl restart sylphd             # a few seconds to load the database
 ```
 
 The startup log line (in the journal) reports database, genome count, limits
-and CORS origins. `/health` and `/info` are never rate limited; the three POST
+and CORS origins. `/health` and `/info` are never rate limited; the four POST
 endpoints share one per-client bucket (`--rate-limit`) and a queue
 (`--max-queue`).
+
+To see the unit fragment (and the `--db` arguments) a `site.env` would
+produce without touching the host:
+
+```bash
+SYLPHD_DRY_RUN=1 ./setup-server.sh
+```
+
+It validates `SYLPH_DB` against `/srv/sylphd/db` and prints the drop-in; after
+an install, `systemctl show -p ExecStart sylphd` shows the expanded command.
 
 Requests reach sylphd through the Unix socket, so the server trusts
 `X-Forwarded-For` only from that socket (`--trusted-proxy unix`) and Caddy
@@ -186,6 +215,9 @@ by hand.
   starts services from `init_t`, and `unconfined_service_t` may only execute
   (`entrypoint`) `bin_t`, `shell_exec_t` and `usr_t` files. Without this the
   unit fails with `status=203/EXEC`.
+- Adding databases needs no SELinux change: every file in `/srv/sylphd/db/`
+  is plain data read by the service, and the unit passes one `--db` argument
+  per file (no wrapper script or extra executable to label).
 - uv replaces its own binary through a temp file, which keeps a `tmp_t` label;
   the unit's `ExecStartPost=` (and `setup-server.sh`) run `restorecon` so the
   next start is not denied.

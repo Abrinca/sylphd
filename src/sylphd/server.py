@@ -6,7 +6,8 @@ Design notes
 * Blocking ``pysylph`` calls run in worker threads through
   ``anyio.to_thread.run_sync``; a semaphore caps the number of concurrent
   profiling jobs (``--max-jobs``) and queues the rest, optionally up to
-  ``--max-queue`` jobs (one job per sample).
+  ``--max-queue`` jobs (one job per sample, one job per ``/assembly`` upload,
+  or one job per ``/contigs`` request however many contigs it carries).
 * One ``Profiler`` per parameter set is cached and shared by all requests:
   with two or more databases its constructor scans every genome, and it is
   safe to use from several threads at once.
@@ -70,6 +71,12 @@ log = logging.getLogger("uvicorn.error")
 
 #: Maximum number of sketches accepted in one request.
 MAX_SKETCHES = 4096
+
+#: Maximum number of contigs accepted in one ``/contigs`` request.  The whole
+#: request is one job (its contigs run sequentially in that slot), so this is
+#: also the batch bound a client should use; ``/info`` advertises it as
+#: ``limits.max_contigs``.
+MAX_CONTIGS = MAX_SKETCHES
 
 #: Largest non-file form field (``params``) Starlette accepts in one request.
 #: ``/contigs`` repeats every contig name, length and k-mer count there, so the
@@ -260,6 +267,7 @@ async def _info(request: Request) -> JSONResponse:
                 "max_jobs": state.max_jobs,
                 "max_upload_mb": state.max_upload_mb,
                 "max_sketches": MAX_SKETCHES,
+                "max_contigs": MAX_CONTIGS,
                 "max_params_bytes": MAX_PARAMS_BYTES,
                 "allow_sequences": state.allow_sequences,
                 "max_sequence_mb": state.max_sequence_mb if state.allow_sequences else None,
@@ -511,7 +519,11 @@ async def _contigs(request: Request) -> JSONResponse:
 
     The body is ``multipart/form-data``: one ``sketch`` part per contig (the
     contig sketched as a single-end sample) and a ``params`` field holding each
-    contig's measurements and the options.  Every contig is one job; the
+    contig's measurements and the options.  The whole request is **one job**,
+    however many contigs it carries (a contig costs milliseconds, far less than
+    a profiling job); its contigs run one after the other inside that one job
+    slot, so ``--max-jobs``/``--max-queue`` bound requests rather than contigs.
+    The per-request bound is ``MAX_CONTIGS``/``MAX_SKETCHES``.  The
     contig-relative ANI, ranking, classification and consensus are computed by
     :mod:`sylphd.per_contig`, so every client gets the same answer.
     """
@@ -536,29 +548,16 @@ async def _contigs(request: Request) -> JSONResponse:
     start = time.perf_counter()
     results: list[dict[str, Any] | None] = [None] * len(contigs)
     try:
-        with state.jobs.admit(len(contigs)):
-            async with anyio.create_task_group() as task_group:
+        with state.jobs.admit():
+            async with state.jobs.slot():
                 for index, (contig, payload) in enumerate(zip(contigs, payloads)):
-                    task_group.start_soon(
-                        _run_contig_slot,
-                        state,
-                        contig,
-                        payload,
-                        options,
-                        tax_sources,
-                        results,
-                        index,
+                    results[index] = await _run_contig(
+                        state, contig, payload, options, tax_sources
                     )
     except QueueFullError:
         return _busy()
     except BadRequest as error:
         return _error(str(error), 400)
-    except BaseExceptionGroup as group:
-        for error in group.exceptions:
-            if isinstance(error, BadRequest):
-                return _error(str(error), 400)
-        log.exception("contig profiling failed")
-        return _error("contig profiling failed", 500)
     except Exception:  # pragma: no cover - defensive
         log.exception("contig profiling failed")
         return _error("contig profiling failed", 500)
@@ -590,31 +589,32 @@ async def _contigs(request: Request) -> JSONResponse:
     )
 
 
-async def _run_contig_slot(
+async def _run_contig(
     state: Any,
     contig: per_contig.ContigInput,
     payload: bytes,
     options: per_contig.ContigOptions,
     tax_sources: Sequence[str] | None,
-    results: list[dict[str, Any] | None],
-    index: int,
-) -> None:
-    """Run one contig as one job, then score it (cheap, so outside the slot)."""
+) -> dict[str, Any]:
+    """Query one contig and score it (the caller already holds the job slot).
+
+    The query runs in a worker thread; scoring is cheap and keeps the slot,
+    which is fine because the whole request is a single job anyway.
+    """
     row_fields = per_contig.classification_fields(
         options.fields, _metadata_columns(state.metadata)
     )
-    async with state.jobs.slot():
-        query = await anyio.to_thread.run_sync(
-            run_contig_query,
-            state.database,
-            state.metadata,
-            contig.name,
-            payload,
-            per_contig.QUERY_PARAMS,
-            row_fields,
-            tax_sources,
-        )
-    results[index] = per_contig.contig_result(
+    query = await anyio.to_thread.run_sync(
+        run_contig_query,
+        state.database,
+        state.metadata,
+        contig.name,
+        payload,
+        per_contig.QUERY_PARAMS,
+        row_fields,
+        tax_sources,
+    )
+    return per_contig.contig_result(
         contig,
         sketch_kmers=int(query["sketch_kmers"]),
         rows=query["rows"],

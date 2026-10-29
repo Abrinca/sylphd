@@ -237,8 +237,9 @@ All notable changes to `sylphd` are documented here. The format follows
   `sylphd/per_contig.py`, and the CLI's half in `sylphd/per_contig_client.py`. Inputs are checked
   before anything runs — one `contigs` entry per sketch part, unique valid names, positive
   `contig_kmers` no larger than `length - k + 1`, `length` <= 1e13, `gc` 0-100, `top` 1-50,
-  `min_ani` 70-100, `consensus_ratio` >= 1, `consensus_z` >= 0 — and bad input is a `400`. Each
-  contig is one job, so `--max-queue` and `--rate-limit` count it like a `/query` sample. `/info`
+  `min_ani` 70-100, `consensus_ratio` >= 1, `consensus_z` >= 0 — and bad input is a `400`. One
+  `/contigs` request is one job (its contigs run one after the other inside that slot), so
+  `--max-queue` and `--rate-limit` count the request, not its contigs. `/info`
   lists `/contigs` in `endpoints`, and `limits.max_params_bytes` (1 MiB, the form-part limit) so a
   client can budget the JSON `params`, which repeats every contig name. See the
   [HTTP API](../reference/http-api.md#post-contigs).
@@ -259,6 +260,22 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **A `/contigs` request is one job.** Previously every contig counted as one server job, so
+  clients had to chunk to `max_jobs + max_queue` (18 contigs on the public instance) and a second
+  run of 100 contigs within a minute hit the rate limit. Now the whole request occupies one job
+  slot and runs its contigs sequentially inside it; `--max-jobs`/`--max-queue` bound concurrent
+  requests and `--rate-limit` counts one POST. The per-request bound is
+  `limits.max_contigs` (4096, the same as `max_sketches`), advertised by `/info`;
+  `per_contig_client.chunk_size_for` and the web page use it instead of `max_jobs + max_queue`
+  (older servers fall back to `max_sketches`). Queue-full behaviour is unchanged: a second
+  request while every job and queue slot is taken is a `503` with `Retry-After: 1`.
+- **`deploy/` accepts several databases.** `SYLPH_DB` in `site.env` may be a space-separated list
+  of `FILE` or `NAME=FILE` entries, one `--db /srv/sylphd/db/...` argument per database;
+  single-database files are unchanged. `setup-server.sh` validates every listed file exists,
+  renders the arguments into `SYLPH_DB_ARGS` in the service drop-in (systemd expands
+  `$SYLPH_DB_ARGS` unquoted into separate arguments, which `${SYLPH_DB}` cannot do), and gains
+  `SYLPHD_DRY_RUN=1` to print the fragment without touching the host. No SELinux change is
+  needed: the databases stay plain data in `/srv/sylphd/db`.
 - **`--per-contig` counts skipped records instead of listing them.** Records below
   `--min-contig-length` (`summary.skipped_short: {contigs, bp}`) and records not sent for too few
   sketched k-mers or zero genome-style k-mers (`summary.skipped_few_kmers`) are no longer kept as
@@ -286,11 +303,11 @@ All notable changes to `sylphd` are documented here. The format follows
   first-seen order, which `docs/guides/taxonomic-profiles.md` wrongly described as sylph-tax's
   order; the guide and `docs/commands/profile.md` are corrected. Verified byte for byte against
   `sylph-tax merge` for all four `--column` values; a golden and a parity test now guard it.
-- Per-contig mode batches contig sketches into `POST /query` requests with `no_adjust`,
-  `minimum_ani=0`, `screen_ani=0` and `min_contain=3`, chunked by the server's advertised limits
-  (`max_sketches`, `max_jobs` + `max_queue`) and by the *measured* request size and JSON `params`
-  size, so a highly fragmented assembly (or one with very long record ids) works against a server
-  with default limits.
+- Per-contig mode batches contig sketches into `POST /contigs` requests with `no_adjust`,
+  `minimum_ani=0`, `screen_ani=0` and `min_contain=3`, chunked by the server's advertised
+  `max_contigs` (falling back to `max_sketches`; one request is one job) and by the *measured*
+  request size and JSON `params` size, so a highly fragmented assembly (or one with very long
+  record ids) works against a server with default limits.
 - `sylphd assembly --json` honours `-o/--output` (it always wrote to stdout before) and still
   writes nothing to stderr, in per-contig mode too; the stderr summary exists only in table mode
   and is now aggregated by consensus taxon and rank instead of by top-hit species.

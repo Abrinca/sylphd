@@ -73,10 +73,10 @@ bytes are rejected. The socket file is removed on shutdown, including on `SIGTER
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--max-jobs N` | `2` | profiling jobs (one per sample, or one per contig on `/contigs`) running at once; further jobs queue. A job costs more with several databases (plain databases are scanned per sample), so lower this on a multi-database server |
+| `--max-jobs N` | `2` | profiling jobs running at once; further jobs queue. A job is one sample of a `/profile` or `/query` request, one `/assembly` upload, or one whole `/contigs` request (its contigs run one after the other in that slot). A job costs more with several databases (plain databases are scanned per sample), so lower this on a multi-database server |
 | `--max-upload-mb N` | `512` | request body limit in MB |
 | `--max-sequence-mb N` | `20` | limit of a *raw-sequence* `/assembly` upload, before decompression; gzip bodies are decompressed up to 5× this. Sketch uploads are limited by `--max-upload-mb` instead |
-| `--max-queue N` | unlimited | jobs (samples) allowed to wait for a job slot; a request whose samples do not all fit is refused whole with `503` and `Retry-After` |
+| `--max-queue N` | unlimited | jobs allowed to wait for a job slot; a request that does not fit is refused whole with `503` and `Retry-After` |
 | `--rate-limit N/min` | off | per-client limit on `/assembly`, `/profile`, `/query` and `/contigs`, for example `10/min`; `N/s` also works. Replies are `429` with `Retry-After` |
 
 Uploaded sketches are also checked structurally before they are decoded; see the

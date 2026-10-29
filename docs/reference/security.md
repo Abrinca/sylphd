@@ -45,7 +45,7 @@ sylph changes.
 | raw-sequence `/assembly` body (`--max-sequence-mb`) | 20 MB | before decompression; sketch bodies use `--max-upload-mb` |
 | decompressed `/assembly` body | 5 × `--max-sequence-mb` | bounded gunzip, `413` above it |
 | concurrent jobs (`--max-jobs`) | 2 | other requests wait |
-| waiting jobs (`--max-queue`) | unlimited | slots are per sample (`/query`, `/profile`) or per assembly, not per HTTP request; a request whose samples do not all fit is refused whole with `503` and `Retry-After: 1`, before its body is read when the queue is already full |
+| waiting jobs (`--max-queue`) | unlimited | slots are per sample (`/query`, `/profile`), per assembly upload, or per whole `/contigs` request (its contigs run sequentially in one slot), not per HTTP request otherwise; a request whose samples do not all fit is refused whole with `503` and `Retry-After: 1`, before its body is read when the queue is already full |
 | request rate (`--rate-limit`) | off | `429` with `Retry-After`; checked before the body is read |
 
 Sketches uploaded to `/assembly` go through the same structural header check as those of `/profile`

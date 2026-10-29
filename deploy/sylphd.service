@@ -12,7 +12,9 @@
 # those are the switches a "public instance" adds on top of the local defaults.
 # setup-server.sh overrides them from deploy/site.env when that file exists
 # (it is not in this repository — keep your own copy out of version control if
-# it names a real host).  Override by hand with a drop-in:
+# it names a real host).  SYLPH_DB may list several databases (see below);
+# setup-server.sh renders the `--db` arguments into SYLPH_DB_ARGS.  Override by
+# hand with a drop-in:
 #
 #   /etc/systemd/system/sylphd.service.d/10-site.conf
 #   [Service]
@@ -35,7 +37,13 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/srv/sylphd/current/bin:/usr/local/bin:/usr/bin:/bin
 
 # Database files (in /srv/sylphd/db, installed by hand — never by this unit).
-Environment=SYLPH_DB=gtdb-r232-c200-dbv2.syl2db
+#
+# SYLPH_DB_ARGS is the whole `--db` list, rendered by setup-server.sh from
+# SYLPH_DB in site.env (one `--db FILE` or `--db NAME=FILE` per entry).  It is
+# expanded *unquoted* below, so systemd splits it into separate arguments; that
+# is why it lives in its own variable instead of `${SYLPH_DB}` (which is always
+# exactly one word).  The value here is the single-database default.
+Environment="SYLPH_DB_ARGS=--db /srv/sylphd/db/gtdb-r232-c200-dbv2.syl2db"
 Environment=SYLPH_META=meta-r232-reps.sqlite
 
 # Example public-instance policy (the one the public instance runs), not a
@@ -45,7 +53,7 @@ Environment=SYLPH_META=meta-r232-reps.sqlite
 #                            which costs CPU and RAM, see --max-sequence-mb)
 #   --max-jobs 2             profiling jobs running at once
 #   --max-queue 16           jobs (samples) allowed to wait for a job slot
-#   --rate-limit 10/min      per-client limit on the three POST endpoints
+#   --rate-limit 10/min      per-client limit on the four POST endpoints
 #   --trusted-proxy unix     believe X-Forwarded-For from the local socket
 #   --cors-origin *          any origin may call the API from a browser
 # Drop any of them, raise the limits, or narrow CORS to your own page.
@@ -59,7 +67,7 @@ Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-queue 16 --ra
 #   Environment="SYLPH_NAME=GTDB r232"
 
 ExecStart=/srv/sylphd/current/bin/sylphd serve \
-    --db /srv/sylphd/db/${SYLPH_DB} \
+    $SYLPH_DB_ARGS \
     --meta /srv/sylphd/db/${SYLPH_META} \
     --socket /srv/sylphd/run/sylphd.sock \
     --name=${SYLPH_NAME} \

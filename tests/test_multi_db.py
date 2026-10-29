@@ -558,10 +558,12 @@ class TestSingleDatabaseGoldens:
         assert "databases" in info
         info.pop("databases")
         # Additive since the golden was captured: ``/contigs`` is one more
-        # POST endpoint and ``max_params_bytes`` one more limit.  The web app
-        # reads neither, so the shape it depends on is unchanged.
+        # POST endpoint and ``max_params_bytes``/``max_contigs`` two more
+        # limits.  The web app reads none of them, so the shape it depends on
+        # is unchanged.
         info["endpoints"].remove("/contigs")
         info["limits"].pop("max_params_bytes")
+        info["limits"].pop("max_contigs")
         assert web_golden.normalise(info) == web_golden.load("info")
 
     def test_assembly(self) -> None:
