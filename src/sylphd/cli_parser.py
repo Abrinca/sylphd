@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 
 from . import __version__
 from .download import METADATA_FILES
@@ -44,6 +45,20 @@ def _top(text: str) -> int:
     value = int(text)
     if not 1 <= value <= 50:
         raise argparse.ArgumentTypeError("must be between 1 and 50")
+    return value
+
+
+def _consensus_ratio(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value) or value < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return value
+
+
+def _non_negative_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
     return value
 
 
@@ -198,9 +213,9 @@ def build_parser() -> argparse.ArgumentParser:
     assembly_parser.add_argument(
         "--top",
         type=_top,
-        default=10,
+        default=None,
         metavar="N",
-        help="number of hits to print [default: 10]",
+        help="number of hits to print [default: 10, or 1 with --per-contig]",
     )
     assembly_parser.add_argument(
         "--min-ani",
@@ -208,6 +223,45 @@ def build_parser() -> argparse.ArgumentParser:
         default=80.0,
         metavar="ANI",
         help="minimum ANI in percent, 70-100 [default: 80]",
+    )
+    assembly_parser.add_argument(
+        "--per-contig",
+        action="store_true",
+        help=(
+            "sketch every FASTA/FASTQ record as its own sample and report the "
+            "closest genomes and a taxonomic consensus of each contig "
+            "(contamination checks); always sketches locally"
+        ),
+    )
+    assembly_parser.add_argument(
+        "--min-contig-length",
+        type=_non_negative,
+        default=None,
+        metavar="BP",
+        help=(
+            "with --per-contig: contigs shorter than this are listed as too_short "
+            "and not sketched or sent [default: 20000]"
+        ),
+    )
+    assembly_parser.add_argument(
+        "--consensus-ratio",
+        type=_consensus_ratio,
+        default=None,
+        metavar="R",
+        help=(
+            "with --per-contig: a species joins the consensus when its "
+            "divergence is at most R times the best hit's [default: 1.5]"
+        ),
+    )
+    assembly_parser.add_argument(
+        "--consensus-z",
+        type=_non_negative_float,
+        default=None,
+        metavar="Z",
+        help=(
+            "with --per-contig: ... plus Z standard deviations of the ANI "
+            "sampling noise [default: 2]"
+        ),
     )
     assembly_parser.add_argument(
         "--name", metavar="NAME", help="query name [default: from the file name]"
@@ -220,14 +274,32 @@ def build_parser() -> argparse.ArgumentParser:
             "sketch the assembly on this machine and upload only the sketch, so the "
             "sequence never leaves it and has no size limit [default]. "
             "--no-local-sketch uploads the raw sequence instead, which only servers "
-            "started with --allow-sequences accept"
+            "started with --allow-sequences accept; it cannot be combined with "
+            "--per-contig"
         ),
     )
     assembly_parser.add_argument(
-        "--json", action="store_true", help="print the raw JSON response"
+        "--fields",
+        metavar="COLS",
+        default=None,
+        help=(
+            "with --per-contig: metadata columns to add to every hit ('all', "
+            "'none' or a comma-separated list) [default: all]"
+        ),
     )
     assembly_parser.add_argument(
-        "-o", "--output", metavar="FILE", help="write the table here [default: stdout]"
+        "--json",
+        action="store_true",
+        help="print JSON (the raw /assembly response, or the per-contig document)",
+    )
+    assembly_parser.add_argument(
+        "-o", "--output", metavar="FILE", help="write the output here [default: stdout]"
+    )
+    assembly_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="do not print the summary on stderr",
     )
     _add_client_options(assembly_parser)
 

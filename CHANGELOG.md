@@ -4,6 +4,60 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`sylphd assembly --per-contig`** sketches every FASTA/FASTQ record as its own sample and
+  reports the closest genomes per contig, for MAG contamination checks. Each contig gets a
+  **contig-relative ANI**, `100 * (shared / contig_kmers) ** (1/k)` (`shared` from the server's
+  `Containment_ind`, `contig_kmers` from a genome-style sketch of the contig), so an exact 20 kb
+  fragment of a 5 Mb genome reports 100 % instead of ~85 %. The 95 % species assignment and GTDB
+  relations use that value, and `--min-ani` filters on it client-side. The table adds `contig`,
+  `contig_length`, `gc`, `status`, `shared_kmers`, `contig_kmers`, `explained_fraction` (the
+  fraction of the contig the hit explains), `reference_ani` (sylph's genome-denominator ANI, kept
+  for continuity) and `gtdb_species`. `--top` (default `1`) and `-o` work in this mode; `--fields`
+  selects the metadata columns added per hit and is accepted *only* with `--per-contig` (the
+  single-assembly table has fixed columns); `--json` emits a per-contig document. A summary on
+  stderr gives the bases per consensus taxon.
+- **Taxonomic consensus per contig.** Like CAT/BAT, the command reduces the hits to the best one per
+  GTDB species and takes the lowest common rank of the species whose divergence `d = 100 - ANI`
+  satisfies `d <= R * d_best + Z * sqrt(sd_best^2 + sd_i^2)`, with the binomial ANI noise
+  `sd = (100/k) * sqrt((1-p) / (n*p))`, `p = shared/contig_kmers`, `n = contig_kmers`. This keeps a
+  near-exact, well-covered contig at species while a short or noisy one widens to genus or family
+  instead of picking one of several indistinguishable species. A species consensus also requires the
+  best hit to reach the 95 % species threshold; below it the answer is truncated to genus, so a
+  distant contig is not labelled with the species that merely happens to be the closest one. The
+  table adds `n_close` (number of close species), `consensus_rank` and `consensus_taxon` after
+  `gtdb_species`; the JSON adds a `consensus` object (`rank`, `taxon`, `n_close`, `species`).
+  Defaults `R = 1.5`, `Z = 2`, settable with `--consensus-ratio R` and `--consensus-z Z`
+  (per-contig only, rejected elsewhere).
+- `--min-contig-length BP` (default `20000`) skips short contigs; they are still listed with
+  `status` `too_short`. A contig with fewer k-mers than sylph's `min_number_kmers` is reported as
+  `no_hit` instead of a spurious match. Duplicate record ids get a deterministic `_2`, `_3` suffix.
+- `--quiet` suppresses the (new or existing) stderr summary of `sylphd assembly`.
+
+### Changed
+
+- Per-contig mode batches contig sketches into `POST /query` requests with `no_adjust`,
+  `minimum_ani=0`, `screen_ani=0` and `min_contain=3`, chunked by the server's advertised limits
+  (`max_sketches`, `max_jobs` + `max_queue`) and by the *measured* request size and JSON `params`
+  size, so a highly fragmented assembly (or one with very long record ids) works against a server
+  with default limits.
+- `sylphd assembly --json` honours `-o/--output` (it always wrote to stdout before) and still
+  writes nothing to stderr, in per-contig mode too; the stderr summary exists only in table mode
+  and is now aggregated by consensus taxon and rank instead of by top-hit species.
+
+### Documented
+
+- Per-contig docs state that `no_hit` can be a two-stage-screen miss rather than proof of absence
+  (measured on a real *Leptospira* assembly: 30 of 236 contigs with a genuine 98-100 % match were
+  dropped, including one at 22.9 kb), how to read `screen_c` from `sylphd info` / `GET /info`, that
+  reported species are GTDB names and may be placeholders (K-12 MG1655 is `G047199095 sp047199095`
+  in r232; `--fields ncbi_organism_name` gives the NCBI name), and how the consensus resolves
+  99.9 vs 99.1 % to species and 89.9 vs 89.1 % to genus, with a resolution limit below ~90-92 %
+  ANI. Chimeric contigs are not detected.
+
 ## [0.2.0] - 2026-10-29
 
 ### Changed

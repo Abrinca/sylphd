@@ -16,9 +16,9 @@ from sylphd.assembly import (
     SequenceError,
     SequenceTooLarge,
     gunzip_limited,
+    gtdb_species,
     parse_assembly,
 )
-from sylphd.cli import _gtdb_species
 from sylphd.limits import JobSlots, QueueFullError, client_identity, parse_rate_limit
 from sylphd.metadata import METADATA_COLUMNS
 from sylphd.server import ServerConfig, create_app
@@ -247,11 +247,11 @@ class TestAssemblyHelpers:
 
     def test_gtdb_species(self) -> None:
         assert (
-            _gtdb_species("d__Bacteria;p__P;c__C;o__O;f__F;g__G;s__Escherichia coli")
+            gtdb_species("d__Bacteria;p__P;c__C;o__O;f__F;g__G;s__Escherichia coli")
             == "Escherichia coli"
         )
-        assert _gtdb_species("d__Bacteria;p__P") == ""
-        assert _gtdb_species(None) == ""
+        assert gtdb_species("d__Bacteria;p__P") == ""
+        assert gtdb_species(None) == ""
 
 
 class TestNoAdjust:

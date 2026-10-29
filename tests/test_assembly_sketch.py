@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import socket
 import subprocess
 import sys
 import time
@@ -221,10 +222,24 @@ def test_sketch_assembly_matches_the_servers_sketch(tmp_path) -> None:
 
 
 def _wait_for_socket(path: Path, timeout: float = 120.0) -> None:
+    """Wait until ``path`` exists *and* accepts connections.
+
+    ``serve`` binds the socket before uvicorn starts listening, so the file can
+    exist for a moment without a listener.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if path.is_socket():
-            return
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            probe.settimeout(0.2)
+            try:
+                probe.connect(str(path))
+            except (FileNotFoundError, ConnectionRefusedError):
+                pass
+            else:
+                return
+            finally:
+                probe.close()
         time.sleep(0.1)
     raise AssertionError(f"server did not create {path} in time")
 

@@ -17,7 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from .protocol import ProfileParams
+from .protocol import ProfileParams, params_json
 
 #: ``Content-Type`` of an ``/assembly`` body that is a sketch (see the server).
 SKETCH_CONTENT_TYPE = "application/vnd.sylph.sketch"
@@ -100,8 +100,11 @@ class SylphClient:
 
     # -- plumbing ---------------------------------------------------------
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        return self._send(self._client.build_request(method, path, **kwargs))
+
+    def _send(self, request: httpx.Request) -> httpx.Response:
         try:
-            response = self._client.request(method, path, **kwargs)
+            response = self._client.send(request)
         except httpx.HTTPError as error:
             raise ClientError(self._connection_message(error)) from error
         if response.status_code >= 400:
@@ -210,6 +213,48 @@ class SylphClient:
             raise ClientError("unexpected response from /assembly")
         return result
 
+    def query_size(
+        self,
+        samples: Sequence[tuple[str, bytes]],
+        *,
+        params: ProfileParams | None = None,
+        fields: Sequence[str] | None = None,
+    ) -> int:
+        """Exact size in bytes of the multipart body :meth:`query` would send.
+
+        This is the prepared request's ``Content-Length`` (boundary, form
+        headers, JSON ``params`` and file names included), so a caller can
+        compare it with a server's upload limit instead of estimating.
+        """
+        request = self._prepare_post("query", samples, params, fields)
+        length = request.headers.get("content-length")
+        if length is None:  # pragma: no cover - bytes payloads always have one
+            raise ClientError("cannot determine the request size")
+        return int(length)
+
+    def _prepare_post(
+        self,
+        mode: str,
+        samples: Sequence[tuple[str, bytes]],
+        params: ProfileParams | None,
+        fields: Sequence[str] | None,
+    ) -> httpx.Request:
+        """Build the multipart request ``_post`` sends (shared with ``query_size``)."""
+        names = [name for name, _ in samples]
+        files: list[tuple[str, tuple[str, bytes, str]]] = [
+            (
+                "sketch",
+                (f"{name or 'sample'}.sylsp", data, "application/octet-stream"),
+            )
+            for name, data in samples
+        ]
+        return self._client.build_request(
+            "POST",
+            mode,
+            data={"params": params_json(mode, params, names, fields)},
+            files=files,
+        )
+
     def _post(
         self,
         mode: str,
@@ -219,26 +264,7 @@ class SylphClient:
     ) -> list[dict[str, Any]]:
         if not samples:
             raise ValueError("no samples to send")
-        payload: dict[str, Any] = {
-            **(params or ProfileParams()).to_dict(),
-            "names": [name for name, _ in samples],
-            "mode": mode,
-        }
-        if fields is not None:
-            payload["fields"] = list(fields)
-        files: list[tuple[str, tuple[str, bytes, str]]] = [
-            (
-                "sketch",
-                (f"{name or 'sample'}.sylsp", data, "application/octet-stream"),
-            )
-            for name, data in samples
-        ]
-        response = self._request(
-            "POST",
-            mode,
-            data={"params": json.dumps(payload)},
-            files=files,
-        )
+        response = self._send(self._prepare_post(mode, samples, params, fields))
         result = response.json()
         if not isinstance(result, list):
             raise ClientError(f"unexpected response from /{mode}: not a JSON list")

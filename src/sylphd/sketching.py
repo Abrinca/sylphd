@@ -380,3 +380,114 @@ def sketch_assembly(
     if not records or not length:
         raise InputError(f"{path} contains no sequences")
     return sketch, AssemblyStats(records, length, round(100.0 * gc / length, 2))
+
+
+@dataclass(frozen=True)
+class Contig:
+    """One record of a fragmented assembly, considered on its own.
+
+    ``sketch`` is the sample-style sketch sent to the server and is ``None``
+    for a record shorter than the per-contig minimum: such a contig is not
+    sketched and not sent, but still reported.  ``contig_kmers`` is the number
+    of k-mers the contig would contribute to a *genome* sketch of itself
+    (``None`` when not sketched), the denominator of the contig-relative ANI.
+    """
+
+    index: int
+    name: str
+    length: int
+    gc: float
+    sketch: SampleSketch | None = None
+    contig_kmers: int | None = None
+
+
+def unique_contig_name(raw: str, counts: dict[str, int], used: set[str], index: int) -> str:
+    """Return a sample name for one contig, suffixing repeated ids.
+
+    The first ``contig`` keeps its name, the second becomes ``contig_2``, the
+    third ``contig_3``, and a later record that is *literally* named
+    ``contig_2`` becomes ``contig_2_2``.  Names are thus unique and depend
+    only on record order.
+
+    >>> counts: dict[str, int] = {}
+    >>> used: set[str] = set()
+    >>> [unique_contig_name("c", counts, used, i) for i in range(1, 4)]
+    ['c', 'c_2', 'c_3']
+    """
+    base = raw or f"contig-{index}"
+    count = counts.get(base, 0) + 1
+    name = base if count == 1 else f"{base}_{count}"
+    while name in used:
+        count += 1
+        name = f"{base}_{count}"
+    counts[base] = count
+    used.add(name)
+    return name
+
+
+def sketch_contigs(
+    path: str | os.PathLike[str], *, c: int, k: int, min_length: int
+) -> Iterator[Contig]:
+    """Yield one :class:`Contig` per record, each sketched as its own sample.
+
+    The sample name is the first word of the record header (``dnaio``'s
+    ``id``), validated by :func:`check_sample_name`; repeated ids are
+    suffixed by :func:`unique_contig_name`.  Records shorter than
+    ``min_length`` are yielded without a sketch.
+
+    The file is streamed and only one record is sketched at a time, so memory
+    is bounded by the largest record plus the bookkeeping the caller keeps
+    (the names already used, and any records/rows it collects).
+    """
+    sketcher = Sketcher(c=c, k=k)
+    counts: dict[str, int] = {}
+    used: set[str] = set()
+    seen = 0
+    try:
+        with dnaio.open(str(path)) as reader:
+            for index, record in enumerate(reader, start=1):
+                seen += 1
+                sequence = record.sequence.upper()
+                length = len(sequence)
+                gc = (
+                    round(100.0 * (sequence.count("G") + sequence.count("C")) / length, 2)
+                    if length
+                    else 0.0
+                )
+                name = unique_contig_name(record.id, counts, used, index)
+                try:
+                    check_sample_name(name)
+                except InputError as error:
+                    raise InputError(f"record #{index}: {error}") from error
+                sketch = contig_kmers = None
+                if length and length >= min_length:
+                    sketch = sketcher.sketch_single(name, [sequence])
+                    # The genome-style count is the exact denominator of the
+                    # contig-relative ANI: the sample sketch keeps every
+                    # selected k-mer, while a genome sketch drops duplicates
+                    # and k-mers closer than min_spacing.  Counting the
+                    # contig's own genome sketch makes an exact fragment score
+                    # exactly 100 %.
+                    contig_kmers = len(
+                        sketcher.sketch_genome(name, [sequence], profiling=False).kmers
+                    )
+                yield Contig(
+                    index=index,
+                    name=name,
+                    length=length,
+                    gc=gc,
+                    sketch=sketch,
+                    contig_kmers=contig_kmers,
+                )
+    except InputError:
+        raise
+    except (
+        OSError,
+        EOFError,
+        ValueError,
+        dnaio.FileFormatError,
+        dnaio.UnknownFileFormat,
+    ) as error:
+        raise InputError(f"cannot sketch {path}: {error}") from error
+    if not seen:
+        raise InputError(f"{path} contains no sequences")

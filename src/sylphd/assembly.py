@@ -177,6 +177,17 @@ def parse_gtdb_taxonomy(taxonomy: object) -> dict[str, str]:
     return ranks
 
 
+def gtdb_species(taxonomy: object) -> str:
+    """The GTDB species name of a lineage, or ``""``.
+
+    >>> gtdb_species("d__Bacteria;s__Escherichia coli")
+    'Escherichia coli'
+    >>> gtdb_species("d__Bacteria;g__Escherichia")
+    ''
+    """
+    return parse_gtdb_taxonomy(taxonomy).get("s", "")
+
+
 def shared_rank(a: dict[str, str], b: dict[str, str]) -> str | None:
     """Deepest rank name two parsed lineages share, or ``None``.
 

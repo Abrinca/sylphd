@@ -8,15 +8,20 @@ import json
 import os
 import sqlite3
 import sys
+from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from . import per_contig
+from .about import About, check_name
+from .assembly import gtdb_species
+from .cli_parser import PROG, build_parser
 from .client import ClientError, connect
 from .download import (
     LIST_KEYWORD,
@@ -30,8 +35,6 @@ from .download import (
     download_release,
     format_size,
 )
-from .about import About, check_name
-from .cli_parser import PROG, build_parser
 from .metadata import build_metadata_db
 from .paths import check_socket_path, default_socket_path, parse_tcp
 from .protocol import ProfileParams, ProtocolError, rows_to_tsv_lines
@@ -481,9 +484,24 @@ def _write_result(
 
 def cmd_assembly(args: argparse.Namespace) -> int:
     path = Path(args.file)
+    if args.per_contig:
+        return _cmd_assembly_per_contig(args, path)
+    if args.fields is not None:
+        _print_error("--fields is only available with --per-contig")
+        return 2
+    if args.min_contig_length is not None:
+        _print_error("--min-contig-length is only available with --per-contig")
+        return 2
+    if args.consensus_ratio is not None:
+        _print_error("--consensus-ratio is only available with --per-contig")
+        return 2
+    if args.consensus_z is not None:
+        _print_error("--consensus-z is only available with --per-contig")
+        return 2
+
     name = args.name or sample_name_from_path(path.name)
-    if not args.json:
-        _check_output_file(args.output)
+    top = args.top if args.top is not None else 10
+    _check_output_file(args.output)
     with _client_from_args(args) as client:
         if args.local_sketch:
             # The assembly is sketched here and only the sketch is uploaded: the sequence
@@ -502,7 +520,7 @@ def cmd_assembly(args: argparse.Namespace) -> int:
                 )
             result = client.assembly_sketch(
                 payload,
-                top=args.top,
+                top=top,
                 min_ani=args.min_ani,
                 name=name,
                 records=stats.records,
@@ -521,37 +539,40 @@ def cmd_assembly(args: argparse.Namespace) -> int:
             )
             result = client.assembly(
                 payload,
-                top=args.top,
+                top=top,
                 min_ani=args.min_ani,
                 name=name,
                 content_type=content_type,
             )
     if args.json:
-        json.dump(result, sys.stdout, indent=None)
-        sys.stdout.write("\n")
-        return 0
-    with _open_output(args.output) as output:
-        output.write(
-            "rank\tani\trelation\tshared_rank\taccession\tgtdb_species\t"
-            "ncbi_organism_name\tncbi_taxid\n"
-        )
-        for hit in result.get("hits", ()):
+        with _open_output(args.output) as output:
+            json.dump(result, output, indent=None)
+            output.write("\n")
+    else:
+        with _open_output(args.output) as output:
             output.write(
-                "\t".join(
-                    [
-                        str(hit.get("rank", "")),
-                        f"{float(hit.get('ani', 0.0)):.2f}",
-                        str(hit.get("relation") or ""),
-                        str(hit.get("shared_rank") or ""),
-                        str(hit.get("accession") or ""),
-                        _gtdb_species(hit.get("gtdb_taxonomy")),
-                        str(hit.get("ncbi_organism_name") or ""),
-                        "" if hit.get("ncbi_taxid") is None else str(hit["ncbi_taxid"]),
-                    ]
-                )
-                + "\n"
+                "rank\tani\trelation\tshared_rank\taccession\tgtdb_species\t"
+                "ncbi_organism_name\tncbi_taxid\n"
             )
-    print(_assignment_summary(result), file=sys.stderr)
+            for hit in result.get("hits", ()):
+                output.write(
+                    "\t".join(
+                        [
+                            str(hit.get("rank", "")),
+                            f"{float(hit.get('ani', 0.0)):.2f}",
+                            str(hit.get("relation") or ""),
+                            str(hit.get("shared_rank") or ""),
+                            str(hit.get("accession") or ""),
+                            gtdb_species(hit.get("gtdb_taxonomy")),
+                            str(hit.get("ncbi_organism_name") or ""),
+                            "" if hit.get("ncbi_taxid") is None else str(hit["ncbi_taxid"]),
+                        ]
+                    )
+                    + "\n"
+                )
+    # JSON is a machine-readable document and has always been silent on stderr.
+    if not args.json and not args.quiet:
+        print(_assignment_summary(result), file=sys.stderr)
     return 0
 
 
@@ -571,14 +592,64 @@ def _assignment_summary(result: dict[str, Any]) -> str:
     return "no hits"
 
 
-def _gtdb_species(taxonomy: Any) -> str:
-    if not isinstance(taxonomy, str):
-        return ""
-    for rank in taxonomy.split(";"):
-        rank = rank.strip()
-        if rank.startswith("s__"):
-            return rank[len("s__") :]
-    return ""
+# ---------------------------------------------------------------------------
+# assembly --per-contig
+# ---------------------------------------------------------------------------
+
+
+def _cmd_assembly_per_contig(args: argparse.Namespace, path: Path) -> int:
+    """Validate the per-contig options and hand the workflow to ``per_contig``."""
+    if not args.local_sketch:
+        _print_error(
+            "--per-contig always sketches locally; --no-local-sketch cannot be used with it"
+        )
+        return 2
+    if args.name is not None:
+        _print_error(
+            "--name cannot be combined with --per-contig: every contig is a sample "
+            "named after its record id"
+        )
+        return 2
+
+    min_length = (
+        per_contig.DEFAULT_MIN_LENGTH
+        if args.min_contig_length is None
+        else args.min_contig_length
+    )
+    _check_output_file(args.output)
+    with _client_from_args(args) as client:
+        info = client.info()
+        metadata = info.get("metadata")
+        options = per_contig.PerContigOptions(
+            top=args.top if args.top is not None else per_contig.DEFAULT_TOP,
+            min_ani=args.min_ani,
+            min_length=min_length,
+            fields=tuple(_resolve_fields(args.fields, metadata) or ()),
+            consensus_ratio=(
+                per_contig.DEFAULT_CONSENSUS_RATIO
+                if args.consensus_ratio is None
+                else args.consensus_ratio
+            ),
+            consensus_z=(
+                per_contig.DEFAULT_CONSENSUS_Z
+                if args.consensus_z is None
+                else args.consensus_z
+            ),
+        )
+        result = per_contig.run(client, path, options, info=info)
+
+    if args.json:
+        with _open_output(args.output) as output:
+            json.dump(result.document(path), output, indent=None)
+            output.write("\n")
+    else:
+        with _open_output(args.output) as output:
+            result.write_tsv(output)
+    # JSON is a machine-readable document and is silent on stderr, exactly as
+    # in single-assembly mode; its summary is part of the document.
+    if not args.json and not args.quiet:
+        result.print_summary()
+    return 0
 
 
 # ---------------------------------------------------------------------------

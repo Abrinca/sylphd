@@ -22,6 +22,7 @@ followed by ``accession`` and the selected metadata columns.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
@@ -137,6 +138,47 @@ class ProfileParams:
 
     def profiler_kwargs(self) -> dict[str, Any]:
         return self.to_dict()
+
+
+def params_payload(
+    mode: str,
+    params: ProfileParams | None,
+    names: Sequence[str],
+    fields: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """The JSON object sent as the ``params`` form field of ``/query``/``/profile``."""
+    payload: dict[str, Any] = {
+        **(params or ProfileParams()).to_dict(),
+        "names": list(names),
+        "mode": mode,
+    }
+    if fields is not None:
+        payload["fields"] = list(fields)
+    return payload
+
+
+def params_json(
+    mode: str,
+    params: ProfileParams | None,
+    names: Sequence[str],
+    fields: Sequence[str] | None = None,
+) -> str:
+    """The exact ``params`` value the client sends (default ``json.dumps`` separators)."""
+    return json.dumps(params_payload(mode, params, names, fields))
+
+
+def params_json_size(
+    mode: str,
+    params: ProfileParams | None,
+    names: Sequence[str],
+    fields: Sequence[str] | None = None,
+) -> int:
+    """Length of :func:`params_json` in characters (one char is one UTF-8 byte here).
+
+    ``json.dumps`` escapes non-ASCII characters (``ensure_ascii``), so the
+    result is also the byte length of the ``params`` form part.
+    """
+    return len(params_json(mode, params, names, fields))
 
 
 def _is_number(value: object) -> bool:

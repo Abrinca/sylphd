@@ -1,0 +1,1252 @@
+"""``sylphd assembly --per-contig``: one sketch, ANI and hit list per record.
+
+Most tests reuse the one-genome database of ``conftest.tiny_database`` (built
+from ``clodf13.fna.gz``) behind a real ``sylphd serve`` process; contigs are
+windows of that genome, so every long enough record has a hit.
+
+``ani_data`` builds a small synthetic database from a 2 Mb random genome and a
+3 %-mutated variant.  It is what makes the contig-relative ANI checkable: an
+exact 30 kb fragment must score 100 % even though it is 1.5 % of the genome.
+"""
+
+from __future__ import annotations
+
+import gzip
+import json
+import math
+import random
+import socket
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+
+import dnaio
+import pysylph
+import pytest
+from conftest import CLODF13_FASTA
+
+from sylphd import cli, per_contig
+from sylphd.client import SylphClient
+from sylphd.protocol import params_json_size
+from sylphd.sketching import unique_contig_name
+
+
+def _wait_for_socket(path: Path, timeout: float = 120.0) -> None:
+    """Wait until ``path`` exists *and* accepts connections."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.is_socket():
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            probe.settimeout(0.2)
+            try:
+                probe.connect(str(path))
+            except (FileNotFoundError, ConnectionRefusedError):
+                pass
+            else:
+                return
+            finally:
+                probe.close()
+        time.sleep(0.1)
+    raise AssertionError(f"server did not create {path} in time")
+
+
+@contextmanager
+def _serve(directory: Path, database: Path, *extra: str, meta: Path | None = None):
+    """Run ``sylphd serve`` on a Unix socket for the duration of the block."""
+    socket_path = directory / "sylphd.sock"
+    command = [sys.executable, "-m", "sylphd", "serve", "--db", str(database)]
+    if meta is not None:
+        command.extend(["--meta", str(meta)])
+    command.extend(["--socket", str(socket_path), "--log-level", "warning", *extra])
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    try:
+        _wait_for_socket(socket_path)
+        yield socket_path
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+@pytest.fixture(scope="module")
+def server(tmp_path_factory, tiny_database, tiny_metadata):
+    with _serve(
+        tmp_path_factory.mktemp("per-contig-server"),
+        tiny_database,
+        meta=tiny_metadata,
+    ) as socket_path:
+        yield socket_path
+
+
+@pytest.fixture(scope="module")
+def queue_server(tmp_path_factory, tiny_database, tiny_metadata):
+    """A server whose queue refuses more than two sketches per request."""
+    with _serve(
+        tmp_path_factory.mktemp("per-contig-queue-server"),
+        tiny_database,
+        "--max-jobs",
+        "1",
+        "--max-queue",
+        "1",
+        meta=tiny_metadata,
+    ) as socket_path:
+        yield socket_path
+
+
+@dataclass(frozen=True)
+class AniData:
+    reference: str
+    variant: str
+    foreign: str
+    database: Path
+
+
+def _mutate(sequence: str, rate: float, seed: int) -> str:
+    rng = random.Random(seed)
+    bases = list(sequence)
+    for position in rng.sample(range(len(bases)), round(rate * len(bases))):
+        current = bases[position]
+        bases[position] = rng.choice([base for base in "ACGT" if base != current])
+    return "".join(bases)
+
+
+@pytest.fixture(scope="session")
+def ani_data(tmp_path_factory) -> AniData:
+    """A 2 Mb random genome, a 3 %-mutated variant, an unrelated genome."""
+    directory = tmp_path_factory.mktemp("per-contig-ani")
+    rng = random.Random(20261029)
+    reference = "".join(rng.choices("ACGT", k=2_000_000))
+    variant = _mutate(reference, 0.03, 20261030)
+    foreign = "".join(random.Random(20261031).choices("ACGT", k=2_000_000))
+    sketcher = pysylph.Sketcher(c=200, k=31)
+    database = directory / "ani.syldb"
+    pysylph.Database(
+        [
+            sketcher.sketch_genome("GCA_000000900.1_genomic.fna.gz", [reference]),
+            sketcher.sketch_genome("GCA_000000901.1_genomic.fna.gz", [variant]),
+            sketcher.sketch_genome("GCA_000000902.1_genomic.fna.gz", [foreign]),
+        ]
+    ).dump(str(database))
+    return AniData(
+        reference=reference, variant=variant, foreign=foreign, database=database
+    )
+
+
+@pytest.fixture(scope="module")
+def ani_server(tmp_path_factory, ani_data: AniData):
+    with _serve(tmp_path_factory.mktemp("ani-server"), ani_data.database) as socket_path:
+        yield socket_path
+
+
+@dataclass(frozen=True)
+class ConsensusData:
+    reference: str
+    sibling: str
+    other: str
+    database: Path
+    metadata: Path
+
+
+@pytest.fixture(scope="session")
+def consensus_data(tmp_path_factory) -> ConsensusData:
+    """Two indistinguishable genomes of one genus, plus a third species.
+
+    ``GCA_000001000.1`` and ``GCA_000001001.1`` differ by 10 substitutions in
+    1 Mb (0.001 % ANI), so no contig can tell them apart and every assignment
+    to one of them is a coin flip.  ``GCA_000001002.1`` is 3 % away: its own
+    species (``Bacillus cereus``) of the same genus.
+    """
+    from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
+
+    directory = tmp_path_factory.mktemp("per-contig-consensus")
+    reference = "".join(random.Random(20261101).choices("ACGT", k=1_000_000))
+    sibling = _mutate(reference, 0.00001, 20261102)
+    other = _mutate(reference, 0.03, 20261103)
+    sketcher = pysylph.Sketcher(c=200, k=31)
+    database = directory / "consensus.syldb"
+    pysylph.Database(
+        [
+            sketcher.sketch_genome("GCA_000001000.1_genomic.fna.gz", [reference]),
+            sketcher.sketch_genome("GCA_000001001.1_genomic.fna.gz", [sibling]),
+            sketcher.sketch_genome("GCA_000001002.1_genomic.fna.gz", [other]),
+        ]
+    ).dump(str(database))
+
+    prefix = "d__Bacteria;p__Bacillota;c__Bacilli;o__Bacillales;f__Bacillaceae;g__Bacillus"
+    taxonomy = {
+        "GCA_000001000.1": f"{prefix};s__Bacillus subtilis_A",
+        "GCA_000001001.1": f"{prefix};s__Bacillus velezensis",
+        "GCA_000001002.1": f"{prefix};s__Bacillus cereus",
+    }
+    source = directory / "consensus.tsv"
+    lines = ["\t".join(["accession", *METADATA_COLUMNS])]
+    for accession, lineage in taxonomy.items():
+        values = {column: "" for column in METADATA_COLUMNS}
+        values["gtdb_taxonomy"] = lineage
+        lines.append("\t".join([accession, *[values[c] for c in METADATA_COLUMNS]]))
+    source.write_text("\n".join(lines) + "\n")
+    metadata = directory / "consensus.sqlite"
+    build_metadata_db([source], metadata, release=232)
+    return ConsensusData(
+        reference=reference,
+        sibling=sibling,
+        other=other,
+        database=database,
+        metadata=metadata,
+    )
+
+
+@pytest.fixture(scope="module")
+def consensus_server(tmp_path_factory, consensus_data: ConsensusData):
+    with _serve(
+        tmp_path_factory.mktemp("consensus-server"),
+        consensus_data.database,
+        meta=consensus_data.metadata,
+    ) as socket_path:
+        yield socket_path
+
+
+@pytest.fixture(scope="session")
+def small_c_database(tmp_path_factory) -> Path:
+    """``clodf13`` at ``c=20``: ~6 kB sketches, so a 1 MB upload limit binds."""
+    with dnaio.open(CLODF13_FASTA) as reader:
+        contigs = [record.sequence for record in reader]
+    sketch = pysylph.Sketcher(c=20, k=31).sketch_genome(
+        "GCA_000000001.1_genomic.fna.gz", contigs
+    )
+    path = tmp_path_factory.mktemp("small-c") / "small-c.syldb"
+    pysylph.Database([sketch]).dump(str(path))
+    return path
+
+
+@pytest.fixture(scope="module")
+def upload_limited_server(tmp_path_factory, small_c_database: Path):
+    with _serve(
+        tmp_path_factory.mktemp("upload-limited-server"),
+        small_c_database,
+        "--max-upload-mb",
+        "1",
+    ) as socket_path:
+        yield socket_path
+
+
+@pytest.fixture(scope="module")
+def genome() -> str:
+    with dnaio.open(CLODF13_FASTA) as reader:
+        return next(iter(reader)).sequence
+
+
+@pytest.fixture
+def fragmented(tmp_path: Path, genome: str) -> Path:
+    """Three long contigs (one id repeated), one short, one low-complexity."""
+    path = tmp_path / "fragmented.fa"
+    path.write_text(
+        ">c1 first window\n"
+        + genome[:6000]
+        + "\n>c2 second window\n"
+        + genome[-6000:]
+        + "\n>c1 duplicate id\n"
+        + genome[1000:7000]
+        + "\n>short one\n"
+        + genome[:500]
+        + "\n>tiny low complexity\n"
+        + "A" * 3000
+        + "\n"
+    )
+    return path
+
+
+def _write_fasta(path: Path, records: list[tuple[str, str]], width: int = 80) -> Path:
+    with path.open("w") as handle:
+        for name, sequence in records:
+            handle.write(f">{name}\n")
+            for start in range(0, len(sequence), width):
+                handle.write(sequence[start : start + width] + "\n")
+    return path
+
+
+def _run(*args: object, check: bool = True) -> int:
+    code = cli.main([str(arg) for arg in args])
+    if check:
+        assert code == 0
+    return code
+
+
+def _rows(
+    capsys: pytest.CaptureFixture[str],
+) -> tuple[list[str], list[dict[str, str]], str]:
+    captured = capsys.readouterr()
+    lines = [line for line in captured.out.splitlines() if line]
+    header = lines[0].split("\t")
+    return header, [dict(zip(header, line.split("\t"))) for line in lines[1:]], captured.err
+
+
+# ---------------------------------------------------------------------------
+# table, statuses and JSON
+# ---------------------------------------------------------------------------
+
+
+def test_one_row_per_contig_and_statuses(server, fragmented, capsys) -> None:
+    _run(
+        "assembly",
+        fragmented,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        server,
+    )
+    header, rows, err = _rows(capsys)
+    assert header[: len(per_contig.COLUMNS)] == list(per_contig.COLUMNS)
+    assert "gtdb_taxonomy" in header  # metadata fields follow the leading columns
+
+    by_id = {row["contig"]: row for row in rows}
+    assert set(by_id) == {"c1", "c2", "c1_2", "short", "tiny"}
+    for name in ("c1", "c2", "c1_2"):
+        row = by_id[name]
+        assert row["status"] == "ok"
+        assert row["rank"] == "1"
+        # an exact window of the reference genome is 100 % by construction,
+        # even though it is only 60 % of the genome
+        assert float(row["ani"]) == pytest.approx(100.0, abs=0.05)
+        # the reference-denominator ANI is a coverage-style number, at best
+        assert float(row["reference_ani"]) <= float(row["ani"])
+        assert row["shared_kmers"] == row["contig_kmers"]
+        assert float(row["explained_fraction"]) == pytest.approx(1.0, abs=0.01)
+        assert row["relation"] == "same species"
+        assert row["shared_rank"] == "species"
+        assert row["ani_species_level"] == "true"
+        assert row["accession"] == "GCA_000000001.1"
+        assert 0.0 <= float(row["gc"]) <= 100.0
+        # the deepest rank the fixture lineage has is the class
+        assert row["n_close"] == "1"
+        assert row["consensus_rank"] == "class"
+        assert row["consensus_taxon"] == "Test"
+    # the fixture taxonomy has no s__ rank, so the derived species is empty
+    assert by_id["c1"]["gtdb_species"] == ""
+    assert by_id["short"]["status"] == "too_short"
+    assert by_id["short"]["contig_length"] == "500"
+    assert by_id["short"]["rank"] == ""
+    assert by_id["tiny"]["status"] == "no_hit"
+    assert by_id["tiny"]["rank"] == ""
+
+    assert "per-contig:" in err
+    assert "shorter than 1000 bp" in err
+    assert "too few k-mers" in err
+    assert "bp by consensus: Test (class) 18,000 bp (100.0 %)" in err
+
+
+def test_tsv_header_is_stable(server, genome, tmp_path, capsys) -> None:
+    """The leading columns are a contract: compare against the literal list."""
+    path = tmp_path / "one.fa"
+    path.write_text(">c\n" + genome + "\n")
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        server,
+        "--fields",
+        "none",
+    )
+    header, rows, _ = _rows(capsys)
+    assert header == [
+        "contig",
+        "contig_length",
+        "gc",
+        "status",
+        "rank",
+        "ani",
+        "shared_kmers",
+        "contig_kmers",
+        "explained_fraction",
+        "reference_ani",
+        "relation",
+        "shared_rank",
+        "ani_species_level",
+        "accession",
+        "gtdb_species",
+        "n_close",
+        "consensus_rank",
+        "consensus_taxon",
+    ]
+    assert len(rows[0]) == len(header)
+
+
+def test_zero_genome_kmers_is_no_hit(server, tmp_path, capsys) -> None:
+    """A tandem repeat has a sample sketch but no genome-style k-mers: no ANI."""
+    rng = random.Random(424242)
+    unit = "".join(rng.choices("ACGT", k=5000))
+    path = _write_fasta(tmp_path / "repeat.fa", [("repeat", unit * 4)])
+
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--socket",
+        server,
+        "--fields",
+        "none",
+        "--json",
+    )
+    payload = json.loads(capsys.readouterr().out)
+    (contig,) = payload["contigs"]
+    assert contig["sketch_kmers"] >= 10  # it was sent
+    assert contig["contig_kmers"] == 0  # every k-mer is a duplicate
+    assert contig["status"] == "no_hit"
+    assert contig["hits"] == []
+    assert contig["consensus"] is None
+
+
+def test_short_contigs_are_skipped_by_default(server, genome, tmp_path, capsys) -> None:
+    path = tmp_path / "one.fa"
+    path.write_text(">c\n" + genome + "\n")
+    _run("assembly", path, "--per-contig", "--socket", server)
+    header, rows, err = _rows(capsys)
+    assert header[:4] == ["contig", "contig_length", "gc", "status"]
+    (row,) = rows
+    assert row["status"] == "too_short"  # 9957 bp < the default 20000
+    assert "0 of 1 contig(s)" in err
+    assert "shorter than 20000 bp" in err
+
+
+def test_json_document(server, fragmented, tmp_path, capsys) -> None:
+    output = tmp_path / "contigs.json"
+    _run(
+        "assembly",
+        fragmented,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        server,
+        "--json",
+        "-o",
+        output,
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""  # the summary is in the document, not on stderr
+    payload = json.loads(output.read_text())
+    assert payload["query"] == {
+        "file": str(fragmented),
+        "per_contig": True,
+    }
+    assert payload["params"] == {
+        "top": 1,  # per-contig default
+        "min_ani": 80.0,
+        "min_contig_length": 1000,
+        "consensus_ratio": 1.5,
+        "consensus_z": 2.0,
+        "no_adjust": True,
+        "minimum_ani": 0.0,
+        "screen_ani": 0.0,
+        "min_contain": 3,
+        "min_number_kmers": 10,
+    }
+    assert payload["thresholds"] == {"species": 95, "imprecise_below": 85}
+
+    by_id = {contig["id"]: contig for contig in payload["contigs"]}
+    assert by_id["c1"]["status"] == "ok"
+    assert by_id["c1"]["index"] == 1
+    assert by_id["c1"]["length"] == 6000
+    assert by_id["c1"]["sketch_kmers"] >= 10
+    assert by_id["c1"]["contig_kmers"] > 0
+    hit = by_id["c1"]["hits"][0]
+    assert hit["ani"] == pytest.approx(100.0, abs=0.05)
+    assert hit["shared_kmers"] == hit["contig_kmers"] == by_id["c1"]["contig_kmers"]
+    assert hit["explained_fraction"] == pytest.approx(1.0, abs=0.01)
+    assert hit["reference_ani"] <= hit["ani"]
+    assert by_id["c1"]["assignment"]["accession"] == "GCA_000000001.1"
+    assert by_id["c1"]["closest"]["accession"] == "GCA_000000001.1"
+    assert by_id["c1"]["hits"][0]["ani_species_level"] is True
+    assert by_id["short"]["status"] == "too_short"
+    assert by_id["short"]["sketch_kmers"] is None
+    assert by_id["short"]["contig_kmers"] is None
+    assert by_id["tiny"]["status"] == "no_hit"
+    assert "too few k-mers" in by_id["tiny"]["reason"]
+
+    summary = payload["summary"]
+    assert summary["contigs"] == 5
+    assert summary["queried_contigs"] == 3
+    assert summary["skipped_contigs"] == 1
+    assert summary["too_few_kmers_contigs"] == 1
+    assert summary["consensus_bp"][0]["taxon"] == "Test"
+    assert summary["consensus_bp"][0]["rank"] == "class"
+    assert summary["consensus_bp"][0]["fraction"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# chunking
+# ---------------------------------------------------------------------------
+
+
+def test_chunk_size_for() -> None:
+    limits = {
+        "max_sketches": 4096,
+        "max_jobs": 2,
+        "max_queue": None,
+    }
+    assert per_contig.chunk_size_for({"limits": limits}) == 4096
+    limits["max_queue"] = 3
+    assert per_contig.chunk_size_for({"limits": limits}) == 5
+    limits.update(max_sketches=4, max_jobs=1, max_queue=0)
+    assert per_contig.chunk_size_for({"limits": limits}) == 1
+    assert per_contig.chunk_size_for({}) == 4096
+
+
+def test_params_budget_counts_json_escapes() -> None:
+    """The running params size is exact, including non-ASCII names."""
+    names = ["é" * 100, "plain", "x" * 1000]
+    batch = per_contig._Batch(per_contig.QUERY_PARAMS, ["gtdb_taxonomy"])
+    for name in names:
+        batch.add({"id": name}, b"")
+    assert batch.params_bytes == params_json_size(
+        "query", per_contig.QUERY_PARAMS, names, ["gtdb_taxonomy"]
+    )
+
+
+def test_requests_follow_the_servers_queue_limit(
+    queue_server, fragmented, monkeypatch, capsys
+) -> None:
+    """--max-jobs 1 --max-queue 1 means two contigs per POST, by real limits."""
+    calls: list[list[str]] = []
+    original = SylphClient.query
+
+    def counting(self, samples, **kwargs):
+        calls.append([name for name, _ in samples])
+        return original(self, samples, **kwargs)
+
+    monkeypatch.setattr(SylphClient, "query", counting)
+    _run(
+        "assembly",
+        fragmented,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        queue_server,
+        "--fields",
+        "none",
+        "--quiet",
+    )
+    rows = _rows(capsys)[1]
+    assert [len(batch) for batch in calls] == [2, 1]
+    sent = [name for batch in calls for name in batch]
+    assert sent == ["c1", "c2", "c1_2"]  # request order is record order
+    assert {row["contig"] for row in rows} == {"c1", "c2", "c1_2", "short", "tiny"}
+
+
+def test_long_names_split_chunks_below_the_params_limit(
+    server, genome, tmp_path, monkeypatch, capsys
+) -> None:
+    """The JSON params part repeats every name; 1000 x ~1 kB must be chunked."""
+    records = [(f"c{index}_" + "x" * 1000, genome) for index in range(1000)]
+    path = _write_fasta(tmp_path / "long-names.fa", records)
+
+    batches: list[tuple[list[str], list[str] | None]] = []
+    original = SylphClient.query
+
+    def counting(self, samples, *, params=None, fields=None):
+        batches.append(([name for name, _ in samples], fields))
+        return original(self, samples, params=params, fields=fields)
+
+    monkeypatch.setattr(SylphClient, "query", counting)
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        server,
+        "--fields",
+        "none",
+        "--quiet",
+    )
+    rows = _rows(capsys)[1]
+    assert len(batches) > 1
+    for names, fields in batches:
+        size = params_json_size("query", per_contig.QUERY_PARAMS, names, fields)
+        assert size <= per_contig.MAX_PARAMS_BYTES
+    assert len(rows) == len(records)
+    assert {row["status"] for row in rows} == {"ok"}
+
+
+def test_single_oversized_sketch_is_rejected(
+    upload_limited_server, tmp_path, capsys
+) -> None:
+    """3 Mb at c=20 is ~1.8 MB of sketch: over the server's 1 MB upload limit."""
+    rng = random.Random(99)
+    sequence = "".join(rng.choices("ACGT", k=3_000_000))
+    path = _write_fasta(tmp_path / "huge.fa", [("huge", sequence)])
+
+    code = cli.main(
+        [
+            "assembly",
+            str(path),
+            "--per-contig",
+            "--socket",
+            str(upload_limited_server),
+            "--fields",
+            "none",
+        ]
+    )
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "huge" in err
+    assert "upload limit" in err
+
+
+def test_upload_limited_server_splits_requests(
+    upload_limited_server, genome, tmp_path, monkeypatch, capsys
+) -> None:
+    """220 x ~6 kB sketches against --max-upload-mb 1: split, never a 413."""
+    records = [(f"c{index}", genome) for index in range(220)]
+    path = _write_fasta(tmp_path / "many.fa", records)
+
+    calls: list[list[str]] = []
+    original = SylphClient.query
+
+    def counting(self, samples, **kwargs):
+        calls.append([name for name, _ in samples])
+        return original(self, samples, **kwargs)
+
+    monkeypatch.setattr(SylphClient, "query", counting)
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        upload_limited_server,
+        "--fields",
+        "none",
+        "--quiet",
+    )
+    rows = _rows(capsys)[1]
+    assert len(calls) > 1  # one request would exceed 1 MB
+    assert len(rows) == len(records)
+    assert {row["status"] for row in rows} == {"ok"}
+
+
+# ---------------------------------------------------------------------------
+# realistic per-contig ANI
+# ---------------------------------------------------------------------------
+
+
+def test_contig_relative_ani_on_exact_and_mutated_fragments(
+    ani_server, ani_data: AniData, tmp_path, capsys
+) -> None:
+    exact = ani_data.reference[123_456:153_456]
+    mutated = _mutate(ani_data.reference[500_000:530_000], 0.03, 4242)
+    path = _write_fasta(tmp_path / "fragments.fa", [("exact", exact), ("mutated", mutated)])
+
+    _run(
+        "assembly", path, "--per-contig", "--socket", ani_server, "--fields", "none"
+    )
+    _, rows, _ = _rows(capsys)
+    by_id = {row["contig"]: row for row in rows}
+
+    exact_row = by_id["exact"]
+    assert exact_row["status"] == "ok"
+    assert exact_row["accession"] == "GCA_000000900.1"
+    assert float(exact_row["ani"]) == pytest.approx(100.0, abs=0.05)
+    assert exact_row["shared_kmers"] == exact_row["contig_kmers"]
+    assert float(exact_row["explained_fraction"]) == pytest.approx(1.0, abs=0.01)
+
+    mutated_row = by_id["mutated"]
+    assert mutated_row["status"] == "ok"
+    assert mutated_row["accession"] == "GCA_000000900.1"
+    assert float(mutated_row["ani"]) == pytest.approx(97.0, abs=1.0)
+    # the old (reference-denominator) number is far too low to be an ANI
+    assert float(mutated_row["reference_ani"]) < 90.0
+    assert 0.2 < float(mutated_row["explained_fraction"]) < 0.6
+
+
+def test_multiple_hits_are_ranked_by_shared_kmers(
+    ani_server, ani_data: AniData, tmp_path, capsys
+) -> None:
+    exact = ani_data.reference[900_000:930_000]
+    path = _write_fasta(tmp_path / "one.fa", [("contig1", exact)])
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--top",
+        "2",
+        "--socket",
+        ani_server,
+        "--fields",
+        "none",
+    )
+    _, rows, _ = _rows(capsys)
+    assert [row["rank"] for row in rows] == ["1", "2"]
+    top, second = rows
+    assert top["accession"] == "GCA_000000900.1"
+    assert second["accession"] == "GCA_000000901.1"
+    assert float(top["ani"]) > float(second["ani"])
+    assert int(top["shared_kmers"]) > int(second["shared_kmers"])
+    assert top["shared_kmers"] == top["contig_kmers"]
+
+
+def test_min_ani_is_applied_to_the_contig_relative_ani(
+    ani_server, ani_data: AniData, tmp_path, capsys
+) -> None:
+    mutated = _mutate(ani_data.reference[1_000_000:1_040_000], 0.03, 5150)
+    path = _write_fasta(tmp_path / "mutated.fa", [("contig1", mutated)])
+
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--min-ani",
+        "99",
+        "--socket",
+        ani_server,
+        "--fields",
+        "none",
+        "--quiet",
+    )
+    (row,) = _rows(capsys)[1]
+    assert row["status"] == "no_hit"  # ~97 % ANI, filtered client-side
+
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--min-ani",
+        "90",
+        "--socket",
+        ani_server,
+        "--fields",
+        "none",
+        "--quiet",
+    )
+    (row,) = _rows(capsys)[1]
+    assert row["status"] == "ok"
+    assert float(row["ani"]) == pytest.approx(97.0, abs=1.0)
+
+
+# ---------------------------------------------------------------------------
+# taxonomic consensus
+# ---------------------------------------------------------------------------
+
+
+def _taxonomy(
+    species: str, genus: str = "Bacillus", family: str = "Bacillaceae"
+) -> str:
+    return (
+        "d__Bacteria;p__Bacillota;c__Bacilli;o__Bacillales;"
+        f"f__{family};g__{genus};s__{species}"
+    )
+
+
+def _consensus_hit(
+    ani: float,
+    *,
+    contig_kmers: int = 400,
+    species: str | None = None,
+    genus: str = "Bacillus",
+    taxonomy: str | None = None,
+    accession: str = "GCA_000000001.1",
+) -> dict[str, object]:
+    """One hit as :func:`per_contig.consensus` sees it (``shared`` from ANI)."""
+    shared = round(contig_kmers * (ani / 100.0) ** 31)
+    if taxonomy is None and species is not None:
+        taxonomy = _taxonomy(species, genus)
+    return {
+        "ani": ani,
+        "shared_kmers": shared,
+        "gtdb_taxonomy": taxonomy,
+        "accession": accession,
+    }
+
+
+def _query_row(
+    shared: int,
+    *,
+    accession: str,
+    species: str,
+    genus: str = "Bacillus",
+    total: int = 10_000,
+) -> dict[str, object]:
+    """One ``POST /query`` row as the server returns it."""
+    return {
+        "Containment_ind": [shared, total],
+        "Naive_ANI": 85.0,
+        "gtdb_taxonomy": _taxonomy(species, genus),
+        "accession": accession,
+        "Genome_file": f"{accession}_genomic.fna.gz",
+    }
+
+
+def test_min_ani_never_changes_the_consensus() -> None:
+    """--min-ani hides rows; it must not turn an ambiguous genus into a species."""
+    rows = [
+        _query_row(85, accession="GCA_000000001.1", species="Bacillus subtilis"),
+        _query_row(84, accession="GCA_000000002.1", species="Bacillus velezensis"),
+    ]
+    loose = per_contig._contig_hits(
+        rows,
+        k=31,
+        contig_kmers=85,
+        options=per_contig.PerContigOptions(min_ani=80.0, top=2),
+    )
+    strict = per_contig._contig_hits(
+        rows,
+        k=31,
+        contig_kmers=85,
+        options=per_contig.PerContigOptions(min_ani=100.0, top=2),
+    )
+    assert [hit["accession"] for hit in loose[0]] == [
+        "GCA_000000001.1",
+        "GCA_000000002.1",
+    ]
+    assert [hit["accession"] for hit in strict[0]] == ["GCA_000000001.1"]
+    for hits, assignment, closest, summary in (loose, strict):
+        assert hits and assignment is not None and closest is not None
+        assert summary is not None
+        assert (summary["rank"], summary["taxon"]) == ("genus", "Bacillus")
+        assert summary["n_close"] == 2
+
+    # Nothing passes --min-ani: the contig has no hits and no consensus, even
+    # though the complete set would have produced one.
+    below = per_contig._contig_hits(
+        rows[1:], k=31, contig_kmers=85, options=per_contig.PerContigOptions(min_ani=100.0)
+    )
+    assert below == ([], None, None, None)
+
+
+def test_exact_ties_are_canonical() -> None:
+    """Equal evidence is ordered by accession, not by the backend's row order."""
+    first = _query_row(50, accession="GCA_000000009.1", species="Bacillus subtilis")
+    second = _query_row(50, accession="GCA_000000001.1", species="Bacillus velezensis")
+    options = per_contig.PerContigOptions(top=2)
+    forward = per_contig._contig_hits([first, second], k=31, contig_kmers=85, options=options)
+    reverse = per_contig._contig_hits([second, first], k=31, contig_kmers=85, options=options)
+    assert [hit["accession"] for hit in forward[0]] == [
+        "GCA_000000001.1",
+        "GCA_000000009.1",
+    ]
+    assert forward == reverse
+
+
+def test_ani_noise_matches_the_binomial_formula() -> None:
+    assert per_contig.ani_noise(100, 100, 31) == 0.0  # exact match: no noise
+    assert per_contig.ani_noise(0, 100, 31) == math.inf  # no estimate at all
+    assert per_contig.ani_noise(5, 0, 31) == math.inf
+    expected = (100 / 31) * math.sqrt((1 - 0.95) / (100 * 0.95))
+    assert per_contig.ani_noise(95, 100, 31) == pytest.approx(expected)
+    # more k-mers, less noise (the sd is ~1/sqrt(n))
+    assert per_contig.ani_noise(950, 1000, 31) < per_contig.ani_noise(95, 100, 31)
+
+
+def test_consensus_of_a_single_species_is_that_species() -> None:
+    result = per_contig.consensus(
+        [_consensus_hit(100.0, species="Bacillus subtilis")], k=31, contig_kmers=400
+    )
+    assert result == {
+        "rank": "species",
+        "taxon": "Bacillus subtilis",
+        "n_close": 1,
+        "species": ["Bacillus subtilis"],
+    }
+
+
+def test_species_consensus_needs_the_species_threshold() -> None:
+    """A lone close species at 91.75 % is a genus call, not a species call."""
+    result = per_contig.consensus(
+        [
+            _consensus_hit(
+                91.75, species="Leptospira alexanderi", genus="Leptospira", accession="A"
+            )
+        ],
+        k=31,
+        contig_kmers=440,
+    )
+    assert (result["rank"], result["taxon"]) == ("genus", "Leptospira")
+    assert result["n_close"] == 1
+    assert result["species"] == ["Leptospira alexanderi"]
+
+    at_threshold = per_contig.consensus(
+        [
+            _consensus_hit(
+                95.0, species="Leptospira alexanderi", genus="Leptospira", accession="A"
+            )
+        ],
+        k=31,
+        contig_kmers=440,
+    )
+    assert (at_threshold["rank"], at_threshold["taxon"]) == (
+        "species",
+        "Leptospira alexanderi",
+    )
+
+
+def test_consensus_99_9_vs_99_1_stays_at_species() -> None:
+    """A 0.8-point gap at 99 % is further than the noise: the best species holds."""
+    result = per_contig.consensus(
+        [
+            _consensus_hit(99.9, species="Bacillus subtilis", accession="A"),
+            _consensus_hit(99.1, species="Bacillus velezensis", accession="B"),
+        ],
+        k=31,
+        contig_kmers=400,
+    )
+    assert result["n_close"] == 1
+    assert (result["rank"], result["taxon"]) == ("species", "Bacillus subtilis")
+
+
+def test_consensus_89_9_vs_89_1_widens_to_genus() -> None:
+    """At 89 %, a 0.8-point gap is within ``ratio`` of a 10-point divergence."""
+    result = per_contig.consensus(
+        [
+            _consensus_hit(89.9, species="Bacillus subtilis", accession="A"),
+            _consensus_hit(89.1, species="Bacillus velezensis", accession="B"),
+        ],
+        k=31,
+        contig_kmers=400,
+    )
+    assert result["n_close"] == 2
+    assert (result["rank"], result["taxon"]) == ("genus", "Bacillus")
+    assert result["species"] == ["Bacillus subtilis", "Bacillus velezensis"]
+
+
+def test_consensus_reduces_to_the_best_hit_per_species() -> None:
+    """Three hits of two species: n_close counts species, not rows."""
+    result = per_contig.consensus(
+        [
+            _consensus_hit(99.9, species="Bacillus subtilis", accession="A"),
+            _consensus_hit(99.5, species="Bacillus subtilis", accession="A2"),
+            _consensus_hit(99.8, species="Bacillus velezensis", accession="B"),
+        ],
+        k=31,
+        contig_kmers=400,
+    )
+    assert result["n_close"] == 2
+    assert result["species"] == ["Bacillus subtilis", "Bacillus velezensis"]
+
+
+def test_consensus_noise_widens_for_a_short_contig() -> None:
+    """The same two hits: genus evidence at 10 k-mers, species at 1000."""
+    weak = per_contig.consensus(
+        [
+            _consensus_hit(99.0, contig_kmers=10, species="A species", accession="A"),
+            _consensus_hit(95.0, contig_kmers=10, species="B species", accession="B"),
+        ],
+        k=31,
+        contig_kmers=10,
+    )
+    strong = per_contig.consensus(
+        [
+            _consensus_hit(99.0, contig_kmers=1000, species="A species", accession="A"),
+            _consensus_hit(95.0, contig_kmers=1000, species="B species", accession="B"),
+        ],
+        k=31,
+        contig_kmers=1000,
+    )
+    assert weak["n_close"] == 2
+    assert strong["n_close"] == 1
+    assert strong["rank"] == "species"
+
+
+def test_consensus_ratio_and_z_control_the_band() -> None:
+    hits = [
+        _consensus_hit(97.0, species="Bacillus subtilis", accession="A"),
+        _consensus_hit(95.5, species="Bacillus velezensis", accession="B"),
+    ]
+    wide = per_contig.consensus(hits, k=31, contig_kmers=400)
+    narrow = per_contig.consensus(hits, k=31, contig_kmers=400, ratio=1.0, z=0.0)
+    assert wide["rank"] == "genus"
+    assert narrow["rank"] == "species"
+
+
+def test_consensus_without_taxonomy_falls_back_to_empty() -> None:
+    assert per_contig.consensus([], k=31, contig_kmers=400) is None
+    alone = per_contig.consensus(
+        [_consensus_hit(100.0, taxonomy=None, accession="GCA_000000009.1")],
+        k=31,
+        contig_kmers=400,
+    )
+    assert (alone["rank"], alone["taxon"]) == (None, None)
+    assert alone["n_close"] == 1
+    assert alone["species"] == ["GCA_000000009.1"]
+    # a close species without a lineage cannot be placed: consensus is empty
+    mixed = per_contig.consensus(
+        [
+            _consensus_hit(99.9, species="Bacillus subtilis", accession="A"),
+            _consensus_hit(99.8, taxonomy=None, accession="GCA_000000009.1"),
+        ],
+        k=31,
+        contig_kmers=400,
+    )
+    assert mixed["n_close"] == 2
+    assert (mixed["rank"], mixed["taxon"]) == (None, None)
+
+
+def test_consensus_columns_and_json(consensus_server, consensus_data, tmp_path, capsys) -> None:
+    """Columns after ``gtdb_species``, and the same values in the JSON."""
+    host = consensus_data.reference[100_000:130_000]
+    other = consensus_data.other[100_000:130_000]
+    path = _write_fasta(tmp_path / "consensus.fa", [("host", host), ("other", other)])
+
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--socket",
+        consensus_server,
+        "--fields",
+        "none",
+    )
+    header, rows, err = _rows(capsys)
+    assert header[-3:] == ["n_close", "consensus_rank", "consensus_taxon"]
+    by_id = {row["contig"]: row for row in rows}
+    assert by_id["host"]["status"] == "ok"
+    assert by_id["host"]["consensus_rank"] == "genus"
+    assert by_id["host"]["consensus_taxon"] == "Bacillus"
+    assert by_id["host"]["n_close"] == "2"  # two ~identical genomes, one genus
+    assert by_id["other"]["consensus_rank"] == "species"
+    assert by_id["other"]["consensus_taxon"] == "Bacillus cereus"
+    assert by_id["other"]["n_close"] == "1"
+    assert "bp by consensus: Bacillus (genus) 30,000 bp (50.0 %)" in err
+    assert "Bacillus cereus (species) 30,000 bp (50.0 %)" in err
+
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--socket",
+        consensus_server,
+        "--json",
+    )
+    payload = json.loads(capsys.readouterr().out)
+    by_id = {contig["id"]: contig for contig in payload["contigs"]}
+    assert by_id["host"]["consensus"]["rank"] == "genus"
+    assert by_id["host"]["consensus"]["taxon"] == "Bacillus"
+    assert by_id["host"]["consensus"]["n_close"] == 2
+    # order follows the hits, which two ~identical genomes may swap
+    assert set(by_id["host"]["consensus"]["species"]) == {
+        "Bacillus subtilis_A",
+        "Bacillus velezensis",
+    }
+    assert by_id["other"]["consensus"]["rank"] == "species"
+    assert payload["summary"]["consensus_bp"][0]["rank"] in {"genus", "species"}
+
+
+def test_consensus_options_are_reported(
+    consensus_server, consensus_data, tmp_path, capsys
+) -> None:
+    """``--consensus-ratio``/``--consensus-z`` reach the rule and the document."""
+    path = _write_fasta(
+        tmp_path / "one.fa", [("host", consensus_data.reference[100_000:130_000])]
+    )
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--socket",
+        consensus_server,
+        "--consensus-ratio",
+        "4",
+        "--consensus-z",
+        "0",
+        "--json",
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["params"]["consensus_ratio"] == 4.0
+    assert payload["params"]["consensus_z"] == 0.0
+    (contig,) = payload["contigs"]
+    assert contig["consensus"]["rank"] == "genus"
+
+
+# ---------------------------------------------------------------------------
+# inputs and output modes
+# ---------------------------------------------------------------------------
+
+
+def test_gzip_input(server, genome, tmp_path, capsys) -> None:
+    path = tmp_path / "fragmented.fa.gz"
+    with gzip.open(path, "wt") as handle:
+        handle.write(">c1\n" + genome[:6000] + "\n>c2\n" + genome[-6000:] + "\n")
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        server,
+        "--fields",
+        "none",
+    )
+    _, rows, _ = _rows(capsys)
+    assert [row["contig"] for row in rows] == ["c1", "c2"]
+    assert [row["status"] for row in rows] == ["ok", "ok"]
+    assert all(float(row["ani"]) == pytest.approx(100.0, abs=0.05) for row in rows)
+
+
+def test_empty_input_is_an_input_error(server, tmp_path, capsys) -> None:
+    path = tmp_path / "empty.fa"
+    path.write_text("")
+    assert cli.main(["assembly", str(path), "--per-contig", "--socket", str(server)]) == 1
+    err = capsys.readouterr().err
+    assert "contains no sequences" in err
+
+
+def test_invalid_sample_name_names_the_record(server, genome, tmp_path, capsys) -> None:
+    path = tmp_path / "bad-name.fa"
+    path.write_text(">c" + "x" * 1100 + "\n" + genome + "\n")
+    assert cli.main(["assembly", str(path), "--per-contig", "--socket", str(server)]) == 1
+    err = capsys.readouterr().err
+    assert "record #1" in err
+    assert "too long" in err
+
+
+def test_sent_contig_without_a_hit(server, tmp_path, capsys) -> None:
+    random_sequence = "".join(random.Random(3).choices("ACGT", k=20_000))
+    path = _write_fasta(tmp_path / "random.fa", [("unrelated", random_sequence)])
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--socket",
+        server,
+        "--fields",
+        "none",
+        "--json",
+    )
+    payload = json.loads(capsys.readouterr().out)
+    (contig,) = payload["contigs"]
+    assert contig["status"] == "no_hit"
+    assert contig["hits"] == []
+    assert "reason" not in contig  # it was sent, the database just has nothing
+    assert payload["summary"]["no_hit_contigs"] == 1
+
+
+def test_fastq_records(server, genome, tmp_path, capsys) -> None:
+    path = tmp_path / "fragmented.fq"
+    path.write_text(
+        "@c1\n" + genome[:6000] + "\n+\n" + "I" * 6000 + "\n"
+        "@c2\n" + genome[-6000:] + "\n+\n" + "I" * 6000 + "\n"
+    )
+    _run(
+        "assembly", path, "--per-contig", "--min-contig-length", "1000",
+        "--socket", server, "--fields", "none",
+    )
+    _, rows, _ = _rows(capsys)
+    assert [row["contig"] for row in rows] == ["c1", "c2"]
+    assert [row["status"] for row in rows] == ["ok", "ok"]
+
+
+def test_fields_none_hides_metadata_but_keeps_relations(
+    server, fragmented, capsys
+) -> None:
+    _run(
+        "assembly",
+        fragmented,
+        "--per-contig",
+        "--min-contig-length",
+        "1000",
+        "--socket",
+        server,
+        "--fields",
+        "none",
+        "--json",
+        "--quiet",
+    )
+    payload = json.loads(capsys.readouterr().out)
+    hit = next(c for c in payload["contigs"] if c["id"] == "c1")["hits"][0]
+    assert "gtdb_taxonomy" not in hit  # not displayed
+    assert hit["relation"] == "same species"  # but still classified with lineage
+
+
+def test_single_assembly_json_output_file(server, genome, tmp_path, capsys) -> None:
+    path = tmp_path / "one.fa"
+    path.write_text(">c\n" + genome + "\n")
+    output = tmp_path / "assembly.json"
+    _run("assembly", path, "--socket", server, "--json", "-o", output)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""  # JSON mode never writes the summary
+    payload = json.loads(output.read_text())
+    assert payload["hits"][0]["accession"] == "GCA_000000001.1"
+
+
+def test_options_of_the_single_assembly_still_work(server, genome, tmp_path, capsys) -> None:
+    path = tmp_path / "one.fa"
+    path.write_text(">c\n" + genome + "\n")
+    # --top default is 10 without --per-contig; the flag combination is checked
+    assert _run("assembly", path, "--socket", server, "--quiet") == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_per_contig_rejects_incompatible_options(genome, tmp_path, capsys) -> None:
+    path = tmp_path / "one.fa"
+    path.write_text(">c\n" + genome + "\n")
+    assert cli.main(["assembly", str(path), "--per-contig", "--no-local-sketch"]) == 2
+    assert "--no-local-sketch" in capsys.readouterr().err
+    assert cli.main(["assembly", str(path), "--per-contig", "--name", "x"]) == 2
+    assert "--name" in capsys.readouterr().err
+    assert cli.main(["assembly", str(path), "--fields", "none"]) == 2
+    assert "--per-contig" in capsys.readouterr().err
+    assert cli.main(["assembly", str(path), "--min-contig-length", "5"]) == 2
+    assert "--per-contig" in capsys.readouterr().err
+    assert cli.main(["assembly", str(path), "--consensus-ratio", "2"]) == 2
+    assert "--consensus-ratio is only available with --per-contig" in capsys.readouterr().err
+    assert cli.main(["assembly", str(path), "--consensus-z", "3"]) == 2
+    assert "--consensus-z is only available with --per-contig" in capsys.readouterr().err
+
+
+def test_consensus_option_range_is_validated(genome, tmp_path, capsys) -> None:
+    path = tmp_path / "one.fa"
+    path.write_text(">c\n" + genome + "\n")
+    with pytest.raises(SystemExit) as ratio:
+        cli.main(["assembly", str(path), "--per-contig", "--consensus-ratio", "0.5"])
+    assert ratio.value.code == 2
+    assert "must be >= 1" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as z:
+        cli.main(["assembly", str(path), "--per-contig", "--consensus-z", "-1"])
+    assert z.value.code == 2
+    assert "must be >= 0" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as infinite:
+        cli.main(["assembly", str(path), "--per-contig", "--consensus-ratio", "inf"])
+    assert infinite.value.code == 2
+    assert "must be >= 1" in capsys.readouterr().err
+
+
+def test_unique_contig_names() -> None:
+    counts: dict[str, int] = {}
+    used: set[str] = set()
+    names = [
+        "c",
+        "c",
+        "c_2",
+        "c",
+        "",
+    ]
+    assert [
+        unique_contig_name(raw, counts, used, index)
+        for index, raw in enumerate(names, start=1)
+    ] == ["c", "c_2", "c_2_2", "c_3", "contig-5"]
+
+
+def test_unreadable_input_is_an_input_error(server, tmp_path, capsys) -> None:
+    missing = tmp_path / "missing.fa"
+    # the server is up, so the failure is the input, not the connection
+    assert cli.main(["assembly", str(missing), "--per-contig", "--socket", str(server)]) == 1
+    err = capsys.readouterr().err
+    assert "cannot sketch" in err
+    assert "missing.fa" in err

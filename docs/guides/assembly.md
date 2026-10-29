@@ -38,16 +38,91 @@ no species-level match (< 95 % ANI); closest relative ... (...)
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--top N` | `10` | number of hits, 1-50 |
+| `--top N` | `10` | number of hits, 1-50 (`1` with `--per-contig`) |
 | `--min-ani ANI` | `80` | minimum ANI in percent, 70-100 |
 | `--name NAME` | file base name | query name |
+| `--per-contig` | off | sketch every record as its own sample (see below) |
+| `--min-contig-length BP` | `20000` | with `--per-contig`: shorter contigs are reported but not queried |
+| `--fields COLS` | `all` | with `--per-contig`: metadata columns per hit |
+| `--consensus-ratio R` | `1.5` | with `--per-contig`: how much more divergent than the best hit a species may be and still join the consensus |
+| `--consensus-z Z` | `2` | with `--per-contig`: allowance for ANI sampling noise, in standard deviations |
 | `--local-sketch` / `--no-local-sketch` | `--local-sketch` | sketch on this machine and upload only the sketch, or upload the raw sequence (needs `--allow-sequences` on the server) |
-| `--json` | off | print the raw response instead of the table |
-| `-o FILE` | stdout | write the table to a file |
+| `--json` | off | print JSON instead of the table |
+| `-o FILE` | stdout | write the output to a file |
+| `--quiet` | off | no summary on stderr |
 
 The columns `gtdb_species`, `ncbi_organism_name` and `ncbi_taxid` are empty when the server has no
 metadata database. The JSON response carries every metadata column; see the
 [`POST /assembly` reference](../reference/http-api.md#post-assembly).
+
+## Per-contig mode { #per-contig }
+
+`--per-contig` makes one sample out of every FASTA/FASTQ record and reports the closest genomes and
+a taxonomic consensus of each contig. Instead of one species call for the whole file, you get one
+per contig, which is what a MAG contamination check needs: a 200 kbp contig from another species
+shows that species even when the rest of the assembly is one genome. The contigs are sketched
+locally and sent as a batch to
+[`POST /query`](../reference/http-api.md#post-query-and-post-profile) with `no_adjust`, so no
+server change is needed and the sequence never leaves the machine.
+
+```bash
+sylphd assembly mag.fasta --per-contig
+sylphd assembly mag.fasta --per-contig --top 3 --fields none
+```
+
+**The ANI is contig-relative.** sylph's usual naive ANI divides by the *reference genome's* k-mer
+count, which is a coverage-style number: an exact 20 kb fragment of a 5 Mb genome would look like
+~85 % ANI. Per-contig mode instead reports `100 * (shared / contig_kmers) ** (1/k)`, with `shared`
+from the server and `contig_kmers` a genome-style k-mer count of the contig computed locally, so
+an exact fragment is 100 % and a contig at 97 % true ANI is 97 %. The 95 % species call and the
+relations use that value; `--min-ani` filters on it too. The query is sent permissively
+(`minimum_ani=0`, `screen_ani=0`, `min_contain=3`, `no_adjust`) so the server cannot drop a short
+contig on the way.
+
+The output has one row per contig and hit with `contig`, `contig_length`, `gc`, `status`
+(`ok`, `too_short` or `no_hit`), `rank`, `ani`, `shared_kmers`, `contig_kmers`,
+`explained_fraction`, `reference_ani`, `relation`, `shared_rank`, `ani_species_level`, `accession`,
+`gtdb_species`, `n_close`, `consensus_rank` and `consensus_taxon`, then the metadata columns
+(`--fields`). `reference_ani` is sylph's genome-denominator value, kept for continuity;
+`explained_fraction` is the fraction of the contig's k-mers the hit explains. A summary on stderr
+gives the number of queried contigs and bases and the fraction of bases per consensus taxon (top
+five), which is the contamination signal. Duplicate record ids get a `_2`, `_3` suffix.
+
+**The consensus is what you should read.** The top hit is not stable: in GTDB r232 the genomes
+nearest to *E. coli* K-12 belong to several near-identical placeholder species and genera, so which
+one wins changes with a k-mer or two. Per contig the command therefore keeps the best hit per GTDB
+species and takes the lowest common rank of the ones whose divergence is within `1.5x` the best
+hit's plus `2` standard deviations of the ANI sampling noise (see
+[the rule](../commands/assembly.md#per-contig-consensus)). A near-exact, well-covered contig
+resolves to its species; an ambiguous, short or noisy one widens to genus, family or higher instead
+of inventing a species. A species consensus also requires the 95 % species threshold, so a distant
+contig stops at genus. `--consensus-ratio` and `--consensus-z` tune the allowance; the defaults
+resolve 166 of the 170 contigs of a real *Leptospira* assembly to *L. interrogans*, 3 to
+`Leptospira` (genus, 91.8-94.4 % to their closest species) and 1 to `Bacteria` (3.3 kb), while a
+K-12 contig comes out as `Enterobacteriaceae` (family) — exactly how far GTDB r232's *E. coli*
+group is resolvable.
+
+**GTDB names, not NCBI names.** The assignment is a GTDB species, which may be a placeholder: K-12
+MG1655 is `G047199095 sp047199095` in r232, not `Escherichia coli`. Add
+`--fields ncbi_organism_name` (or `all`, the default) for the NCBI name of each hit.
+
+**Short contigs and the screen.** Contigs shorter than `--min-contig-length` (20000 bp by default)
+are reported as `too_short` and not queried; a contig with fewer than sylph's 10 sketched k-mers is
+`no_hit` rather than a spurious match. At `c=200` a 20 kb contig has ~85 genome-style k-mers, which
+gives roughly ±0.5 % ANI; at 10 kb (~43 k-mers) it is ~±1 % and only down to ~93 % ANI; below ~90 %
+ANI a short contig has too few shared k-mers to resolve anything below family. Two-stage `.syl2db`
+databases additionally drop some short contigs in their first-stage screen before any threshold
+applies — measured on a real *Leptospira* assembly, 30 of the 236 queried contigs with a genuine
+98-100 % match were lost to it (most below 5 kb, but also one at 22.9 kb and 99.22 % ANI), and 7
+more of the 243 contigs of at least 2 kb were too small to sketch. `no_hit` therefore
+means "no evidence", not "no relative": the screen may simply not have looked. Use a plain `.syldb`
+or longer contigs for short-contig work, and treat the ANI of a few-kbp contig as a hint, not as a
+species-level identification.
+
+Cost is per contig but small: against a 200 000-genome database, 236 short contigs took 0.24 s and
+38 contigs totalling 1.87 Mb took 0.4 s, i.e. a few milliseconds per contig on the server plus
+0.1-0.3 ms of local sketching. The full column and JSON reference is in
+[`sylphd assembly`](../commands/assembly.md#per-contig-mode).
 
 ## Sketching in the browser { #sketching-in-the-browser }
 
