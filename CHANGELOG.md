@@ -4,7 +4,7 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.2] - 2026-10-29
 
 ### Added
 
@@ -89,5 +89,6 @@ server with a sketching client: the database is loaded once and shared, clients 
   for Linux x86_64 and aarch64, CPython 3.14, so a production server can install without a Rust
   toolchain.
 
+[0.1.2]: https://github.com/Abrinca/sylphd/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Abrinca/sylphd/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Abrinca/sylphd/releases/tag/v0.1.0

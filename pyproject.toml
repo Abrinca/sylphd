@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sylphd"
-version = "0.1.1"
+version = "0.1.2"
 description = "A long-running sylph server with a sketching client, for shared database and profiling."
 readme = "README.md"
 requires-python = ">=3.14"
