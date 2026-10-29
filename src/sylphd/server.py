@@ -37,6 +37,7 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.formparsers import MultiPartException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -663,6 +664,22 @@ def _metadata_columns(metadata: MetadataDB | None) -> tuple[str, ...]:
     return tuple(metadata.field_columns) if metadata is not None else ()
 
 
+def _too_many_contigs(limit: int) -> str:
+    return (
+        "too many contigs in one request; send at most "
+        f"{limit} contigs per POST /contigs (one 'sketch' part each; the "
+        "server's limits.max_contigs in GET /info) and batch the rest "
+        "yourself, or use 'sylphd assembly --per-contig', which batches by "
+        "that limit"
+    )
+
+
+def _is_too_many_files(message: str) -> bool:
+    # Starlette stops at the first file beyond ``max_files``, so the count in
+    # its message is that limit, not the number of parts the request carried.
+    return message.startswith("Too many files")
+
+
 async def _read_contigs(
     request: Request,
 ) -> tuple[
@@ -679,10 +696,9 @@ async def _read_contigs(
     limit = state.max_contigs
     try:
         async with request.form(
-            # One more than the limit, so the explicit check below gives a
-            # clear message; only a client that ignores it hits Starlette's
-            # "too many files" error (whose count a request must not control).
-            max_files=limit + 1,
+            # Exactly the limit: the parser raises on the (N+1)th file part,
+            # so N+1 uploads are not spooled to disk before the 400 below.
+            max_files=limit,
             max_fields=16,
             max_part_size=MAX_PARAMS_BYTES,
         ) as form:
@@ -700,14 +716,7 @@ async def _read_contigs(
             if not sketches:
                 return _error("no 'sketch' part in the request", 400)
             if len(sketches) > limit:
-                return _error(
-                    f"too many contigs in one request ({len(sketches)} > {limit}); "
-                    f"send at most {limit} sketches per POST /contigs (the "
-                    "server's limits.max_contigs in GET /info) and batch the "
-                    "rest yourself, or use 'sylphd assembly --per-contig', which "
-                    "batches by that limit",
-                    400,
-                )
+                return _error(_too_many_contigs(limit), 400)
             for part in sketches:
                 if not isinstance(part, UploadFile):
                     return _error("'sketch' parts must be file uploads", 400)
@@ -740,7 +749,17 @@ async def _read_contigs(
                 payloads,
             )
     except StarletteHTTPException as error:
+        if _is_too_many_files(str(error.detail)):
+            return _error(_too_many_contigs(limit), 400)
         return _error(str(error.detail), error.status_code)
+    except MultiPartException as error:
+        # Starlette re-raises this as a 400 HTTPException when the app is in
+        # the scope; translating it here too keeps the message independent of
+        # that. Other multipart errors (bad boundary, oversized part) keep
+        # their own message.
+        if _is_too_many_files(error.message):
+            return _error(_too_many_contigs(limit), 400)
+        return _error(error.message, 400)
 
 
 async def _handle(request: Request, mode: str) -> JSONResponse:

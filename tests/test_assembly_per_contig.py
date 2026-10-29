@@ -21,6 +21,7 @@ the phage first.
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 import math
@@ -36,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import dnaio
+import httpx
 import pysylph
 import pytest
 from conftest import CLODF13_FASTA
@@ -1567,12 +1569,74 @@ def test_max_contigs_is_advertised_and_enforced(ani_data: AniData) -> None:
         assert too_many.status_code == 400
         error = too_many.json()["error"]
         assert "too many contigs" in error
-        assert "3 > 2" in error
+        assert "at most 2 contigs" in error
         assert "limits.max_contigs" in error
 
         accepted = _post_contigs(client, payloads[:2], {"contigs": specs[:2]})
         assert accepted.status_code == 200
         assert len(accepted.json()["contigs"]) == 2
+
+
+def test_max_contigs_stops_parsing_before_the_rest_is_spooled(
+    ani_data: AniData,
+) -> None:
+    """The parser stops at the (N+1)th file part instead of reading the body.
+
+    The body is streamed lazily and far larger than the limit; if the parser
+    kept going (as it did with ``max_files=limit + 1`` until the explicit
+    check), every upload would be written to a temporary file. Counting the
+    chunks the app pulls shows it stops right after the first refused part.
+    """
+    boundary = "----sylphdcontigstest"
+
+    def part(index: int) -> bytes:
+        return (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="sketch"; '
+            f'filename="c{index}.sylsp"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode() + b"x\r\n"
+
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="params"\r\n\r\n{}\r\n'
+    ).encode()
+    body += b"".join(part(index) for index in range(300))
+    body += f"--{boundary}--\r\n".encode()
+
+    chunk_size = 256
+    total_chunks = math.ceil(len(body) / chunk_size)
+    pulled = 0
+
+    async def chunks():
+        nonlocal pulled
+        for start in range(0, len(body), chunk_size):
+            pulled += 1
+            yield body[start : start + chunk_size]
+
+    async def post():
+        app = create_app(ServerConfig(db_path=ani_data.database, max_contigs=2))
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as client:
+            return await client.post(
+                "/contigs",
+                content=chunks(),
+                headers={
+                    "content-type": f"multipart/form-data; boundary={boundary}"
+                },
+            )
+
+    response = asyncio.run(post())
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert "too many contigs" in error
+    assert "at most 2 contigs" in error
+    assert "limits.max_contigs" in error
+    # Two accepted parts fit in a couple of chunks; the remaining ~300 parts
+    # were never read.
+    assert 0 < pulled < total_chunks // 10, (pulled, total_chunks)
 
 
 def test_floor_contigs_never_reach_the_profiler(

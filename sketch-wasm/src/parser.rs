@@ -94,8 +94,22 @@ impl RecordParser {
             if self.partial.is_empty() {
                 self.on_line(line, emit)?;
             } else {
-                // `on_line` needs `&mut self`, so move the buffer out meanwhile
+                // `on_line` needs `&mut self`, so move the buffer out meanwhile.
+                // Check the combined length before extending: `on_line` would
+                // see the limit only after the buffer had already grown, and a
+                // line split across many chunks could pass it by more than a
+                // chunk.
                 let mut joined = std::mem::take(&mut self.partial);
+                // `on_line` strips one trailing CR, so ignore it here too (the
+                // CR of a split CRLF may sit in `partial` or in `line`).
+                let trailing_cr =
+                    usize::from(line.last().or_else(|| joined.last()) == Some(&b'\r'));
+                if self.max_sequence > 0
+                    && joined.len() + line.len() - trailing_cr > self.max_sequence
+                {
+                    self.partial = joined;
+                    return self.too_long("a line");
+                }
                 joined.extend_from_slice(line);
                 let result = self.on_line(&joined, emit);
                 joined.clear();
@@ -314,5 +328,51 @@ mod tests {
                 ("b".to_string(), "TT".to_string())
             ]
         );
+    }
+
+    #[test]
+    fn a_line_split_across_chunks_cannot_outgrow_the_limit() {
+        // Two chunks complete the carry buffer, the third chunk closes the
+        // line: the join must be refused before the buffer grows past the
+        // limit (otherwise the whole 15-byte line would be assembled first).
+        let mut parser = RecordParser::new().with_max_sequence(10);
+        let mut feeds = 0;
+        let mut feed_error = None;
+        for chunk in b"AAAAAAAAAAAAAAA\n".chunks(5) {
+            match parser.feed(chunk, &mut |_, _| {}) {
+                Ok(()) => {
+                    feeds += 1;
+                    assert!(parser.partial.len() <= 10);
+                }
+                Err(message) => {
+                    feed_error = Some(message);
+                    break;
+                }
+            }
+        }
+        assert_eq!(feeds, 2);
+        assert_eq!(
+            parser.partial.len(),
+            10,
+            "the buffer must not exceed the limit"
+        );
+        let error = feed_error.expect("the joined line must be refused");
+        assert!(error.contains("per-record limit"), "{error}");
+        assert!(parser.partial.len() <= 10);
+
+        // A line of exactly the limit, split across chunks, is still accepted.
+        let mut parser = RecordParser::new().with_max_sequence(11);
+        let mut records = Vec::new();
+        for chunk in b">abcdefghij\nACGT\n".chunks(2) {
+            parser
+                .feed(chunk, &mut |seq, header| {
+                    records.push((record_name(header), seq.to_vec()))
+                })
+                .unwrap();
+        }
+        parser
+            .finish(&mut |seq, header| records.push((record_name(header), seq.to_vec())))
+            .unwrap();
+        assert_eq!(records, vec![("abcdefghij".to_string(), b"ACGT".to_vec())]);
     }
 }

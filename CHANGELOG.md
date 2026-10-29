@@ -262,7 +262,10 @@ All notable changes to `sylphd` are documented here. The format follows
 
 - **`POST /contigs` is work-bounded.** `serve --max-contigs N` (default 4096) caps the contigs of
   one request with a `400` that names the limit; `/info` advertises it as `limits.max_contigs`,
-  which the CLI and the web page already use as their batch size. A whole request is one job and a
+  which the CLI and the web page already use as their batch size. The multipart parser itself is
+  configured with `max_files=N`, so the `(N+1)`th `sketch` part is refused before it is spooled to
+  a temporary file (Starlette's "too many files" error becomes the same friendly `400`); the rest
+  of the body is not read. A whole request is one job and a
   contig costs ~0.6 s on a server with plain databases, so a public instance should run
   `--max-contigs 100` (now the example policy in `deploy/`): ~40 minutes of a job slot from one
   ~5 MB upload becomes about a minute. A sketch below the sample k-mer floor (10) is answered as
@@ -282,7 +285,9 @@ All notable changes to `sylphd` are documented here. The format follows
 - **The browser per-contig path is bounded.** Record names are made unique only for the contigs
   actually sent (the `counts`/`used` bookkeeping no longer grows with every record), the wasm
   sketcher refuses more than 1,000,000 records or a single record longer than 50 Mbp with a
-  message pointing to `sylphd assembly --per-contig` (checked while parsing, before buffers grow).
+  message pointing to `sylphd assembly --per-contig` (checked while parsing, before buffers grow;
+  a line split across chunks is measured joined before its carry buffer is extended, so it cannot
+  briefly outgrow the limit either).
 - **`deploy/setup-server.sh` validates and escapes what it writes.** Database file names (and
   `SYLPH_META`) are restricted to `[A-Za-z0-9._+-]+`, not starting with `.` or `-`; empty aliases
   and multi-line lists are refused; `SYLPH_HTTP_MAX` must be a size. Every value in a systemd
