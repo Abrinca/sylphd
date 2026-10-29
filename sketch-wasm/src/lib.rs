@@ -9,6 +9,7 @@
 //! const sylsp = s.finish("sample");   // Uint8Array, a .sylsp file
 //! ```
 
+pub mod contig;
 pub mod gzip;
 pub mod parser;
 pub mod seeding;
@@ -17,6 +18,7 @@ pub mod stream;
 
 use wasm_bindgen::prelude::*;
 
+use contig::{ContigRecord, ContigSketcher};
 use seeding::Seeding;
 use stream::StreamSketcher;
 
@@ -165,6 +167,170 @@ impl WasmSketcher {
 /// Largest accepted `chunk_size` (keeps `chunk + chunk / 4` far from overflow).
 const MAX_CHUNK: usize = 256 << 20;
 
+/// Per-contig sketcher: every record of a FASTA/FASTQ file (plain or gzip)
+/// as its own sample, plus its genome-style k-mer count.
+///
+/// ```js
+/// const s = new WasmContigSketcher(200, 31, 20000);   // c, k, min_length
+/// s.push(chunk);                    // decompressed text, any chunking
+/// for (const rec of s.drain()) {     // finished records, in file order
+///   rec.index; rec.name; rec.length; rec.gcCount; rec.contigKmers; rec.sketch;
+/// }
+/// s.end_file();                     // still drain: the last record may finish here
+/// ```
+/// gzip input via `push_gz` (multi-member like `WasmSketcher.push_gz`).
+///
+/// Each record object has `index` (1-based), `name` (first word of the header,
+/// possibly empty or repeated; the caller makes it unique if needed), `length`,
+/// `gcCount` (G+C bases, either case), `contigKmers` (genome-style count,
+/// `null` when the record was not sketched: empty or shorter than
+/// `min_length`) and `sketch` (a `Uint8Array` with the `.sylsp` bytes of the
+/// sample sketch, `null` when not sketched).
+///
+/// Records are produced one per `push`/`end_file` call at most per parser
+/// position, but `drain` gives all finished ones, so memory is bounded by the
+/// chunk size plus one record; the consumer should drain after every push.
+#[wasm_bindgen]
+pub struct WasmContigSketcher {
+    inner: ContigSketcher,
+}
+
+fn contig_record_to_js(record: ContigRecord) -> JsValue {
+    let obj = js_sys::Object::new();
+    let set = |key: &str, value: JsValue| {
+        // Object::new() never fails to accept a property
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(key), &value);
+    };
+    set("index", JsValue::from_f64(record.index as f64));
+    set("name", JsValue::from_str(&record.name));
+    set("length", JsValue::from_f64(record.length as f64));
+    set("gcCount", JsValue::from_f64(record.gc_count as f64));
+    set(
+        "contigKmers",
+        match record.contig_kmers {
+            Some(n) => JsValue::from_f64(n as f64),
+            None => JsValue::NULL,
+        },
+    );
+    set(
+        "sketch",
+        match record.sketch {
+            Some(bytes) => js_sys::Uint8Array::from(bytes.as_slice()).into(),
+            None => JsValue::NULL,
+        },
+    );
+    obj.into()
+}
+
+#[wasm_bindgen]
+impl WasmContigSketcher {
+    /// `min_length`: records shorter than this (or empty) are reported without
+    /// a sketch, like `--min-contig-length` (default 20000).
+    /// `min_spacing`: sylph's genome-sketch spacing (default 30).
+    /// `scalar_seeding`: as for `WasmSketcher`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        c: usize,
+        k: usize,
+        min_length: Option<f64>,
+        min_spacing: Option<usize>,
+        scalar_seeding: Option<bool>,
+    ) -> Result<WasmContigSketcher, JsError> {
+        let min_length = min_length.unwrap_or(20_000.0);
+        if !(min_length >= 0.0 && min_length.is_finite()) {
+            return Err(js_err(format!("invalid min_length: {min_length}")));
+        }
+        let seeding = if scalar_seeding.unwrap_or(false) {
+            Seeding::Scalar
+        } else {
+            Seeding::Avx2
+        };
+        Ok(Self {
+            inner: ContigSketcher::new(
+                c,
+                k,
+                min_length as u64,
+                min_spacing.unwrap_or(contig::DEFAULT_MIN_SPACING),
+                seeding,
+            )
+            .map_err(js_err)?,
+        })
+    }
+
+    /// Feeds single-end FASTQ/FASTA text (already decompressed), any chunking.
+    pub fn push(&mut self, data: &[u8]) -> Result<(), JsError> {
+        self.inner.push(data).map_err(js_err)
+    }
+
+    /// Like `push`, for raw chunks of a gzip file (multi-member files fine).
+    pub fn push_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
+        self.inner.push_gz(data).map_err(js_err)
+    }
+
+    /// Ends the current file: flushes the last record (drain afterwards).
+    pub fn end_file(&mut self) -> Result<(), JsError> {
+        self.inner.end_file().map_err(js_err)
+    }
+
+    /// Announces the end of the input: the same as `end_file`.
+    pub fn finish(&mut self) -> Result<(), JsError> {
+        self.inner.end_file().map_err(js_err)
+    }
+
+    /// All finished records (JS objects, see the type docs), oldest first.
+    pub fn drain(&mut self) -> js_sys::Array {
+        let out = js_sys::Array::new();
+        while let Some(record) = self.inner.take_next() {
+            out.push(&contig_record_to_js(record));
+        }
+        out
+    }
+
+    /// Next finished record as a JS object, or `null`.
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> JsValue {
+        match self.inner.take_next() {
+            Some(record) => contig_record_to_js(record),
+            None => JsValue::NULL,
+        }
+    }
+
+    /// Records seen so far (including not-yet-drained ones).
+    pub fn seen(&self) -> f64 {
+        self.inner.seen as f64
+    }
+
+    /// Records sketched so far.
+    pub fn sketched(&self) -> f64 {
+        self.inner.sketched as f64
+    }
+
+    /// Records skipped (empty or shorter than `min_length`) so far.
+    pub fn skipped(&self) -> f64 {
+        self.inner.skipped as f64
+    }
+
+    /// Bases seen so far.
+    pub fn bases(&self) -> f64 {
+        self.inner.bases as f64
+    }
+
+    /// Finished records not yet taken by `drain`/`next`.
+    pub fn pending(&self) -> f64 {
+        self.inner.pending() as f64
+    }
+}
+
+/// Streaming gzip decoder for the browser (multi-member / BGZF / plain gzip
+/// all behave the same; flate2 + zlib-rs inside).
+///
+/// ```js
+/// const gz = new WasmGunzip(2 << 20, 'deferred');   // output chunk size, CRC mode
+/// gz.push(compressedChunk);
+/// let out; while ((out = gz.pull()) !== undefined) post(out, gz.take_trailers());
+/// ...
+/// post(gz.finish(), gz.take_trailers());    // last partial chunk; throws if truncated
+/// ```
 #[wasm_bindgen]
 pub struct WasmGunzip {
     decoder: gzip::GzipDecoder,

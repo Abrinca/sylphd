@@ -19,11 +19,12 @@ pure-Rust `zlib-rs` backend, compiled to wasm. Details below.
 |---|---|
 | `src/seeding.rs` | k-mer hashing/seeding ported from sylph (scalar `fmh_seeds`, plus an emulation of sylph's x86_64 AVX2 path) |
 | `src/sketch.rs` | what pysylph's `Sketcher.sketch_single` / `sketch_paired` do: read dedup (exact set for single, scalable cuckoo filter for pairs), mean read length, bincode `SequencesSketch` writer |
-| `src/parser.rs` | streaming FASTQ/FASTA record parser (chunk-safe, CRLF, multi-line FASTA) |
+| `src/contig.rs` | per-contig mode: each FASTA/FASTQ record as its own sample sketch, plus its genome-style k-mer count (duplicate removal + 30 bp minimum spacing, as `Sketcher.sketch_genome`) |
+| `src/parser.rs` | streaming FASTQ/FASTA record parser (chunk-safe, CRLF, multi-line FASTA, header/name) |
 | `src/gzip.rs` | push/pull multi-member gzip decoder: own header/trailer/member loop around `flate2`'s raw inflate (`zlib-rs` backend), CRC32 inline, deferred or off |
 | `src/stream.rs` | single / two-stream paired / interleaved front end |
-| `src/lib.rs` | `wasm-bindgen` API (`WasmSketcher`, `WasmGunzip`, `WasmCrc`) |
-| `tests/` | native equality tests against pysylph, node check of the wasm build, gzip tests, `browser_check.mjs` (`web/sketching.js` and its workers in Firefox/Chromium via playwright-core), `bench_gunzip.mjs`, `make_fixtures.py` |
+| `src/lib.rs` | `wasm-bindgen` API (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`) |
+| `tests/` | native equality tests against pysylph, node check of the wasm build, per-contig parity (`contigs_check.mjs`, `contigs_pipeline_check.mjs`), gzip tests, `browser_check.mjs` (`web/sketching.js` and its workers in Firefox/Chromium via playwright-core), `bench_gunzip.mjs`, `make_fixtures.py` |
 | `.cargo/config.toml` | builds wasm32 with `+simd128` |
 
 Ported code carries attribution comments with file and line numbers. Sources:
@@ -31,8 +32,9 @@ Ported code carries attribution comments with file and line numbers. Sources:
 `4b5c2beb05312d9da9006529b12ad24ec47f0914` (MrTomRod/sylph, `expose-library-api`, the revision
 pysylph pins) and [pysylph](https://github.com/althonos/pysylph) (MIT, Martin Larralde), branch
 `multi-db`. No dependency on the `sylph` crate (it pulls in needletail, zlib-ng, rayon, clap ...);
-dependencies are `wasm-bindgen`, `fxhash`, `memchr`, `scalable_cuckoo_filter` (+`rand`,
-`rand_xoshiro`), `flate2` (+`zlib-rs`). All build for `wasm32-unknown-unknown`.
+dependencies are `wasm-bindgen` (+`js-sys` for the per-contig record objects), `fxhash`, `memchr`,
+`scalable_cuckoo_filter` (+`rand`, `rand_xoshiro`), `flate2` (+`zlib-rs`). All build for
+`wasm32-unknown-unknown`.
 
 ## Build and run
 
@@ -72,6 +74,46 @@ s.free();
 
 An optional 4th constructor argument `scalar_seeding` selects the non-AVX2 behaviour (see below).
 
+### Per-contig mode (`POST /contigs`)
+
+`WasmContigSketcher` streams a FASTA/FASTQ file record by record. For each
+record it emits the record's **sample** sketch (`.sylsp` bytes, exactly what the
+read sketcher produces for that one sequence) and its **genome-style** k-mer
+count (what `len(pysylph.Sketcher(c, k).sketch_genome(name, [seq]).kmers)`
+gives: selected c-subsampled hashes with duplicates removed and a greedy 30 bp
+minimum spacing along the sequence). That count is the denominator of the
+contig-relative ANI on the server, see `docs/reference/http-api.md` and
+`scratch/per-contig-ani/FINDINGS.md`.
+
+```js
+// wasm API: poll the finished records after every push
+const s = new WasmContigSketcher(200, 31, 20000);  // c, k, min_length
+s.push(decompressedChunk);                          // or s.push_gz(gzipChunk)
+for (const rec of s.drain()) {
+  // rec = { index, name, length, gcCount, contigKmers, sketch }
+}
+s.end_file();                                       // the last FASTA/FASTQ record finishes here
+for (const rec of s.drain()) { /* ... */ }
+
+// browser API (web/sketching.js): the same through the two-worker pipeline
+const run = SylphdSketch.sketchContigs(file, { c, k, minLength: 20000 }, (contig) => {
+  // contig = { index, name, headerName, length, gcCount, gc, contigKmers, sketch }
+});
+const stats = await run.done;  // records, sketched, skipped, bases, chunks, ...
+```
+
+`name` there is the first word of the header made unique (`contig`, `contig_2`,
+...; an empty header id becomes `contig-<index>`) exactly like
+`unique_contig_name`; the sketch's inner `file_name` keeps the raw header name,
+which nothing reads (the request names come from `params`). `contigKmers` and
+`sketch` are `null` for an empty record or one shorter than `minLength` (the
+`--min-contig-length` behaviour), while `length`/`gcCount` are always reported.
+Records are delivered as they finish and the chunk credits are only returned
+after the main thread has consumed the batch, so memory stays bounded by the
+largest record plus a few chunks (assemblies with millions of contigs work; the
+caller must not accumulate the records).
+
+
 ## Equality with pysylph
 
 `cargo test --release` (from `sketch-wasm/`) sketches the inputs with this crate natively
@@ -105,6 +147,30 @@ corrupt/truncated gzip and a few malformed inputs.
 The sketches also pass `sylphd.sketchcheck` and `SampleSketch.from_bytes`, and the live server
 profiles them.
 
+### Per-contig parity
+
+`cargo test` also has unit tests for the genome-style count against a naive
+reference implementation in `src/contig.rs` (every k-mer window, canonical
+hash, duplicate removal, greedy spacing), for the AVX2 position trimming and for
+the streaming record split. `tests/test_web_contigs_js.py` (in the repository's
+`tests/`, run with `uv run pytest tests/test_web_contigs_js.py`) then compares
+the **built wasm** record by record with pysylph and with the CLI reference
+`sylphd.sketching.sketch_contigs`:
+
+| case | |
+|---|---|
+| random 3 kb, a block repeated twice, N runs, lower case, 10 bp, 20 bp, exactly k, a 4.8 kb tandem repeat | c=200 k=31 and c=50 k=21; chunk sizes 997/4093 so records are split at arbitrary bytes |
+| a FASTQ file and a wrapped (multi-line) FASTA, 13/17-byte chunks | first-word names |
+| the same file as a two-member gzip, through `WasmContigSketcher.push_gz` | |
+| `scratch/taxonomy/phase4a/lambda.fasta` (48.5 kb, 212 genome-style k-mers) | when the file is present |
+| a multi-record FASTA with duplicate and empty header ids, 2.2 Mbp record, gzipped | through `sketchContigs` and the real workers (node worker threads), checking batching, ack/backpressure and unique names/gc |
+
+`contigKmers` is identical to `len(Sketcher.sketch_genome(...).kmers)` for every
+record, and the sample sketch bytes are identical after sorting the k-mer
+entries (the wasm always writes them sorted). Tandem repeats give
+`contigKmers == 0` (every k-mer repeated); the sample sketch is still produced.
+
+
 ### Differences and things to know
 
 * **Seeding differs between sylph builds.** `sketch::extract_markers` uses an AVX2 implementation
@@ -122,6 +188,13 @@ profiles them.
 * Mate pairing is by record order, as in `sketch_paired`; read names are not compared.
 * Only 4-line FASTQ (like dnaio); FASTA may be multi-line. Every record is a "read", FASTA contigs
   included (this is what `sketch_single` does with an assembly).
+* Per-contig mode uses the same seeding choice for the sample sketch and the genome-style count
+  (both go through sylph's `..._positions` functions, which drop the same AVX2 tail), a fixed
+  `min_spacing` of 30 (constructor argument, matching `Sketcher`), and skips records that are empty
+  or shorter than `min_length` exactly like `sketch_contigs`. A tandem repeat therefore reports
+  `contigKmers == 0` while its sample sketch is still produced; `POST /contigs` refuses such a
+  contig, which is what the CLI does too. The serialized inner `file_name` is the raw header name,
+  not the unique request name (`sketchContigs` puts that into the request `params`).
 
 ## Design: two-worker pipeline
 
@@ -143,6 +216,10 @@ main thread ── File handles ──> decompress worker(s) ── ~2 MB chunks
   chunks of 75 bp and 150 bp mates hold different numbers of records), so at most about one
   chunk of unmatched mates (a few MB) is queued.
   Simple and correct: same sketch bytes as native, 3 workers in total.
+* **Per-contig mode** (`sketchContigs`): the same decompress worker and a single port. The sketch
+  worker posts the records it finished as a batch and returns that chunk's credit only when the
+  main thread *acks* the batch, so at most the 4 in-flight chunks' records are queued; the main
+  thread hands each record to `onContig` and drops it.
 * **CRC32** of the gzip members (integrity of the input) costs ~15 % of the gunzip time, and gunzip
   is the bottleneck stage. So it is *deferred*: the decompress worker only records
   `(end offset, crc, isize)` per member and sends them with the chunk the member ended in; the
@@ -219,7 +296,9 @@ Memory: peak RSS of the biggest Chromium process was ~0.8-1.1 GB in the previous
 (it includes the browser's stream buffers and file cache). Not re-measured for the pipeline;
 what we control is small: 8 MB of chunks in flight and the ~40 MB sketcher heap.
 
-`.wasm` = **142 KB** (with simd128, zlib-rs; no `wasm-opt` run), glue JS 26 KB.
+`.wasm` = **164 KB** (with simd128, zlib-rs, per-contig mode; no `wasm-opt` run), glue JS 34 KB.
+The per-contig API adds ~24 KB: it is the only part that builds JS objects (`js-sys`
+`Object`/`Reflect`/`Uint8Array`) for the records, which was 142 KB before it.
 
 BYOB reads into wasm memory (item 4 of the iteration) were skipped: the read stage costs 0.6 s in
 total and overlaps with gunzip, and what it could save is the one memcpy of the compressed
@@ -270,5 +349,8 @@ next to the **Assembly** mode.
   FASTA or a file, with the G/C count (`WasmSketcher.gc()`) for the GC% of the summary,
   and sends `application/vnd.sylph.sketch` to `POST /assembly`. Verified identical to the server
   sketching the same FASTA (hits, assignment, closest, records, length, GC).
+* The per-contig pipeline (`SylphdSketch.sketchContigs`, `POST /contigs`) is available but not
+  wired into the page yet; `tests/test_web_contigs_js.py` covers it end to end (through the real
+  workers on node worker threads).
 * Still open: Safari, `wasm-opt` in CI, keeping the equality tests (`cargo test`, needs the sylphd
-  venv) in CI, a time/size warning for files over a few GB.
+  venv) in CI, a time/size warning for files over a few GB, the per-contig UI.

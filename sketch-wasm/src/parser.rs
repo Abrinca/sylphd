@@ -3,14 +3,18 @@
 //! Bytes arrive in arbitrary chunks (a record, or even a CRLF pair, may be
 //! split across two chunks). The parser is a line state machine: complete
 //! lines are handled straight from the chunk, an incomplete trailing line is
-//! carried over in `partial`. Only the sequence of the current record is
-//! copied; qualities are skipped (their length is checked).
+//! carried over in `partial`. Only the header and the sequence of the current
+//! record are copied; qualities are skipped (their length is checked).
 //!
 //! The format is detected from the first non-empty line (`@` = FASTQ,
 //! `>` = FASTA). FASTQ is the usual 4-line layout; FASTA sequences may span
 //! several lines. Both accept `\n` and `\r\n` line ends and blank lines
 //! between records. Every record, including one with an empty sequence, is
 //! passed to the callback, as `dnaio` (what sylphd uses to feed pysylph) does.
+//!
+//! The callback receives the sequence and the header line (with its leading
+//! `@` / `>` and a trailing CR, which is what `dnaio`'s `record.id` is derived
+//! from); the read sketchers only use the sequence.
 
 use memchr::memchr;
 
@@ -33,6 +37,8 @@ pub struct RecordParser {
     format: Format,
     partial: Vec<u8>,
     seq: Vec<u8>,
+    /// Header line of the current record, marker included (`@`/`>`).
+    header: Vec<u8>,
     /// FASTA: a header has been seen and its record has not been emitted yet.
     pending: bool,
     line: u64,
@@ -50,14 +56,19 @@ impl RecordParser {
             format: Format::Unknown,
             partial: Vec::new(),
             seq: Vec::new(),
+            header: Vec::new(),
             pending: false,
             line: 0,
         }
     }
 
-    /// Feeds one chunk; `emit` is called with the sequence of every record
-    /// completed by it.
-    pub fn feed(&mut self, mut data: &[u8], emit: &mut dyn FnMut(&[u8])) -> Result<(), String> {
+    /// Feeds one chunk; `emit` is called with `(sequence, header)` for every
+    /// record completed by it.
+    pub fn feed(
+        &mut self,
+        mut data: &[u8],
+        emit: &mut dyn FnMut(&[u8], &[u8]),
+    ) -> Result<(), String> {
         while let Some(pos) = memchr(b'\n', data) {
             let (line, rest) = (&data[..pos], &data[pos + 1..]);
             if self.partial.is_empty() {
@@ -79,13 +90,13 @@ impl RecordParser {
 
     /// Ends the current file: handles a last line without newline, emits a
     /// pending FASTA record and resets the parser for a following file.
-    pub fn finish(&mut self, emit: &mut dyn FnMut(&[u8])) -> Result<(), String> {
+    pub fn finish(&mut self, emit: &mut dyn FnMut(&[u8], &[u8])) -> Result<(), String> {
         let result = self.finish_inner(emit);
         *self = Self::new();
         result
     }
 
-    fn finish_inner(&mut self, emit: &mut dyn FnMut(&[u8])) -> Result<(), String> {
+    fn finish_inner(&mut self, emit: &mut dyn FnMut(&[u8], &[u8])) -> Result<(), String> {
         if !self.partial.is_empty() {
             let last = std::mem::take(&mut self.partial);
             self.on_line(&last, emit)?;
@@ -98,26 +109,30 @@ impl RecordParser {
             )),
             Format::Fasta => {
                 if self.pending {
-                    emit(&self.seq);
+                    emit(&self.seq, &self.header);
                 }
                 Ok(())
             }
         }
     }
 
-    fn on_line(&mut self, line: &[u8], emit: &mut dyn FnMut(&[u8])) -> Result<(), String> {
+    fn on_line(&mut self, line: &[u8], emit: &mut dyn FnMut(&[u8], &[u8])) -> Result<(), String> {
         self.line += 1;
         let line = line.strip_suffix(b"\r").unwrap_or(line);
         match self.format {
             Format::Unknown => match line.first() {
                 None => Ok(()),
                 Some(b'@') => {
+                    self.header.clear();
+                    self.header.extend_from_slice(line);
                     self.format = Format::Fastq(FastqState::Seq);
                     Ok(())
                 }
                 Some(b'>') => {
                     self.format = Format::Fasta;
                     self.pending = true;
+                    self.header.clear();
+                    self.header.extend_from_slice(line);
                     self.seq.clear();
                     Ok(())
                 }
@@ -131,6 +146,8 @@ impl RecordParser {
                     if line.is_empty() {
                         Ok(())
                     } else if line[0] == b'@' {
+                        self.header.clear();
+                        self.header.extend_from_slice(line);
                         self.format = Format::Fastq(FastqState::Seq);
                         Ok(())
                     } else {
@@ -163,7 +180,7 @@ impl RecordParser {
                             self.seq.len()
                         ));
                     }
-                    emit(&self.seq);
+                    emit(&self.seq, &self.header);
                     self.format = Format::Fastq(FastqState::Header);
                     Ok(())
                 }
@@ -171,8 +188,10 @@ impl RecordParser {
             Format::Fasta => {
                 if line.first() == Some(&b'>') {
                     if self.pending {
-                        emit(&self.seq);
+                        emit(&self.seq, &self.header);
                     }
+                    self.header.clear();
+                    self.header.extend_from_slice(line);
                     self.seq.clear();
                     self.pending = true;
                 } else if line.is_empty() || line[0] == b';' {
@@ -185,5 +204,82 @@ impl RecordParser {
                 Ok(())
             }
         }
+    }
+}
+
+/// The record name as `dnaio` sees it: the header without its leading `@` /
+/// `>` marker up to the first whitespace (so `>c1 some description` gives
+/// `c1`). Empty when the header has no name. Invalid UTF-8 becomes U+FFFD.
+pub fn record_name(header: &[u8]) -> String {
+    let header = header
+        .strip_prefix(b">")
+        .or_else(|| header.strip_prefix(b"@"))
+        .unwrap_or(header);
+    let end = header
+        .iter()
+        .position(|b| b.is_ascii_whitespace())
+        .unwrap_or(header.len());
+    String::from_utf8_lossy(&header[..end]).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(data: &[u8], chunk: usize) -> Vec<(String, String)> {
+        let mut parser = RecordParser::new();
+        let mut out = Vec::new();
+        for piece in data.chunks(chunk) {
+            parser
+                .feed(piece, &mut |seq, header| {
+                    out.push((
+                        record_name(header),
+                        String::from_utf8_lossy(seq).into_owned(),
+                    ))
+                })
+                .unwrap();
+        }
+        parser
+            .finish(&mut |seq, header| {
+                out.push((
+                    record_name(header),
+                    String::from_utf8_lossy(seq).into_owned(),
+                ))
+            })
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn names_and_sequences_any_chunking() {
+        let fasta = b">c1 description here\nACGT\nAC\n\n>c2\tx\nTT\n>c3\n";
+        let expected = vec![
+            ("c1".to_string(), "ACGTAC".to_string()),
+            ("c2".to_string(), "TT".to_string()),
+            ("c3".to_string(), "".to_string()),
+        ];
+        for chunk in [1, 2, 3, 7, 4096] {
+            assert_eq!(parse(fasta, chunk), expected, "chunk {chunk}");
+        }
+        let fastq = b"@r1/1 x\nACGT\n+\nIIII\n@r2\nTT\n+\nII\n";
+        let expected = vec![
+            ("r1/1".to_string(), "ACGT".to_string()),
+            ("r2".to_string(), "TT".to_string()),
+        ];
+        for chunk in [1, 3, 5, 4096] {
+            assert_eq!(parse(fastq, chunk), expected, "chunk {chunk}");
+        }
+    }
+
+    #[test]
+    fn crlf_and_missing_final_newline() {
+        let data = b">a\r\nACGT\r\n>b\r\nTT";
+        assert_eq!(
+            parse(data, 2),
+            vec![
+                ("a".to_string(), "ACGT".to_string()),
+                ("b".to_string(), "TT".to_string())
+            ]
+        );
     }
 }

@@ -117,6 +117,109 @@
 
   const isSylsp = (file) => /\.sylsp$/i.test(file.name || '');
 
+  // A sample name for one contig, unique within the request: repeated header
+  // ids get `_2`, `_3`, ... like sylphd's `unique_contig_name`; a record with
+  // no id is `contig-<index>`. `counts` (Map) and `used` (Set) are the
+  // bookkeeping of one file.
+  function uniqueContigName(raw, counts, used, index) {
+    const base = raw || `contig-${index}`;
+    let count = (counts.get(base) || 0) + 1;
+    let name = count === 1 ? base : `${base}_${count}`;
+    while (used.has(name)) {
+      count += 1;
+      name = `${base}_${count}`;
+    }
+    counts.set(base, count);
+    used.add(name);
+    return name;
+  }
+
+  // One sample sketch per record of a FASTA/FASTQ file (plain or gzip), for
+  // POST /contigs: records are streamed to `onContig` as they finish, so memory
+  // stays bounded by the largest record (plus the chunks in flight).
+  //
+  //   const run = sketchContigs(file, { c, k, minLength: 20000 }, (contig) => {
+  //     // contig = { index, name, headerName, length, gcCount, gc, contigKmers, sketch }
+  //   });
+  //   const stats = await run.done;   // records, sketched, skipped, bases, ...
+  //
+  // `name` is unique (see uniqueContigName); `sketch` is the .sylsp bytes of the
+  // record's sample sketch and `contigKmers` the record's genome-style k-mer
+  // count, both null for an empty record or one shorter than `minLength`.
+  // `gc` is the GC percent (two decimals), `gcCount` the number of G/C bases.
+  // Returns { done, cancel() }; cancelling rejects `done` with an AbortError.
+  // The caller must not hold on to the records (a large assembly does not fit
+  // in memory) and should send or aggregate them as they arrive.
+  function sketchContigs(file, { c, k, minLength = 20000, minSpacing, onProgress = () => {} } = {}, onContig = () => {}) {
+    let kill = () => {};
+    let cancelled = false;
+    const counts = new Map();
+    const used = new Set();
+    const done = new Promise((resolve, reject) => {
+      (async () => {
+        const module = await loadModule();
+        if (cancelled) return reject(abortError());
+        const sketchWorker = new Worker('sketch-worker.js', { type: 'module' });
+        const decompressor = new Worker('decompress-worker.js', { type: 'module' });
+        const workers = [sketchWorker, decompressor];
+        const channel = new MessageChannel();
+        let settled = false;
+        const terminate = () => workers.forEach((w) => w.terminate());
+        kill = () => { if (!settled) { settled = true; terminate(); reject(abortError()); } };
+        const fail = (message) => { if (settled) return; settled = true; terminate(); reject(new Error(workerMessage(message))); };
+        const state = { streams: [{ read: 0, decompressed: 0, finished: false }], sketch: {}, contigs: 0 };
+        sketchWorker.onmessage = ({ data }) => {
+          if (settled) return;
+          if (data.type === 'progress') {
+            state.sketch = data;
+            if (data.wasmMemory > MEM_ABORT) {
+              fail('The browser ran out of memory while sketching (memory limit of 4 GB reached). This input is too diverse or too large for in-browser sketching; use the sylphd command line instead.');
+            } else onProgress(state);
+          } else if (data.type === 'contigs') {
+            try {
+              for (const record of data.records) {
+                const name = uniqueContigName(record.name, counts, used, record.index);
+                state.contigs++;
+                onContig({
+                  index: record.index,
+                  name,
+                  headerName: record.name,
+                  length: record.length,
+                  gcCount: record.gcCount,
+                  gc: record.length ? Number(((100 * record.gcCount) / record.length).toFixed(2)) : 0,
+                  contigKmers: record.contigKmers,
+                  sketch: record.sketch,
+                });
+              }
+            } catch (error) {
+              return fail(String(error && error.message ? error.message : error));
+            }
+            if (data.ack) sketchWorker.postMessage({ type: 'ack', ack: data.ack });
+            onProgress(state);
+          } else if (data.type === 'done') {
+            settled = true; terminate();
+            resolve({ ...data.stats, contigs: state.contigs });
+          } else if (data.type === 'error') fail(data.message);
+        };
+        decompressor.onmessage = ({ data }) => {
+          if (settled) return;
+          if (data.type === 'error') return fail(data.message);
+          state.streams[0] = { ...data, finished: data.type === 'finished' };
+          onProgress(state);
+        };
+        decompressor.onerror = (e) => fail(`decompress worker: ${e.message || 'failed to start'}`);
+        sketchWorker.onerror = (e) => fail(`sketch worker: ${e.message || 'failed to start'}`);
+        decompressor.postMessage(
+          { module, port: channel.port1, files: [file], stream: 0, chunkSize: CHUNK, credits: CREDITS, crc: 'deferred', engine: 'wasm' },
+          [channel.port1]);
+        sketchWorker.postMessage(
+          { module, port: channel.port2, mode: 'contigs', c, k, minLength, minSpacing },
+          [channel.port2]);
+      })().catch(reject);
+    });
+    return { done, cancel: () => { cancelled = true; kill(); } };
+  }
+
   // Header of a ready-made sketch (.sylsp = bincode of sylph's SequencesSketch; same layout as
   // src/sylphd/sketchcheck.py): u64 n, n x (u64 kmer, u32 count), u64 c, u64 k, String file_name,
   // Option<String> sample_name, u8 paired, f64 mean_read_length. Only the 8 bytes at the start and the
@@ -176,5 +279,5 @@
     return null;
   }
 
-  window.SylphdSketch = { unsupported, loadModule, start, isSylsp, readSylspHeader, sketchProblem };
+  window.SylphdSketch = { unsupported, loadModule, start, sketchContigs, uniqueContigName, isSylsp, readSylspHeader, sketchProblem };
 })();

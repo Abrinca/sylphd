@@ -145,28 +145,30 @@ impl StreamSketcher {
         match stream {
             Stream::Single => {
                 let builder = &mut self.builder;
-                self.parser1.feed(data, &mut |seq| builder.add_single(seq))
+                self.parser1
+                    .feed(data, &mut |seq, _header| builder.add_single(seq))
             }
             Stream::R1 => {
                 let queue = &mut self.queue1;
                 self.parser1
-                    .feed(data, &mut |seq| queue.push_back(seq.to_vec()))?;
+                    .feed(data, &mut |seq, _header| queue.push_back(seq.to_vec()))?;
                 self.drain_pairs();
                 Ok(())
             }
             Stream::R2 => {
                 let queue = &mut self.queue2;
                 self.parser2
-                    .feed(data, &mut |seq| queue.push_back(seq.to_vec()))?;
+                    .feed(data, &mut |seq, _header| queue.push_back(seq.to_vec()))?;
                 self.drain_pairs();
                 Ok(())
             }
             Stream::Interleaved => {
                 let (builder, held) = (&mut self.builder, &mut self.held);
-                self.parser1.feed(data, &mut |seq| match held.take() {
-                    Some(first) => builder.add_pair(&first, seq),
-                    None => *held = Some(seq.to_vec()),
-                })
+                self.parser1
+                    .feed(data, &mut |seq, _header| match held.take() {
+                        Some(first) => builder.add_pair(&first, seq),
+                        None => *held = Some(seq.to_vec()),
+                    })
             }
         }
     }
@@ -196,15 +198,16 @@ impl StreamSketcher {
             Mode::Unset => Ok(()),
             Mode::Single => {
                 let builder = &mut self.builder;
-                self.parser1.finish(&mut |seq| builder.add_single(seq))
+                self.parser1
+                    .finish(&mut |seq, _header| builder.add_single(seq))
             }
             Mode::TwoStream => {
                 let queue = &mut self.queue1;
                 self.parser1
-                    .finish(&mut |seq| queue.push_back(seq.to_vec()))?;
+                    .finish(&mut |seq, _header| queue.push_back(seq.to_vec()))?;
                 let queue = &mut self.queue2;
                 self.parser2
-                    .finish(&mut |seq| queue.push_back(seq.to_vec()))?;
+                    .finish(&mut |seq, _header| queue.push_back(seq.to_vec()))?;
                 self.drain_pairs();
                 if self.queue1.len() != self.queue2.len() {
                     return Err(format!(
@@ -216,7 +219,7 @@ impl StreamSketcher {
             }
             Mode::Interleaved => {
                 let (builder, held) = (&mut self.builder, &mut self.held);
-                self.parser1.finish(&mut |seq| match held.take() {
+                self.parser1.finish(&mut |seq, _header| match held.take() {
                     Some(first) => builder.add_pair(&first, seq),
                     None => *held = Some(seq.to_vec()),
                 })?;

@@ -208,8 +208,10 @@ pub struct SketchBuilder {
     scratch2: Vec<u64>,
 }
 
-fn count_gc(seq: &[u8]) -> u64 {
-    seq.iter().filter(|b| matches!(b, b'G' | b'C' | b'g' | b'c')).count() as u64
+pub(crate) fn count_gc(seq: &[u8]) -> u64 {
+    seq.iter()
+        .filter(|b| matches!(b, b'G' | b'C' | b'g' | b'c'))
+        .count() as u64
 }
 
 impl SketchBuilder {

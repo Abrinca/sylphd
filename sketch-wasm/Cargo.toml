@@ -18,6 +18,7 @@ zlib-rs = { version = "0.6", default-features = false, features = ["std"] }
 rand = { version = "0.8", default-features = false }
 rand_xoshiro = "0.6"
 scalable_cuckoo_filter = "0.2"
+js-sys = "0.3"
 # `ScalableCuckooFilterBuilder::new()` calls `rand::thread_rng()`, which needs
 # a `getrandom` backend on wasm32-unknown-unknown. We replace that RNG with a
 # seeded one right away, so a custom (non-random) backend is registered in
