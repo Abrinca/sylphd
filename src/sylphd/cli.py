@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from . import per_contig
+from . import per_contig_client
 from .about import About, check_name
 from .assembly import gtdb_species, hit_lineage, species_caveat
 from .cli_parser import PROG, build_parser
@@ -804,7 +804,7 @@ def _assignment_summary(result: dict[str, Any]) -> str:
 
 
 def _cmd_assembly_per_contig(args: argparse.Namespace, path: Path) -> int:
-    """Validate the per-contig options and hand the workflow to ``per_contig``."""
+    """Validate the per-contig options and hand the workflow to ``per_contig_client``."""
     if not args.local_sketch:
         _print_error(
             "--per-contig always sketches locally; --no-local-sketch cannot be used with it"
@@ -818,31 +818,39 @@ def _cmd_assembly_per_contig(args: argparse.Namespace, path: Path) -> int:
         return 2
 
     min_length = (
-        per_contig.DEFAULT_MIN_LENGTH
+        per_contig_client.DEFAULT_MIN_LENGTH
         if args.min_contig_length is None
         else args.min_contig_length
     )
     _check_output_file(args.output)
     with _client_from_args(args) as client:
         info = client.info()
+        if "/contigs" not in (info.get("endpoints") or ()):
+            # The classification runs on the server now; say so instead of
+            # letting the first POST fail with a bare 404.
+            raise ClientError(
+                "--per-contig needs a server that offers POST /contigs; this one "
+                "does not (GET /info lists its endpoints). Upgrade the server, or "
+                "run `sylphd assembly` without --per-contig."
+            )
         metadata = info.get("metadata")
-        options = per_contig.PerContigOptions(
-            top=args.top if args.top is not None else per_contig.DEFAULT_TOP,
+        options = per_contig_client.PerContigOptions(
+            top=args.top if args.top is not None else per_contig_client.DEFAULT_TOP,
             min_ani=args.min_ani,
             min_length=min_length,
             fields=tuple(_resolve_fields(args.fields, metadata) or ()),
             consensus_ratio=(
-                per_contig.DEFAULT_CONSENSUS_RATIO
+                per_contig_client.DEFAULT_CONSENSUS_RATIO
                 if args.consensus_ratio is None
                 else args.consensus_ratio
             ),
             consensus_z=(
-                per_contig.DEFAULT_CONSENSUS_Z
+                per_contig_client.DEFAULT_CONSENSUS_Z
                 if args.consensus_z is None
                 else args.consensus_z
             ),
         )
-        result = per_contig.run(client, path, options, info=info)
+        result = per_contig_client.run(client, path, options, info=info)
 
     if args.json:
         with _open_output(args.output) as output:

@@ -12,9 +12,10 @@ authentication; see the [security notes](security.md).
 | `/query` | POST | ANI hits of uploaded sketches |
 | `/profile` | POST | taxonomic profile of uploaded sketches |
 | `/assembly` | POST | closest genomes of one assembly, sent as a sketch (always) or as raw sequence (only with `--allow-sequences`) |
+| `/contigs` | POST | one classified result per contig of a fragmented assembly (contig-relative ANI, hits, consensus) |
 
 `/health` and `/info` are always served. The abuse limits (`--rate-limit`, `--max-queue`) apply to
-the three POST endpoints only. With `curl` over a Unix socket:
+the four POST endpoints only. With `curl` over a Unix socket:
 
 ```bash
 curl --unix-socket "$XDG_RUNTIME_DIR/sylphd.sock" http://localhost/info
@@ -61,9 +62,10 @@ Reports:
   `markdown`. The web page renders a safe subset (marked + DOMPurify, never HTML), see
   [Describing your instance](../guides/public-server.md#describing-your-instance). Clients must
   treat `text` as untrusted;
-- `limits`: `max_jobs`, `max_upload_mb`, `max_sketches`, `allow_sequences`, `max_sequence_mb`
-  (`null` unless sequences are allowed), `rate_limit` (`{"count", "window_seconds"}` or `null`) and
-  `max_queue` (`null` means unlimited);
+- `limits`: `max_jobs`, `max_upload_mb`, `max_sketches`, `max_params_bytes` (the largest non-file
+  form field, i.e. how large the JSON `params` of one request may grow), `allow_sequences`,
+  `max_sequence_mb` (`null` unless sequences are allowed), `rate_limit` (`{"count",
+  "window_seconds"}` or `null`) and `max_queue` (`null` means unlimited);
 - `endpoints`: the endpoint paths this server serves.
 
 ## `POST /query` and `POST /profile` { #post-query-and-post-profile }
@@ -305,16 +307,115 @@ species boundary case) gets the lineage relation, for example `same genus`, plus
 source for now; the `note` above says so where it is a heuristic, and `--per-contig` and the `tax`
 profile print the same caveat once on stderr.
 
+## `POST /contigs` { #post-contigs }
+
+Classifies the contigs of one **fragmented assembly**: one result per contig with the
+contig-relative ANI of its hits, the species assignment, and the taxonomic consensus. This is what
+`sylphd assembly FILE --per-contig` uses; the ANI, the ranking, the classification and the consensus
+are computed on the server, so every client gets the same answer.
+
+The body is `multipart/form-data`:
+
+- one **`sketch`** file part per contig: the contig sketched as a single-end sample with the
+  database's `c` and `k` (exactly the bytes `POST /query` takes, a `.sylsp` file's contents);
+- a **`params`** field with a JSON object:
+
+```json
+{"contigs": [{"name": "contig1", "contig_kmers": 84, "length": 20000, "gc": 51.2}],
+ "top": 1, "min_ani": 80.0, "consensus_ratio": 1.5, "consensus_z": 2.0,
+ "fields": [], "tax_sources": null}
+```
+
+| `params` key | Meaning |
+|---|---|
+| `contigs` | required, one object per `sketch` part in the same order: `name` (a valid sample name, unique in the request), `contig_kmers`, `length`, `gc` |
+| `contig_kmers` | the record's **genome-style k-mer count**, a positive integer no larger than `length - k + 1`. It is the denominator of the contig-relative ANI: sketch the record with `pysylph.Sketcher(c, k).sketch_genome(...)` and count its k-mers. It is *not* the sketch's k-mer count (a sample sketch keeps duplicates and skips the minimum-spacing filter) |
+| `length`, `gc` | the record's length in bases (1 to 1e13) and GC percent (0-100); informational, echoed in the result and used for the per-request summary |
+| `top` | hits per contig, 1-50 (default `1`) |
+| `min_ani` | minimum **contig-relative** ANI in percent, 70-100 (default `80`); a contig whose best hit is below it is `no_hit` |
+| `consensus_ratio` | the close-band ratio `R` of the consensus rule, `>= 1` (default `1.5`) |
+| `consensus_z` | the noise allowance `Z` of the consensus rule, `>= 0` (default `2`) |
+| `fields` | metadata columns added flat to every hit; omitted means all, `[]` means none; needs a metadata database |
+| `tax_sources` | like `/query`: resolve hits against these taxonomy sources only |
+
+Unknown keys are a 400. Every contig is one job (one sample), so `--max-queue` and `--rate-limit`
+see one request with as many jobs as it has sketches, and each sketch is validated like a `/query`
+sketch (`k` must match, `c` must not be sparser than the database's). The whole request is refused
+with a 400 if any entry is invalid (a count that does not match the sketch parts, a `contig_kmers`
+no sequence of that length can have, a duplicate name, ...).
+
+The response carries one result per contig, in request order, plus a summary of the request:
+
+```json
+{"contigs": [{"name": "contig1", "length": 20000, "gc": 51.2,
+              "sketch_kmers": 95, "contig_kmers": 84,
+              "status": "ok", "hits": [{"rank": 1, "ani": 99.12,
+                  "shared_kmers": 78, "contig_kmers": 84, "explained_fraction": 0.9286,
+                  "reference_ani": 96.16, "reference_containment": [78, 8413],
+                  "relation": "same species", "shared_rank": "species",
+                  "ani_species_level": true, "genome_file": "...", "accession": "GCA_...",
+                  "gtdb_species": "...", "taxon": "...", "...": "..."}],
+              "assignment": {"rank": "species", "taxon": "...", "accession": "...", "ani": 99.12},
+              "closest": {"...": "..."},
+              "consensus": {"rank": "family", "taxon": "Enterobacteriaceae",
+                            "n_close": 2, "species": ["...", "..."]}}],
+ "summary": {"contigs": 1, "bp": 20000, "queried_contigs": 1, "queried_bp": 20000,
+             "too_few_kmers_contigs": 0, "too_few_kmers_bp": 0, "no_hit_contigs": 0,
+             "consensus_bp": [{"rank": "family", "taxon": "Enterobacteriaceae",
+                               "bp": 20000, "fraction": 1.0}]},
+ "caveats": [], "database": {"name": "...", "genomes": 199937, "c": 200, "k": 31},
+ "params": {"top": 1, "min_ani": 80.0, "consensus_ratio": 1.5, "consensus_z": 2.0, "fields": []},
+ "thresholds": {"species": 95.0, "imprecise_below": 85.0},
+ "elapsed_ms": 12.5}
+```
+
+- **`status`** is `ok` (hits), `no_hit` (queried, nothing above `min_ani`) or `too_few_kmers` (the
+  sketch holds fewer k-mers than sylph's floor of 10; such a contig is not queried, and `reason`
+  says so).
+- **`ani`** is the contig-relative ANI, `100 * (shared / contig_kmers) ** (1/k)`, **not** sylph's
+  `Naive_ANI`. `shared_kmers` is `Containment_ind[0]` (reference k-mers found in the contig),
+  `explained_fraction` is `shared / contig_kmers` (clamped at 1), `reference_ani` is sylph's
+  genome-denominator `Naive_ANI` in percent, and `reference_containment` is
+  `[shared, reference k-mers]`. An exact fragment scores exactly 100 %.
+- **Ranking.** Hits are ordered by the contig-relative ANI (equivalently by `shared`, the
+  likelihood order). Hits within the consensus close band of the best hit (the same rule the
+  consensus uses: `100 - ani <= R * (100 - ani_best) + Z * sqrt(sd_best^2 + sd^2)`) **and** with
+  `explained_fraction >= 0.95` are statistically indistinguishable on the contig side and
+  near-completely contained, so among them the reference with the fewest k-mers comes first — that
+  is the highest `reference_ani`, the most parsimonious explanation of the contig. A public
+  assembly that carries a contaminant contig (a lambda prophage in a bacterial genome, say)
+  contains every k-mer of the contig, exactly like the much smaller true source; only the genome
+  size separates them. The saturation condition keeps the rule to containment: at `k=31`,
+  `explained_fraction = 0.95` is already ~99.83 % ANI, so a >= 95 % assignment can never be moved
+  below the species threshold. Everything else keeps the evidence order.
+- **`consensus`** is the lowest common rank of the species whose divergence is inside that band
+  (the best hit included), or `null` without hits. `rank`/`taxon` are `null` when a close lineage
+  is missing or when the close set spans two taxonomy sources; the latter also sets
+  `mixed_sources: true`. Hits that merely *contain* the contig in a far larger genome are **not**
+  dropped from the consensus, so a phage contig whose close set spans UHGV and GTDB genomes stays
+  `mixed_sources`. The full rule, with `n_close` and the species list, is in
+  [`sylphd assembly`](../commands/assembly.md#per-contig-consensus); `consensus` uses every hit of
+  the contig, whatever `top` and `min_ani` are.
+- **`assignment`/`closest`** have the shape of `POST /assembly`'s, computed from the ranked hits.
+- **`summary`** covers the contigs of this request only: `contigs`/`bp` of everything sent,
+  `queried_contigs`/`queried_bp` of those actually queried, the `too_few_kmers_*` counters, and
+  `consensus_bp`: **every** consensus taxon with its bases and its share of the queried bases
+  (not truncated, so a client can merge the summaries of several requests and cut afterwards).
+- **`caveats`** lists the distinct species-threshold notes of the request (viruses, fungi, other
+  sources; see [`POST /assembly`](#post-assembly)).
+- `summary`, `caveats` and `database` are per request, so a client that splits a large assembly into
+  several requests adds the counters and merges `consensus_bp` by `(rank, taxon)`.
+
 ## Errors
 
 Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 
 | Status | When |
 |---|---|
-| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request; for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, or malformed or non-`ACGTN` raw sequence |
+| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request; for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, or malformed or non-`ACGTN` raw sequence; for `/contigs` a `contigs` list that does not match the sketch parts, a duplicate or unusable contig name, a `contig_kmers` that is not a positive integer or that no sequence of that `length` can have, or an out-of-range option |
 | `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted) |
 | `413` | the body exceeds `--max-upload-mb`, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
-| `415` | `/query` and `/profile` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |
+| `415` | `/query`, `/profile` and `/contigs` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |
 | `429` | rate limited (`--rate-limit`); with `Retry-After` in seconds |
 | `503` | the job queue is full (`--max-queue`), or the request has more samples than fit in it; nothing was run; with `Retry-After: 1` |
 | `500` | profiling failed inside the server |

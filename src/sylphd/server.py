@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from . import __version__
+from . import __version__, per_contig
 from .about import About
 from .assembly import INTERPRETATION_THRESHOLDS, SequenceError, SequenceTooLarge
 from .limits import (
@@ -59,6 +59,7 @@ from .profiling import (
     DatabaseSpec,
     run_assembly,
     run_assembly_sketch,
+    run_contig_query,
     run_sample,
 )
 from .protocol import ProfileParams, ProtocolError
@@ -68,6 +69,11 @@ log = logging.getLogger("uvicorn.error")
 
 #: Maximum number of sketches accepted in one request.
 MAX_SKETCHES = 4096
+
+#: Largest non-file form field (``params``) Starlette accepts in one request.
+#: ``/contigs`` repeats every contig name, length and k-mer count there, so the
+#: limit is advertised in ``/info`` for clients that budget their requests.
+MAX_PARAMS_BYTES = 1024 * 1024
 
 #: Accepted ``Content-Type`` values of a raw-sequence ``/assembly`` upload.
 SEQUENCE_CONTENT_TYPES = frozenset(
@@ -238,6 +244,7 @@ async def _info(request: Request) -> JSONResponse:
                 "max_jobs": state.max_jobs,
                 "max_upload_mb": state.max_upload_mb,
                 "max_sketches": MAX_SKETCHES,
+                "max_params_bytes": MAX_PARAMS_BYTES,
                 "allow_sequences": state.allow_sequences,
                 "max_sequence_mb": state.max_sequence_mb if state.allow_sequences else None,
                 "rate_limit": _rate_limit_dict(state.rate_limit),
@@ -249,7 +256,7 @@ async def _info(request: Request) -> JSONResponse:
 
 
 def _endpoints(state: Any) -> list[str]:
-    return ["/health", "/info", "/profile", "/query", "/assembly"]
+    return ["/health", "/info", "/profile", "/query", "/assembly", "/contigs"]
 
 
 def _rate_limit_dict(rate_limit: tuple[int, float] | None) -> dict[str, Any] | None:
@@ -449,6 +456,194 @@ def _query_float(
     return value
 
 
+async def _contigs(request: Request) -> JSONResponse:
+    """Classify every contig of one fragmented assembly.
+
+    The body is ``multipart/form-data``: one ``sketch`` part per contig (the
+    contig sketched as a single-end sample) and a ``params`` field holding each
+    contig's measurements and the options.  Every contig is one job; the
+    contig-relative ANI, ranking, classification and consensus are computed by
+    :mod:`sylphd.per_contig`, so every client gets the same answer.
+    """
+    state = request.app.state
+    content_type = request.headers.get("content-type", "")
+    if not content_type.lower().startswith("multipart/form-data"):
+        return _error(
+            "expected a multipart/form-data body with one 'sketch' part per contig",
+            415,
+        )
+
+    try:
+        state.jobs.check()
+    except QueueFullError:
+        return _busy()
+
+    upload = await _read_contigs(request)
+    if isinstance(upload, JSONResponse):
+        return upload
+    contigs, options, tax_sources, payloads = upload
+
+    start = time.perf_counter()
+    results: list[dict[str, Any] | None] = [None] * len(contigs)
+    try:
+        with state.jobs.admit(len(contigs)):
+            async with anyio.create_task_group() as task_group:
+                for index, (contig, payload) in enumerate(zip(contigs, payloads)):
+                    task_group.start_soon(
+                        _run_contig_slot,
+                        state,
+                        contig,
+                        payload,
+                        options,
+                        tax_sources,
+                        results,
+                        index,
+                    )
+    except QueueFullError:
+        return _busy()
+    except BadRequest as error:
+        return _error(str(error), 400)
+    except BaseExceptionGroup as group:
+        for error in group.exceptions:
+            if isinstance(error, BadRequest):
+                return _error(str(error), 400)
+        log.exception("contig profiling failed")
+        return _error("contig profiling failed", 500)
+    except Exception:  # pragma: no cover - defensive
+        log.exception("contig profiling failed")
+        return _error("contig profiling failed", 500)
+
+    elapsed_ms = round((time.perf_counter() - start) * 1000.0, 1)
+    contig_results = [result for result in results if result is not None]
+    database = state.database
+    return JSONResponse(
+        {
+            "contigs": contig_results,
+            "summary": per_contig.summarize(contig_results),
+            "caveats": per_contig.caveats(contig_results),
+            "database": {
+                "name": database.name,
+                "genomes": database.genomes,
+                "c": database.c,
+                "k": database.k,
+            },
+            "params": {
+                "top": options.top,
+                "min_ani": options.min_ani,
+                "consensus_ratio": options.consensus_ratio,
+                "consensus_z": options.consensus_z,
+                "fields": list(options.fields),
+            },
+            "thresholds": dict(INTERPRETATION_THRESHOLDS),
+            "elapsed_ms": elapsed_ms,
+        }
+    )
+
+
+async def _run_contig_slot(
+    state: Any,
+    contig: per_contig.ContigInput,
+    payload: bytes,
+    options: per_contig.ContigOptions,
+    tax_sources: Sequence[str] | None,
+    results: list[dict[str, Any] | None],
+    index: int,
+) -> None:
+    """Run one contig as one job, then score it (cheap, so outside the slot)."""
+    row_fields = per_contig.classification_fields(
+        options.fields, _metadata_columns(state.metadata)
+    )
+    async with state.jobs.slot():
+        query = await anyio.to_thread.run_sync(
+            run_contig_query,
+            state.database,
+            state.metadata,
+            contig.name,
+            payload,
+            per_contig.QUERY_PARAMS,
+            row_fields,
+            tax_sources,
+        )
+    results[index] = per_contig.contig_result(
+        contig,
+        sketch_kmers=int(query["sketch_kmers"]),
+        rows=query["rows"],
+        options=options,
+        k=state.database.k,
+    )
+
+
+def _metadata_columns(metadata: MetadataDB | None) -> tuple[str, ...]:
+    return tuple(metadata.field_columns) if metadata is not None else ()
+
+
+async def _read_contigs(
+    request: Request,
+) -> tuple[
+    tuple[per_contig.ContigInput, ...],
+    per_contig.ContigOptions,
+    Sequence[str] | None,
+    list[bytes],
+] | JSONResponse:
+    """Parse the ``/contigs`` form, or return the error response.
+
+    The form (and its temporary files) is closed before returning.
+    """
+    state = request.app.state
+    try:
+        async with request.form(
+            max_files=MAX_SKETCHES,
+            max_fields=16,
+            max_part_size=MAX_PARAMS_BYTES,
+        ) as form:
+            raw_params = form.get("params")
+            try:
+                params_data: Any = (
+                    {} if raw_params is None else json.loads(str(raw_params))
+                )
+            except json.JSONDecodeError as error:
+                return _error(f"invalid JSON in 'params': {error}", 400)
+            if not isinstance(params_data, dict):
+                return _error("'params' must be a JSON object", 400)
+
+            sketches = form.getlist("sketch")
+            if not sketches:
+                return _error("no 'sketch' part in the request", 400)
+            for part in sketches:
+                if not isinstance(part, UploadFile):
+                    return _error("'sketch' parts must be file uploads", 400)
+
+            try:
+                contigs, options = per_contig.parse_params(
+                    params_data, k=state.database.k, count=len(sketches)
+                )
+            except ProtocolError as error:
+                return _error(str(error), 400)
+
+            fields = _validate_fields(params_data.get("fields"), state.metadata)
+            if isinstance(fields, JSONResponse):
+                return fields
+            tax_sources = _validate_tax_sources(
+                params_data.get("tax_sources"), state.metadata
+            )
+            if isinstance(tax_sources, JSONResponse):
+                return tax_sources
+
+            try:
+                payloads = [await part.read() for part in sketches]
+            except Exception:
+                log.exception("failed to read an uploaded sketch part")
+                return _error("failed to read a 'sketch' part", 500)
+            return (
+                contigs,
+                replace(options, fields=tuple(fields or ())),
+                tax_sources,
+                payloads,
+            )
+    except StarletteHTTPException as error:
+        return _error(str(error.detail), error.status_code)
+
+
 async def _handle(request: Request, mode: str) -> JSONResponse:
     state = request.app.state
     content_type = request.headers.get("content-type", "")
@@ -516,7 +711,7 @@ async def _read_upload(
         async with request.form(
             max_files=MAX_SKETCHES,
             max_fields=16,
-            max_part_size=1024 * 1024,
+            max_part_size=MAX_PARAMS_BYTES,
         ) as form:
             raw_params = form.get("params")
             try:
@@ -719,6 +914,7 @@ def create_app(
         Route("/profile", _profile, methods=["POST"]),
         Route("/query", _query, methods=["POST"]),
         Route("/assembly", _assembly, methods=["POST"]),
+        Route("/contigs", _contigs, methods=["POST"]),
     ]
     app = Starlette(
         routes=routes,
@@ -750,7 +946,7 @@ def create_app(
         app.add_middleware(
             RateLimitMiddleware,
             limiter=RateLimiter(count, window),
-            paths=frozenset(("/profile", "/query", "/assembly")),
+            paths=frozenset(("/profile", "/query", "/assembly", "/contigs")),
             trusted=frozenset(config.trusted_proxies),
         )
     if config.cors_origins:

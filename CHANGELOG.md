@@ -189,9 +189,47 @@ All notable changes to `sylphd` are documented here. The format follows
   species-equivalent rank (GTDB species -> genus, a prefix-less vOTU -> its parent level). A close
   set spanning two taxonomy sources has no consensus (`mixed_sources: true` in JSON, empty
   `consensus_rank`/`consensus_taxon` in the table). The table adds a `taxon` column.
+- **`POST /contigs`**, a server endpoint that classifies every contig of a fragmented assembly in
+  one request. The body is one `sketch` part per contig plus a `params` object with, per contig,
+  `name`, `contig_kmers` (the record's genome-style k-mer count), `length` and `gc`, and the
+  options `top`, `min_ani`, `consensus_ratio`, `consensus_z`, `fields` and `tax_sources`. It
+  returns one result per contig (`status` `ok`/`no_hit`/`too_few_kmers`, `hits`, `assignment`,
+  `closest`, `consensus`) and a per-request `summary` (bases per consensus taxon, not truncated so
+  a client can merge requests), the distinct `caveats` and `elapsed_ms`. The whole computation
+  (contig-relative ANI, ANI noise, ranking, classification, consensus) now lives on the server in
+  `sylphd/per_contig.py`, and the CLI's half in `sylphd/per_contig_client.py`. Inputs are checked
+  before anything runs — one `contigs` entry per sketch part, unique valid names, positive
+  `contig_kmers` no larger than `length - k + 1`, `length` <= 1e13, `gc` 0-100, `top` 1-50,
+  `min_ani` 70-100, `consensus_ratio` >= 1, `consensus_z` >= 0 — and bad input is a `400`. Each
+  contig is one job, so `--max-queue` and `--rate-limit` count it like a `/query` sample. `/info`
+  lists `/contigs` in `endpoints`, and `limits.max_params_bytes` (1 MiB, the form-part limit) so a
+  client can budget the JSON `params`, which repeats every contig name. See the
+  [HTTP API](../reference/http-api.md#post-contigs).
+- **Parsimony ranking inside the ANI noise band.** Among the hits that are statistically
+  indistinguishable on the contig side — the same close band the consensus uses,
+  `d <= R * d_best + Z * sqrt(sd_best^2 + sd^2)` — **and** that explain at least 95 % of the contig
+  (`explained_fraction >= 0.95`, `PARSIMONY_MIN_EXPLAINED`), the reference with the fewest k-mers
+  is listed first (the highest `reference_ani`). The saturation condition keeps the rule to
+  containment: at k=31 `explained_fraction = 0.95` is already ~99.83 % ANI, so a >= 95 %
+  assignment can never be moved below the species threshold, and a 97 % hit is not displaced by a
+  smaller reference at 95 %. Everything else keeps the evidence order. `shared`
+  saturates at `contig_kmers` when a reference *contains* the contig, so a bacterial assembly that
+  carries a lambda contaminant contig used to outrank the true (far smaller) phage genome with
+  every k-mer of the contig accounted for. On the real lambda contig of the phase-4a mock against
+  GTDB r232 + UHGV, `Lambdavirus` now comes first (`82/210` k-mers, `reference_ani` 97.0) instead
+  of the six lambda-carrying GTDB genomes at `83/10 271`. The consensus does **not** drop those
+  containing genomes: a close set that spans UHGV and GTDB stays `mixed_sources`.
 
 ### Changed
 
+- **`sylphd assembly --per-contig` now needs a server with `POST /contigs`** (this version or
+  newer; an older server answers `404`). The command still reads the file, sketches every record
+  and measures its genome-style k-mer count locally, but the contig-relative ANI, the ranking, the
+  classification and the consensus are computed on the server, and the per-request summaries are
+  added up instead of re-sending every hit to the client. The table, the JSON document and the
+  stderr summary are unchanged except for the parsimony tie-break above, and a contig whose genome
+  sketch is empty (a tandem repeat, the ANI denominator would be zero) is now `no_hit` with a
+  `reason` and is not sent, because the endpoint requires a positive `contig_kmers`.
 - `sylphd serve` logs each database it loads (name, kind, genomes, `c`, `k`, load time) and the
   total load time, plus the `Profiler` construction time, on the `sylphd` logger at the
   `--log-level`; a differing `c` between databases is a warning. `ServerConfig` gains a

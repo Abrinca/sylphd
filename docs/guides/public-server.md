@@ -58,14 +58,15 @@ never logged: only sizes, timings and request outcomes appear in the server log.
 
 | Option | Default | Applies to | Meaning |
 |---|---|---|---|
-| `--max-jobs N` | `2` | `/profile`, `/query`, `/assembly` | profiling jobs running at once; further jobs queue. A job is one sample of a `/profile` or `/query` request, or one `/assembly` upload |
+| `--max-jobs N` | `2` | `/profile`, `/query`, `/assembly`, `/contigs` | profiling jobs running at once; further jobs queue. A job is one sample of a `/profile` or `/query` request, one `/assembly` upload, or one contig of a `/contigs` request |
 | `--max-upload-mb N` | `512` | all `POST`s | request body limit (413 above it) |
 | `--max-sequence-mb N` | `20` | raw `/assembly` | upload limit of a raw sequence before decompression; gzip bodies may decompress to 5× this. Sketch uploads use `--max-upload-mb` |
-| `--rate-limit N/min` | off | `/profile`, `/query`, `/assembly` | per-client limit (`N/min` or `N/s`); over the limit: `429` with `Retry-After` |
+| `--rate-limit N/min` | off | `/profile`, `/query`, `/assembly`, `/contigs` | per-client limit (`N/min` or `N/s`); over the limit: `429` with `Retry-After` |
 | `--max-queue N` | unlimited | the same | jobs (samples) allowed to wait for a job slot; beyond that `503` with `Retry-After: 1` |
 
 `/health` and `/info` are always served and never limited. At most 4096 sketches fit in one
-`/query` or `/profile` request; `/info` reports the cap as `max_sketches`.
+`/query`, `/profile` or `/contigs` request; `/info` reports the cap as `max_sketches` and, for
+`/contigs`, the largest JSON `params` part as `max_params_bytes`.
 
 `--max-queue` counts jobs, not HTTP requests, and a request is accepted or refused as a whole:
 if all its samples do not fit within `--max-jobs` + `--max-queue`, it gets a `503` before any

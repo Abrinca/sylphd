@@ -79,8 +79,9 @@ a taxonomic consensus of each contig. Instead of one species call for the whole 
 per contig, which is what a MAG contamination check needs: a 200 kbp contig from another species
 shows that species even when the rest of the assembly is one genome. The contigs are sketched
 locally and sent as a batch to
-[`POST /query`](../reference/http-api.md#post-query-and-post-profile) with `no_adjust`, so no
-server change is needed and the sequence never leaves the machine.
+[`POST /contigs`](../reference/http-api.md#post-contigs), which does the classification on the
+server; the sequence never leaves the machine. The endpoint is new, so `--per-contig` needs a
+server running this version of `sylphd` (`GET /info` lists `/contigs`).
 
 ```bash
 sylphd assembly mag.fasta --per-contig
@@ -108,7 +109,11 @@ five), which is the contamination signal. Duplicate record ids get a `_2`, `_3` 
 
 **The consensus is what you should read.** The top hit is not stable: in GTDB r232 the genomes
 nearest to *E. coli* K-12 belong to several near-identical placeholder species and genera, so which
-one wins changes with a k-mer or two. Per contig the command therefore keeps the best hit per
+one wins changes with a k-mer or two. Among near-completely contained hits (>= 95 % of the contig
+explained, i.e. >= ~99.83 % ANI) within the noise band, the ranking prefers the reference with the
+fewest k-mers (parsimony), which is what puts a phage genome ahead of the bacterial assemblies that
+merely carry a prophage copy of it; below that containment the evidence order and the consensus
+stand unchanged. Per contig the command therefore keeps the best hit per
 species and takes the lowest common rank of the ones whose divergence is within `1.5x` the best
 hit's plus `2` standard deviations of the ANI sampling noise (see
 [the rule](../commands/assembly.md#per-contig-consensus)). A near-exact, well-covered contig
@@ -129,8 +134,8 @@ MG1655 is `G047199095 sp047199095` in r232, not `Escherichia coli`. Add
 `--fields ncbi_organism_name` (or `all`, the default) for the NCBI name of each hit.
 
 **Short contigs and the screen.** Contigs shorter than `--min-contig-length` (20000 bp by default)
-are reported as `too_short` and not queried; a contig with fewer than sylph's 10 sketched k-mers is
-`no_hit` rather than a spurious match. At `c=200` a 20 kb contig has ~85 genome-style k-mers, which
+are reported as `too_short` and not queried; a contig with fewer than sylph's 10 sketched k-mers,
+or with an empty genome sketch (a tandem repeat), is `no_hit` rather than a spurious match. At `c=200` a 20 kb contig has ~85 genome-style k-mers, which
 gives roughly ±0.5 % ANI; at 10 kb (~43 k-mers) it is ~±1 % and only down to ~93 % ANI; below ~90 %
 ANI a short contig has too few shared k-mers to resolve anything below family. Two-stage `.syl2db`
 databases additionally drop some short contigs in their first-stage screen before any threshold
@@ -140,6 +145,14 @@ more of the 243 contigs of at least 2 kb were too small to sketch. `no_hit` ther
 means "no evidence", not "no relative": the screen may simply not have looked. Use a plain `.syldb`
 or longer contigs for short-contig work, and treat the ANI of a few-kbp contig as a hint, not as a
 species-level identification.
+
+**Prophages and contaminants.** A reference genome that carries a phage (or any contaminant) as an
+extra contig contains every k-mer of that phage, so containment alone cannot separate it from the
+phage genome; the parsimony rule above does, because the phage genome is orders of magnitude
+smaller. The other direction is deliberately not attempted: a contig that *is* a prophage region of
+a genome will still match the phage genome first when both are in the database, and the consensus
+says how far the evidence separates them (often `mixed_sources`, when a viral and a bacterial
+source both have close hits).
 
 Cost is per contig but small: against a 200 000-genome database, 236 short contigs took 0.24 s and
 38 contigs totalling 1.87 Mb took 0.4 s, i.e. a few milliseconds per contig on the server plus

@@ -307,6 +307,9 @@ are not re-argued:
 
 - `/assembly` and per-contig `assembly` query the pooled set, sort by ANI and keep `top`, so a hit
   list may mix databases. `/assembly` already adds every metadata column flat to each hit.
+  (Later: per-contig classification moved from the client to `POST /contigs`, which queries the
+  same pooled set and returns the contig-relative ANI, the ranking and the consensus; the client
+  only sketches, batches and merges. The multi-database behaviour described here is unchanged.)
 - With only GTDB metadata, a non-GTDB hit has no `gtdb_taxonomy`; `classify_hits` then labels it
   `unknown lineage`, or, if it is the *best* hit, drops to ANI-only labels for all hits
   (`assembly.py`). Acceptable for the first phases; B6 generalises it, and B3 supplies

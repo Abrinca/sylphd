@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 from .metadata import METADATA_COLUMNS, accession_from_genome_name
 
@@ -99,7 +100,7 @@ class ProfileParams:
     no_adjust: bool = False
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "ProfileParams":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> ProfileParams:
         if data is None:
             return cls()
         if not isinstance(data, Mapping):
@@ -127,9 +128,9 @@ class ProfileParams:
             seq_id=_optional_float(data, "seq_id", 0.0, 100.0),
             estimate_unknown=_optional_bool(data, "estimate_unknown", False),
             estimate_read_counts=_optional_bool(data, "estimate_read_counts", False),
-            min_number_kmers=_integer(data, "min_number_kmers", 10, minimum=0),
-            min_contain=_integer(data, "min_contain", 7, minimum=0),
-            screen_ani=_number(data, "screen_ani", 85.0, 0.0, 100.0),
+            min_number_kmers=integer_field(data, "min_number_kmers", 10, minimum=0),
+            min_contain=integer_field(data, "min_contain", 7, minimum=0),
+            screen_ani=number_field(data, "screen_ani", 85.0, 0.0, 100.0),
             no_adjust=_optional_bool(data, "no_adjust", False),
         )
 
@@ -201,6 +202,73 @@ def params_json_size(
     return len(params_json(mode, params, names, fields, tax_sources))
 
 
+def contigs_payload(
+    contigs: Sequence[Mapping[str, Any]],
+    *,
+    options: Mapping[str, Any] | None = None,
+    fields: Sequence[str] | None = None,
+    tax_sources: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """The JSON object sent as the ``params`` field of ``POST /contigs``.
+
+    ``contigs`` holds one object per ``sketch`` part, in the same order, with
+    ``name``, ``contig_kmers`` (the record's genome-style k-mer count, the
+    denominator of the contig-relative ANI), ``length`` and ``gc``.  ``options``
+    are the server-side options of the scoring and the reporting: ``top``,
+    ``min_ani``, ``consensus_ratio`` and ``consensus_z``.  ``fields`` and
+    ``tax_sources`` keep their meaning from ``/query``.
+    """
+    payload: dict[str, Any] = {"contigs": [dict(contig) for contig in contigs]}
+    if options is not None:
+        payload.update(options)
+    if fields is not None:
+        payload["fields"] = list(fields)
+    if tax_sources is not None:
+        payload["tax_sources"] = list(tax_sources)
+    return payload
+
+
+def contigs_json(
+    contigs: Sequence[Mapping[str, Any]],
+    *,
+    options: Mapping[str, Any] | None = None,
+    fields: Sequence[str] | None = None,
+    tax_sources: Sequence[str] | None = None,
+) -> str:
+    """The exact ``params`` value the client sends to ``POST /contigs``."""
+    return json.dumps(
+        contigs_payload(
+            contigs, options=options, fields=fields, tax_sources=tax_sources
+        )
+    )
+
+
+def contigs_json_size(
+    contigs: Sequence[Mapping[str, Any]],
+    *,
+    options: Mapping[str, Any] | None = None,
+    fields: Sequence[str] | None = None,
+    tax_sources: Sequence[str] | None = None,
+) -> int:
+    """Length of :func:`contigs_json` in characters (== UTF-8 bytes)."""
+    return len(
+        contigs_json(
+            contigs, options=options, fields=fields, tax_sources=tax_sources
+        )
+    )
+
+
+def contig_json_size(contig: Mapping[str, Any]) -> int:
+    """Characters one ``params.contigs`` entry adds to the JSON text.
+
+    ``json.dumps`` of the whole object uses the same separators and escaping
+    for the nested entry, so a caller can account for a growing list without
+    re-encoding it: the first entry adds this many characters plus ``", "`` for
+    every later one.
+    """
+    return len(json.dumps(dict(contig)))
+
+
 def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -224,7 +292,7 @@ def _finite_float(value: object, key: str, *, optional: bool = False) -> float:
     return number
 
 
-def _number(
+def number_field(
     data: Mapping[str, Any],
     key: str,
     default: float,
@@ -257,7 +325,7 @@ def _optional_float(
     return number
 
 
-def _integer(
+def integer_field(
     data: Mapping[str, Any],
     key: str,
     default: int,

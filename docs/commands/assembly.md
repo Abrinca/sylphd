@@ -57,10 +57,15 @@ the hit relations. Per-contig mode reports a *contig-relative* ANI instead (see
 ## Per-contig mode { #per-contig-mode }
 
 `--per-contig` reads the file record by record, sketches each record on its own with the server's
-`c` and `k` (from [`GET /info`](../reference/http-api.md#get-info)) and asks the server for its
-closest genomes. Each contig is one sample, so the ANI is *not* diluted by the rest of the
-assembly: a contaminating contig shows its own species, not the species of the whole file. The
-sequence still never leaves your machine.
+`c` and `k` (from [`GET /info`](../reference/http-api.md#get-info)) and sends the sketches to
+[`POST /contigs`](../reference/http-api.md#post-contigs), which returns one classified result per
+contig. Each contig is one sample, so the ANI is *not* diluted by the rest of the assembly: a
+contaminating contig shows its own species, not the species of the whole file. The sequence still
+never leaves your machine — only the sketches and a few numbers per record do.
+
+The endpoint is new; a server without it answers `404`, so `--per-contig` needs a server running
+this version of `sylphd` (or newer). `GET /info` lists `/contigs` in `endpoints` when it is
+available.
 
 ```bash
 sylphd assembly mag.fasta --per-contig
@@ -72,25 +77,28 @@ sylphd assembly mag.fasta --per-contig --min-contig-length 5000 --json -o contig
 
 sylph's `Naive_ANI` divides the shared k-mers by the **reference genome's** k-mer count. That is
 the right coverage-style number for a whole assembly, but not for a contig: an exact 20 kb
-fragment of a 5 Mb genome would report ~85 % ANI. Per-contig mode therefore computes, client-side,
+fragment of a 5 Mb genome would report ~85 % ANI. Per-contig mode therefore computes, on the
+server,
 
 ```text
 ani         = 100 * (shared / contig_kmers) ** (1 / k)
 explained   = shared / contig_kmers          (= (ani / 100) ** k)
 ```
 
-where `shared` is `Containment_ind[0]` from the server (the reference's k-mers found in the
-contig) and `contig_kmers` is a genome-style k-mer count of the contig itself, computed locally
-while streaming. An exact fragment scores exactly 100.00 %, and a contig at 97 % true ANI scores
-97 %. The 95 % species assignment and every `relation` use this value. `--min-ani` is applied to it
-**here**, not on the server: the query is sent with `minimum_ani=0` and `screen_ani=0` so that
-sylph's genome-denominator ANI cannot censor a short contig. The other query settings are
-`no_adjust`, `min_contain=3` (drops the one- or two-k-mer tail) and `min_number_kmers=10` (which
-applies to the reference genome). Hits are re-ranked by `shared` (equivalently by the contig ANI;
-`shared` is the likelihood order), not by sylph's `Naive_ANI`, and then cut to `--top`.
+where `shared` is `Containment_ind[0]` (the reference's k-mers found in the contig) and
+`contig_kmers` is a genome-style k-mer count of the contig itself, measured locally while
+streaming and sent with the sketch. An exact fragment scores exactly 100.00 %, and a contig at
+97 % true ANI scores 97 %. The 95 % species assignment and every `relation` use this value.
+`--min-ani` is applied to it, not to sylph's `Naive_ANI`: the query is sent with `minimum_ani=0`
+and `screen_ani=0` so that sylph's genome-denominator ANI cannot censor a short contig. The other
+query settings are `no_adjust`, `min_contain=3` (drops the one- or two-k-mer tail) and
+`min_number_kmers=10` (which applies to the reference genome). Hits are ranked by `shared`
+(equivalently by the contig ANI; `shared` is the likelihood order), not by sylph's `Naive_ANI`,
+and then cut to `--top`.
 
 The naive number is still reported as `reference_ani`, but it is a coverage-style value that
-depends on the reference's size; do not read it as the contig's ANI.
+depends on the reference's size; do not read it as the contig's ANI. Inside the noise band it is
+also the parsimony signal.
 
 Two small biases remain. The denominator assumes sylph's default `--min-spacing` of 30 (pysylph's
 `Sketcher` hard-codes it); a database built with another spacing shifts the ANI by roughly 0.1 %.
@@ -98,6 +106,34 @@ And `contig_kmers` is the contig's own genome sketch: on a repeat-rich contig it
 number of that contig's k-mers that survive in the *whole-genome* reference sketch, which biases
 the ANI down slightly (it is clamped at 100 %). Both are far smaller than the sampling noise at
 the default contig length.
+
+### Ranking inside the noise band { #per-contig-parsimony }
+
+`shared` saturates at `contig_kmers` whenever a reference *contains* the whole contig, and many
+public assemblies carry contaminant contigs: GTDB representatives with a lambda prophage hold
+every k-mer of a lambda contig, exactly like the (far smaller) phage genome itself. Containment
+cannot tell "this contig is a region of this genome" from "this genome happens to carry a copy of
+it", but the genome size can.
+
+So among the hits that are statistically indistinguishable **on the contig side** — the same close
+band the consensus uses (below) — *and* that explain at least 95 % of the contig
+(`explained_fraction >= 0.95`), the reference with the **fewest k-mers** is listed first: it is the
+most parsimonious explanation of the contig, and its `reference_ani` is the highest. The
+saturation condition is what keeps the rule honest: parsimony is only meaningful when the contig is
+(almost) completely contained, and at `k=31` a hit at `explained_fraction = 0.95` is already at
+~99.83 % ANI, so reordering can never move a >= 95 % assignment below the species threshold. Every
+other hit — outside the band, or inside it but not near-saturated — keeps the plain evidence
+order. Measured on the real lambda contig of
+`scratch/taxonomy/phase4a/mock-mixed.fasta` against GTDB r232 + UHGV, the viral hit
+(`82/210` k-mers, `reference_ani` 97.0) now comes first instead of the six lambda-carrying GTDB
+assemblies at `83/10 271` (`reference_ani` 85.6), so the contig is assigned to `Lambdavirus`
+rather than to *Andreesenia angusta*.
+
+Because only near-saturated hits are reordered, a 97 % ANI hit is never displaced by a smaller
+reference at 95 %: at that divergence only ~39 % of the contig is explained, and the evidence
+order stands. Measured on the mock MAG (`scratch/contigs-endpoint/`), rank-1 accessions and
+assignments are unchanged from before the rule except on near-completely contained contigs. Read
+the consensus, which uses every hit and is unaffected by the ordering.
 
 ### Columns and statuses
 
@@ -125,7 +161,9 @@ contig8 18000          61.20  no_hit
 - `n_close`, `consensus_rank` and `consensus_taxon` describe the whole contig (see
   [Taxonomic consensus](#per-contig-consensus)); they are the same on every row of a contig.
 - `status` is `ok`, `too_short` or `no_hit`. Use `--fields none` for this compact table, `--fields
-  all` (the default) for every metadata column, or name the columns you want.
+  all` (the default) for every metadata column, or name the columns you want. (`POST /contigs`
+  also knows `too_few_kmers`; the command reports such a contig as `no_hit` with a `reason`, as it
+  always has, because it skips it before sending.)
 
 ### Taxonomic consensus { #per-contig-consensus }
 
@@ -172,6 +210,10 @@ consensus    = lowest common rank of the GTDB lineages of the close species (bes
 6. Only lineages of **one source** are intersected. When the close set spans two taxonomy sources
    the consensus is empty (`consensus_rank`/`consensus_taxon` empty in the TSV) and the JSON
    consensus has `mixed_sources: true`: the ranks of two taxonomies are not the same yardstick.
+7. Hits that merely *contain* the contig in a far larger reference stay in the set: the consensus
+   says which taxa the evidence cannot separate, not which reference is the source. A phage contig
+   whose close set spans UHGV and GTDB genomes therefore keeps no consensus (`mixed_sources`), even
+   though [parsimony](#per-contig-parsimony) ranks the viral hit first.
 
 The consensus is not a claim that the contig is a member of that taxon: it is the deepest rank the
 close set agrees on. Below roughly **90-92 % ANI** there is little left to agree on — at 90 % ANI a
@@ -191,7 +233,9 @@ not detected: k-mer counts cannot tell them from a uniformly divergent contig.
   contigs are not sketched or sent; they are listed with `status` `too_short`.
 - A contig whose sample sketch holds fewer k-mers than sylph's `min_number_kmers` (10) is not sent
   either, because an ANI from a handful of k-mers is noise; it is `no_hit` with a `reason` in JSON.
-  A contig that was sent but has no hit above `--min-ani` is `no_hit` too.
+  So is a contig whose *genome* sketch is empty, which happens for a tandem repeat: every k-mer
+  occurs more than once, a genome sketch drops those, and the contig-relative ANI would divide by
+  zero. A contig that was sent but has no hit above `--min-ani` is `no_hit` too.
 - **`no_hit` is not proof that the database has no relative.** There are three ways to get one and
   the output cannot tell them apart: nothing passes `--min-ani`, the contig is too small for
   `min_number_kmers`, or — on a two-stage `.syl2db` database — the **first-stage screen never looked
@@ -222,15 +266,19 @@ not detected: k-mer counts cannot tell them from a uniformly divergent contig.
 
 ### Requests, classification and cost
 
-- **Requests are chunked.** Contigs are sent as batches to `POST /query`. The chunk size is the
-  smaller of the server's `limits.max_sketches` (4096) and `max_jobs + max_queue` when the server
-  caps its queue; it is also cut when the JSON `params` part (which repeats every contig name;
-  names may be up to 1024 characters) would exceed 900 KiB, and when the *measured* multipart body
-  would exceed `max_upload_mb`. A request that is still too large is split in half. Every chunk is
-  one POST and counts against `--rate-limit`.
-- **Classification** is identical to the single-assembly path, but with the contig-relative ANI:
-  the 95 % species assignment (`assignment`), the closest relative, and the
-  `relation`/`shared_rank` from the hit's lineage (generic, within one taxonomy source).
+- **Requests are chunked.** Contigs are sent as batches to `POST /contigs`, each with the
+  contig's genome-style k-mer count, length and GC content. The chunk size is the smaller of the
+  server's `limits.max_sketches` (4096) and `max_jobs + max_queue` when the server caps its queue;
+  it is also cut when the JSON `params` part (which repeats every contig name, length and k-mer
+  count; names may be up to 1024 characters) would exceed 90 % of `limits.max_params_bytes`
+  (900 KiB at most), and when the *measured* multipart body would exceed `max_upload_mb`. A
+  request that is still too large is split in half. Every chunk is one POST and counts against
+  `--rate-limit`. The per-request summaries are added up, so the output is the same however the
+  contigs were chunked.
+- **Classification** is identical to the single-assembly path, but with the contig-relative ANI,
+  and happens on the server with the same metadata: the 95 % species assignment (`assignment`),
+  the closest relative, and the `relation`/`shared_rank` from the hit's lineage (generic, within
+  one taxonomy source).
 - **`--top`** defaults to `1` here: one row per contig is what a contamination check needs, and the
   consensus already summarises the other hits. `--top N` lists up to N hits per contig, with the
   consensus columns repeated on each row. The consensus always uses every hit the server returns,

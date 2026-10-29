@@ -1,12 +1,22 @@
 """``sylphd assembly --per-contig``: one sketch, ANI and hit list per record.
 
-Most tests reuse the one-genome database of ``conftest.tiny_database`` (built
-from ``clodf13.fna.gz``) behind a real ``sylphd serve`` process; contigs are
-windows of that genome, so every long enough record has a hit.
+The classification lives on the server now (``POST /contigs``), so this file
+tests both halves: the endpoint (validation, admission, the response shape, the
+per-request summary) through ``TestClient``, and the command end to end through
+a real ``sylphd serve`` process.
+
+Most command tests reuse the one-genome database of ``conftest.tiny_database``
+(built from ``clodf13.fna.gz``); contigs are windows of that genome, so every
+long enough record has a hit.
 
 ``ani_data`` builds a small synthetic database from a 2 Mb random genome and a
 3 %-mutated variant.  It is what makes the contig-relative ANI checkable: an
 exact 30 kb fragment must score 100 % even though it is 1.5 % of the genome.
+
+``contaminant_data`` is the parsimony regression: a bacterial genome that
+carries a 20 kb phage segment as one of its contigs, plus the phage genome on
+its own.  The phage contig is contained in both, so only the ranking can put
+the phage first.
 """
 
 from __future__ import annotations
@@ -27,10 +37,12 @@ import dnaio
 import pysylph
 import pytest
 from conftest import CLODF13_FASTA
+from starlette.testclient import TestClient
 
-from sylphd import cli, per_contig
+from sylphd import cli, per_contig, per_contig_client
 from sylphd.client import SylphClient
-from sylphd.protocol import params_json_size
+from sylphd.protocol import contig_json_size, contigs_json_size
+from sylphd.server import ServerConfig, create_app
 from sylphd.sketching import unique_contig_name
 
 
@@ -305,7 +317,7 @@ def test_one_row_per_contig_and_statuses(server, fragmented, capsys) -> None:
         server,
     )
     header, rows, err = _rows(capsys)
-    assert header[: len(per_contig.COLUMNS)] == list(per_contig.COLUMNS)
+    assert header[: len(per_contig_client.COLUMNS)] == list(per_contig_client.COLUMNS)
     assert "gtdb_taxonomy" in header  # metadata fields follow the leading columns
 
     by_id = {row["contig"]: row for row in rows}
@@ -385,7 +397,12 @@ def test_tsv_header_is_stable(server, genome, tmp_path, capsys) -> None:
 
 
 def test_zero_genome_kmers_is_no_hit(server, tmp_path, capsys) -> None:
-    """A tandem repeat has a sample sketch but no genome-style k-mers: no ANI."""
+    """A tandem repeat has a sample sketch but no genome-style k-mers: no ANI.
+
+    Such a contig is not sent: ``contig_kmers`` is the denominator of the ANI,
+    so the endpoint requires it to be positive and the client reports the
+    contig itself.
+    """
     rng = random.Random(424242)
     unit = "".join(rng.choices("ACGT", k=5000))
     path = _write_fasta(tmp_path / "repeat.fa", [("repeat", unit * 4)])
@@ -402,9 +419,10 @@ def test_zero_genome_kmers_is_no_hit(server, tmp_path, capsys) -> None:
     )
     payload = json.loads(capsys.readouterr().out)
     (contig,) = payload["contigs"]
-    assert contig["sketch_kmers"] >= 10  # it was sent
+    assert contig["sketch_kmers"] >= 10  # it could have been sent
     assert contig["contig_kmers"] == 0  # every k-mer is a duplicate
     assert contig["status"] == "no_hit"
+    assert "no genome-style k-mers" in contig["reason"]
     assert contig["hits"] == []
     assert contig["consensus"] is None
 
@@ -498,23 +516,35 @@ def test_chunk_size_for() -> None:
         "max_jobs": 2,
         "max_queue": None,
     }
-    assert per_contig.chunk_size_for({"limits": limits}) == 4096
+    assert per_contig_client.chunk_size_for({"limits": limits}) == 4096
     limits["max_queue"] = 3
-    assert per_contig.chunk_size_for({"limits": limits}) == 5
+    assert per_contig_client.chunk_size_for({"limits": limits}) == 5
     limits.update(max_sketches=4, max_jobs=1, max_queue=0)
-    assert per_contig.chunk_size_for({"limits": limits}) == 1
-    assert per_contig.chunk_size_for({}) == 4096
+    assert per_contig_client.chunk_size_for({"limits": limits}) == 1
+    assert per_contig_client.chunk_size_for({}) == 4096
 
 
 def test_params_budget_counts_json_escapes() -> None:
     """The running params size is exact, including non-ASCII names."""
-    names = ["é" * 100, "plain", "x" * 1000]
-    batch = per_contig._Batch(per_contig.QUERY_PARAMS, ["gtdb_taxonomy"])
-    for name in names:
-        batch.add({"id": name}, b"")
-    assert batch.params_bytes == params_json_size(
-        "query", per_contig.QUERY_PARAMS, names, ["gtdb_taxonomy"]
-    )
+    specs = [
+        {"name": "é" * 100, "contig_kmers": 12, "length": 3000, "gc": 51.25},
+        {"name": "plain", "contig_kmers": 7, "length": 2000, "gc": 0.0},
+        {"name": "x" * 1000, "contig_kmers": 100, "length": 25_000, "gc": 49.5},
+    ]
+    batch = per_contig_client._Batch(("gtdb_taxonomy",))
+    for spec in specs:
+        batch.add({"id": spec["name"]}, spec, b"")
+    assert batch.params_bytes == contigs_json_size(specs, fields=("gtdb_taxonomy",))
+    assert per_contig_client.contig_json_size(specs[0]) == contig_json_size(specs[0])
+
+
+def test_params_budget_follows_the_server_limit() -> None:
+    """A server advertising a smaller params part gets smaller batches."""
+    assert per_contig_client.params_budget({}) == per_contig_client.DEFAULT_PARAMS_BUDGET
+    small = {"limits": {"max_params_bytes": 100 * 1024}}
+    assert per_contig_client.params_budget(small) == 90 * 1024
+    roomy = {"limits": {"max_params_bytes": 8 * 1024 * 1024}}
+    assert per_contig_client.params_budget(roomy) == per_contig_client.DEFAULT_PARAMS_BUDGET
 
 
 def test_requests_follow_the_servers_queue_limit(
@@ -522,13 +552,13 @@ def test_requests_follow_the_servers_queue_limit(
 ) -> None:
     """--max-jobs 1 --max-queue 1 means two contigs per POST, by real limits."""
     calls: list[list[str]] = []
-    original = SylphClient.query
+    original = SylphClient.contigs
 
     def counting(self, samples, **kwargs):
         calls.append([name for name, _ in samples])
         return original(self, samples, **kwargs)
 
-    monkeypatch.setattr(SylphClient, "query", counting)
+    monkeypatch.setattr(SylphClient, "contigs", counting)
     _run(
         "assembly",
         fragmented,
@@ -555,14 +585,16 @@ def test_long_names_split_chunks_below_the_params_limit(
     records = [(f"c{index}_" + "x" * 1000, genome) for index in range(1000)]
     path = _write_fasta(tmp_path / "long-names.fa", records)
 
-    batches: list[tuple[list[str], list[str] | None]] = []
-    original = SylphClient.query
+    batches: list[tuple[list[str], list[dict[str, object]], dict[str, object]]] = []
+    original = SylphClient.contigs
 
-    def counting(self, samples, *, params=None, fields=None):
-        batches.append(([name for name, _ in samples], fields))
-        return original(self, samples, params=params, fields=fields)
+    def counting(self, samples, *, contigs, options=None, **kwargs):
+        batches.append(
+            ([name for name, _ in samples], list(contigs), dict(options or {}))
+        )
+        return original(self, samples, contigs=contigs, options=options, **kwargs)
 
-    monkeypatch.setattr(SylphClient, "query", counting)
+    monkeypatch.setattr(SylphClient, "contigs", counting)
     _run(
         "assembly",
         path,
@@ -577,9 +609,10 @@ def test_long_names_split_chunks_below_the_params_limit(
     )
     rows = _rows(capsys)[1]
     assert len(batches) > 1
-    for names, fields in batches:
-        size = params_json_size("query", per_contig.QUERY_PARAMS, names, fields)
-        assert size <= per_contig.MAX_PARAMS_BYTES
+    for names, specs, options in batches:
+        assert names == [spec["name"] for spec in specs]
+        size = contigs_json_size(specs, options=options, fields=())
+        assert size <= per_contig_client.DEFAULT_PARAMS_BUDGET
     assert len(rows) == len(records)
     assert {row["status"] for row in rows} == {"ok"}
 
@@ -617,13 +650,13 @@ def test_upload_limited_server_splits_requests(
     path = _write_fasta(tmp_path / "many.fa", records)
 
     calls: list[list[str]] = []
-    original = SylphClient.query
+    original = SylphClient.contigs
 
     def counting(self, samples, **kwargs):
         calls.append([name for name, _ in samples])
         return original(self, samples, **kwargs)
 
-    monkeypatch.setattr(SylphClient, "query", counting)
+    monkeypatch.setattr(SylphClient, "contigs", counting)
     _run(
         "assembly",
         path,
@@ -799,17 +832,17 @@ def test_min_ani_never_changes_the_consensus() -> None:
         _query_row(85, accession="GCA_000000001.1", species="Bacillus subtilis"),
         _query_row(84, accession="GCA_000000002.1", species="Bacillus velezensis"),
     ]
-    loose = per_contig._contig_hits(
+    loose = per_contig.contig_hits(
         rows,
         k=31,
         contig_kmers=85,
-        options=per_contig.PerContigOptions(min_ani=80.0, top=2),
+        options=per_contig.ContigOptions(min_ani=80.0, top=2),
     )
-    strict = per_contig._contig_hits(
+    strict = per_contig.contig_hits(
         rows,
         k=31,
         contig_kmers=85,
-        options=per_contig.PerContigOptions(min_ani=100.0, top=2),
+        options=per_contig.ContigOptions(min_ani=100.0, top=2),
     )
     assert [hit["accession"] for hit in loose[0]] == [
         "GCA_000000001.1",
@@ -824,8 +857,8 @@ def test_min_ani_never_changes_the_consensus() -> None:
 
     # Nothing passes --min-ani: the contig has no hits and no consensus, even
     # though the complete set would have produced one.
-    below = per_contig._contig_hits(
-        rows[1:], k=31, contig_kmers=85, options=per_contig.PerContigOptions(min_ani=100.0)
+    below = per_contig.contig_hits(
+        rows[1:], k=31, contig_kmers=85, options=per_contig.ContigOptions(min_ani=100.0)
     )
     assert below == ([], None, None, None)
 
@@ -834,9 +867,9 @@ def test_exact_ties_are_canonical() -> None:
     """Equal evidence is ordered by accession, not by the backend's row order."""
     first = _query_row(50, accession="GCA_000000009.1", species="Bacillus subtilis")
     second = _query_row(50, accession="GCA_000000001.1", species="Bacillus velezensis")
-    options = per_contig.PerContigOptions(top=2)
-    forward = per_contig._contig_hits([first, second], k=31, contig_kmers=85, options=options)
-    reverse = per_contig._contig_hits([second, first], k=31, contig_kmers=85, options=options)
+    options = per_contig.ContigOptions(top=2)
+    forward = per_contig.contig_hits([first, second], k=31, contig_kmers=85, options=options)
+    reverse = per_contig.contig_hits([second, first], k=31, contig_kmers=85, options=options)
     assert [hit["accession"] for hit in forward[0]] == [
         "GCA_000000001.1",
         "GCA_000000009.1",
@@ -1106,8 +1139,8 @@ def test_contig_hits_classify_and_report_a_non_gtdb_hit() -> None:
             "Genome_file": "votus_full.fna.gz",
         }
     ]
-    hits, assignment, closest, summary = per_contig._contig_hits(
-        rows, k=31, contig_kmers=85, options=per_contig.PerContigOptions()
+    hits, assignment, closest, summary = per_contig.contig_hits(
+        rows, k=31, contig_kmers=85, options=per_contig.ContigOptions()
     )
     assert assignment is not None and closest is not None
     assert assignment["taxon"] == "vOTU-9"
@@ -1318,6 +1351,27 @@ def test_options_of_the_single_assembly_still_work(server, genome, tmp_path, cap
     assert capsys.readouterr().err == ""
 
 
+def test_per_contig_requires_the_server_endpoint(
+    server, genome, tmp_path, capsys, monkeypatch
+) -> None:
+    """An older server has no /contigs: say so instead of a bare 404."""
+    path = tmp_path / "one.fa"
+    path.write_text(">c\n" + genome + "\n")
+    original = SylphClient.info
+
+    def info(self):
+        document = original(self)
+        document["endpoints"] = [
+            endpoint for endpoint in document["endpoints"] if endpoint != "/contigs"
+        ]
+        return document
+
+    monkeypatch.setattr(SylphClient, "info", info)
+    assert cli.main(["assembly", str(path), "--per-contig", "--socket", str(server)]) == 1
+    err = capsys.readouterr().err
+    assert "POST /contigs" in err
+
+
 def test_per_contig_rejects_incompatible_options(genome, tmp_path, capsys) -> None:
     path = tmp_path / "one.fa"
     path.write_text(">c\n" + genome + "\n")
@@ -1375,3 +1429,493 @@ def test_unreadable_input_is_an_input_error(server, tmp_path, capsys) -> None:
     err = capsys.readouterr().err
     assert "cannot sketch" in err
     assert "missing.fa" in err
+
+
+# ---------------------------------------------------------------------------
+# POST /contigs
+# ---------------------------------------------------------------------------
+
+
+def _sketch_contig(sequence: str, name: str) -> tuple[bytes, int, float]:
+    """The sample sketch of one contig, its genome-style count and its GC."""
+    sketcher = pysylph.Sketcher(c=200, k=31)
+    sample = sketcher.sketch_single(name, [sequence])
+    kmers = len(sketcher.sketch_genome(name, [sequence], profiling=False).kmers)
+    gc = round(100.0 * (sequence.count("G") + sequence.count("C")) / len(sequence), 2)
+    return sample.to_bytes(), kmers, gc
+
+
+def _contig_spec(name: str, sequence: str, kmers: int, gc: float) -> dict[str, object]:
+    return {"name": name, "contig_kmers": kmers, "length": len(sequence), "gc": gc}
+
+
+def _post_contigs(
+    client: TestClient,
+    payloads: list[tuple[str, bytes]],
+    params: dict[str, object],
+):
+    return client.post(
+        "/contigs",
+        data={"params": json.dumps(params)},
+        files=[("sketch", (f"{name}.sylsp", data)) for name, data in payloads],
+    )
+
+
+@pytest.fixture(scope="module")
+def endpoint_data(ani_data: AniData) -> tuple[bytes, dict[str, object]]:
+    """One 40 kb exact fragment of the fixture genome, as a sketch and a spec."""
+    sequence = ani_data.reference[100_000:140_000]
+    payload, kmers, gc = _sketch_contig(sequence, "contig1")
+    return payload, _contig_spec("contig1", sequence, kmers, gc)
+
+
+@pytest.fixture(scope="module")
+def endpoint_app(ani_data: AniData):
+    with TestClient(create_app(ServerConfig(db_path=ani_data.database))) as client:
+        yield client
+
+
+def test_info_advertises_the_contigs_endpoint(endpoint_app: TestClient) -> None:
+    info = endpoint_app.get("/info").json()
+    assert "/contigs" in info["endpoints"]
+    assert info["limits"]["max_params_bytes"] == 1024 * 1024
+
+
+def test_contigs_endpoint_response(endpoint_app, endpoint_data) -> None:
+    payload, spec = endpoint_data
+    response = _post_contigs(
+        endpoint_app, [("contig1", payload)], {"contigs": [spec], "top": 2, "fields": []}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "contigs",
+        "summary",
+        "caveats",
+        "database",
+        "params",
+        "thresholds",
+        "elapsed_ms",
+    }
+    assert body["database"] == {
+        "name": ani_name(endpoint_app),
+        "genomes": 3,
+        "c": 200,
+        "k": 31,
+    }
+    assert body["params"] == {
+        "top": 2,
+        "min_ani": 80.0,
+        "consensus_ratio": 1.5,
+        "consensus_z": 2.0,
+        "fields": [],
+    }
+    assert body["thresholds"] == {"species": 95, "imprecise_below": 85}
+    assert body["caveats"] == []
+    assert body["elapsed_ms"] >= 0
+
+    (result,) = body["contigs"]
+    assert result["name"] == "contig1"
+    assert result["status"] == "ok"
+    assert result["length"] == spec["length"]
+    assert result["contig_kmers"] == spec["contig_kmers"]
+    assert result["sketch_kmers"] >= result["contig_kmers"]
+    assert result["assignment"]["accession"] == "GCA_000000900.1"
+    assert result["closest"]["accession"] == "GCA_000000900.1"
+
+    hit = result["hits"][0]
+    assert hit["rank"] == 1
+    assert hit["accession"] == "GCA_000000900.1"
+    assert hit["ani"] == pytest.approx(100.0, abs=0.05)
+    assert hit["shared_kmers"] == hit["contig_kmers"] == spec["contig_kmers"]
+    assert hit["explained_fraction"] == pytest.approx(1.0, abs=0.01)
+    assert hit["reference_containment"] == [spec["contig_kmers"], hit["reference_containment"][1]]
+    assert hit["taxon"] is None  # no metadata on this server
+    assert "gtdb_taxonomy" not in hit  # and no metadata columns were requested
+
+    summary = body["summary"]
+    assert summary["contigs"] == 1
+    assert summary["bp"] == spec["length"]
+    assert summary["queried_contigs"] == 1
+    assert summary["queried_bp"] == spec["length"]
+    assert summary["too_few_kmers_contigs"] == 0
+    assert summary["no_hit_contigs"] == 0
+    assert summary["consensus_bp"] == [
+        {"rank": None, "taxon": "unassigned", "bp": spec["length"], "fraction": 1.0}
+    ]
+
+
+def ani_name(client: TestClient) -> str:
+    return client.get("/info").json()["database"]["name"]
+
+
+def test_contigs_endpoint_too_few_kmers(endpoint_app: TestClient) -> None:
+    """A sketch below the k-mer floor is reported, not queried."""
+    sequence = "".join(random.Random(5).choices("ACGT", k=300))
+    payload, kmers, gc = _sketch_contig(sequence, "tiny")
+    assert kmers >= 1
+    response = _post_contigs(
+        endpoint_app,
+        [("tiny", payload)],
+        {"contigs": [_contig_spec("tiny", sequence, kmers, gc)]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    (result,) = body["contigs"]
+    assert result["status"] == "too_few_kmers"
+    assert "too few k-mers" in result["reason"]
+    assert result["hits"] == []
+    assert result["consensus"] is None
+    assert body["summary"]["too_few_kmers_contigs"] == 1
+    assert body["summary"]["queried_contigs"] == 0
+
+
+def test_contigs_endpoint_requires_multipart(endpoint_app: TestClient) -> None:
+    response = endpoint_app.post("/contigs", content=b"x")
+    assert response.status_code == 415
+    assert "multipart" in response.json()["error"]
+
+
+def test_contigs_endpoint_needs_a_sketch(endpoint_app: TestClient) -> None:
+    response = endpoint_app.post(
+        "/contigs", files={"params": (None, json.dumps({"contigs": []}))}
+    )
+    assert response.status_code == 400
+    assert "no 'sketch' part" in response.json()["error"]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "needle"),
+    [
+        ({"contigs": None}, "'params.contigs' must be a list"),
+        (
+            {"contigs": [{"name": "contig1", "length": 40000, "gc": 50.0}]},
+            "contig_kmers must be an integer",
+        ),
+        ({"contigs": [{"name": "contig1", "contig_kmers": 0, "length": 40000, "gc": 50.0}]}, "must be between 1 and"),
+        ({"contigs": [{"name": "contig1", "contig_kmers": 40_000, "length": 40000, "gc": 50.0}]}, "at most"),
+        ({"contigs": [{"name": "a\tb", "contig_kmers": 100, "length": 40000, "gc": 50.0}]}, "control character"),
+        ({"contigs": [{"name": "", "contig_kmers": 100, "length": 40000, "gc": 50.0}]}, "is empty"),
+        ({"contigs": [{"name": "c", "contig_kmers": 100, "length": 0, "gc": 50.0}]}, "must be between 1 and"),
+        ({"contigs": [{"name": "c", "contig_kmers": 100, "length": 40000, "gc": 101}]}, "gc must be between"),
+        ({"contigs": [{"name": "c", "contig_kmers": 100, "length": 40000, "gc": 50.0, "x": 1}]}, "unknown key"),
+        ({"contigs": [{"name": "c", "contig_kmers": "100", "length": 40000, "gc": 50.0}]}, "must be an integer"),
+        ({"top": 0}, "'top' must be >= 1"),
+        ({"top": 51}, "'top' must be <= 50"),
+        ({"min_ani": 50}, "'min_ani' must be >= 70"),
+        ({"consensus_ratio": 0.5}, "'consensus_ratio' must be >= 1"),
+        ({"consensus_z": -1}, "'consensus_z' must be >= 0"),
+        ({"mode": "query"}, "unknown parameter"),
+        ({"fields": ["nope"]}, "no metadata database"),
+        ({"tax_sources": ["nope"]}, "no sylph-tax taxonomy sources"),
+    ],
+)
+def test_contigs_endpoint_rejects_bad_input(
+    endpoint_app: TestClient, endpoint_data, overrides, needle: str
+) -> None:
+    payload, spec = endpoint_data
+    params = {"contigs": [spec], **overrides}
+    response = _post_contigs(endpoint_app, [("contig1", payload)], params)
+    assert response.status_code == 400, response.text
+    assert needle in response.json()["error"]
+
+
+def test_contigs_endpoint_counts_must_match_the_sketches(
+    endpoint_app: TestClient, endpoint_data
+) -> None:
+    payload, spec = endpoint_data
+    response = _post_contigs(
+        endpoint_app, [("contig1", payload)], {"contigs": [spec, spec]}
+    )
+    assert response.status_code == 400
+    assert "2 entries for 1 sketches" in response.json()["error"]
+
+
+def test_contigs_endpoint_rejects_duplicate_names(
+    endpoint_app: TestClient, endpoint_data
+) -> None:
+    payload, spec = endpoint_data
+    response = _post_contigs(
+        endpoint_app,
+        [("contig1", payload), ("contig1", payload)],
+        {"contigs": [spec, spec]},
+    )
+    assert response.status_code == 400
+    assert "repeats 'contig1'" in response.json()["error"]
+
+
+def test_contigs_endpoint_admits_each_contig_as_one_job(
+    ani_data: AniData, endpoint_data
+) -> None:
+    """--max-jobs 1 --max-queue 1: two contigs fit, three are refused whole."""
+    payload, spec = endpoint_data
+    second = dict(spec, name="contig2")
+    third = dict(spec, name="contig3")
+    app = create_app(ServerConfig(db_path=ani_data.database, max_jobs=1, max_queue=1))
+    with TestClient(app) as client:
+        ok = _post_contigs(
+            client, [("contig1", payload), ("contig2", payload)], {"contigs": [spec, second]}
+        )
+        assert ok.status_code == 200
+        assert [result["name"] for result in ok.json()["contigs"]] == [
+            "contig1",
+            "contig2",
+        ]
+        busy = _post_contigs(
+            client,
+            [("contig1", payload), ("contig2", payload), ("contig3", payload)],
+            {"contigs": [spec, second, third]},
+        )
+        assert busy.status_code == 503
+        assert busy.headers["retry-after"] == "1"
+        assert "busy" in busy.json()["error"]
+
+
+# ---------------------------------------------------------------------------
+# parsimony: a contaminant contig inside a reference genome
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ContaminantData:
+    host: str
+    phage: str
+    database: Path
+
+
+@pytest.fixture(scope="session")
+def contaminant_data(tmp_path_factory) -> ContaminantData:
+    """A bacterium that carries a 20 kb phage contig, plus the phage genome.
+
+    ``GCA_000000020.1`` holds the bacterial sequence and, as one more contig,
+    a 20 kb random "phage"; ``GCA_000000021.1`` is that phage on its own.  A
+    contig taken from the phage is therefore *contained* in both genomes, and
+    only the genome sizes can tell which one it belongs to.
+    """
+    directory = tmp_path_factory.mktemp("contaminant")
+    host = "".join(random.Random(20261110).choices("ACGT", k=300_000))
+    phage = "".join(random.Random(20261111).choices("ACGT", k=20_000))
+    sketcher = pysylph.Sketcher(c=200, k=31)
+    database = directory / "contaminant.syldb"
+    pysylph.Database(
+        [
+            sketcher.sketch_genome(
+                "GCA_000000020.1_genomic.fna.gz", [host, phage]
+            ),
+            sketcher.sketch_genome("GCA_000000021.1_genomic.fna.gz", [phage]),
+        ]
+    ).dump(str(database))
+    return ContaminantData(host=host, phage=phage, database=database)
+
+
+@pytest.fixture(scope="module")
+def contaminant_server(tmp_path_factory, contaminant_data: ContaminantData):
+    with _serve(
+        tmp_path_factory.mktemp("contaminant-server"), contaminant_data.database
+    ) as socket_path:
+        yield socket_path
+
+
+def test_parsimony_ranks_the_phage_genome_first(
+    contaminant_server, contaminant_data: ContaminantData, tmp_path, capsys
+) -> None:
+    """The contig is in both genomes; the one that is only the phage wins."""
+    path = _write_fasta(
+        tmp_path / "phage.fa",
+        [
+            ("phage", contaminant_data.phage),
+            ("host", contaminant_data.host[:20_000]),
+        ],
+    )
+    _run(
+        "assembly",
+        path,
+        "--per-contig",
+        "--top",
+        "2",
+        "--socket",
+        contaminant_server,
+        "--fields",
+        "none",
+        "--quiet",
+    )
+    _, rows, _ = _rows(capsys)
+    by_contig: dict[str, list[dict[str, str]]] = {}
+    for row in rows:
+        by_contig.setdefault(row["contig"], []).append(row)
+
+    phage_rows = by_contig["phage"]
+    assert [row["rank"] for row in phage_rows] == ["1", "2"]
+    assert phage_rows[0]["accession"] == "GCA_000000021.1"
+    assert phage_rows[1]["accession"] == "GCA_000000020.1"
+    # both contain the whole contig; only the reference size separates them
+    assert phage_rows[0]["ani"] == phage_rows[1]["ani"]
+    assert phage_rows[0]["explained_fraction"] == phage_rows[1]["explained_fraction"]
+    assert float(phage_rows[0]["reference_ani"]) > 99.0
+    assert float(phage_rows[1]["reference_ani"]) < 95.0
+
+    host_rows = by_contig["host"]
+    assert [row["accession"] for row in host_rows] == ["GCA_000000020.1"]
+
+
+def _contig_row(
+    shared: int,
+    total: int,
+    *,
+    accession: str,
+    taxonomy: str | None = None,
+    tax_lineage: str | None = None,
+    tax_source: str | None = None,
+) -> dict[str, object]:
+    """One hit row as the profiler returns it to :func:`per_contig.contig_hits`."""
+    return {
+        "Containment_ind": [shared, total],
+        "Naive_ANI": 100.0 * (shared / total) ** (1 / 31),
+        "gtdb_taxonomy": taxonomy,
+        "tax_lineage": tax_lineage,
+        "tax_source": tax_source,
+        "accession": accession,
+        "Genome_file": f"{accession}_genomic.fna.gz",
+    }
+
+
+def test_parsimony_only_reorders_hits_inside_the_noise_band() -> None:
+    """A hit further than the close band keeps its evidence order."""
+    rows = [
+        # 100 % of the contig, a 10 Mb genome (the contaminant case)
+        _contig_row(83, 10_271, accession="GCA_000001000.1"),
+        # 99.96 % of the contig, the phage genome itself
+        _contig_row(82, 210, accession="GCA_000001001.1"),
+        # far outside the band: a genuinely worse hit with a small genome
+        _contig_row(40, 100, accession="GCA_000001002.1"),
+    ]
+    hits, assignment, _, _ = per_contig.contig_hits(
+        rows, k=31, contig_kmers=83, options=per_contig.ContigOptions(top=3)
+    )
+    assert [hit["accession"] for hit in hits] == [
+        "GCA_000001001.1",  # parsimony: 210 reference k-mers vs 10 271 at the same ANI
+        "GCA_000001000.1",
+        "GCA_000001002.1",  # outside the close band: evidence order
+    ]
+    assert assignment["accession"] == "GCA_000001001.1"
+
+
+def test_parsimony_keeps_a_non_saturated_best_hit_first() -> None:
+    """97 % ANI is a real distance; a smaller genome at 95 % must stay second.
+
+    Both hits are inside the close band, so the plain rule would have moved the
+    tiny reference first.  Only hits that explain >= 95 % of the contig (i.e.
+    are near-completely contained, >= ~99.83 % ANI) may be reordered.
+    """
+    rows = [
+        # 97.0 % of the contig, a 5 000-k-mer reference
+        _contig_row(78, 5_000, accession="GCA_000002000.1"),
+        # 95.0 % of the contig, a 300-k-mer reference
+        _contig_row(41, 300, accession="GCA_000002001.1"),
+    ]
+    hits, assignment, _, _ = per_contig.contig_hits(
+        rows, k=31, contig_kmers=200, options=per_contig.ContigOptions(top=2)
+    )
+    assert [hit["accession"] for hit in hits] == [
+        "GCA_000002000.1",
+        "GCA_000002001.1",
+    ]
+    assert hits[0]["ani"] == pytest.approx(97.0, abs=0.15)
+    assert hits[1]["ani"] == pytest.approx(95.0, abs=0.15)
+    assert hits[1]["reference_ani"] > hits[0]["reference_ani"]
+    assert hits[0]["explained_fraction"] < per_contig.PARSIMONY_MIN_EXPLAINED
+    assert assignment["accession"] == "GCA_000002000.1"
+    # the pair *is* inside the close band: the saturation condition is what
+    # keeps the evidence order
+    best_ani = 100 * (78 / 200) ** (1 / 31)
+    other_ani = 100 * (41 / 200) ** (1 / 31)
+    assert per_contig.is_close(
+        other_ani,
+        per_contig.ani_noise(41, 200, 31),
+        best_ani=best_ani,
+        best_sd=per_contig.ani_noise(78, 200, 31),
+    )
+
+
+def test_containment_only_hits_still_block_the_consensus() -> None:
+    """The owner's choice: a close set spanning sources stays mixed.
+
+    The larger containing genome is *not* dropped from the consensus, so a
+    phage contig whose close set spans UHGV and GTDB has no consensus, even
+    though parsimony now ranks the UHGV hit first.
+    """
+    rows = [
+        _contig_row(
+            83,
+            10_271,
+            accession="GCA_000001000.1",
+            taxonomy="d__Bacteria;p__Bacillota;c__Bacilli;o__Bacillales;"
+            "f__Bacillaceae;g__Bacillus;s__Bacillus subtilis",
+        ),
+        _contig_row(
+            82,
+            210,
+            accession="",
+            tax_lineage="vFAM-1;vOTU-9",
+            tax_source="UHGV_default",
+        ),
+    ]
+    hits, assignment, _, summary = per_contig.contig_hits(
+        rows, k=31, contig_kmers=83, options=per_contig.ContigOptions(top=2)
+    )
+    assert hits[0]["taxon"] == "vOTU-9"
+    assert assignment["taxon"] == "vOTU-9"
+    assert summary["mixed_sources"] is True
+    assert summary["n_close"] == 2
+    assert (summary["rank"], summary["taxon"]) == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# summaries of several requests
+# ---------------------------------------------------------------------------
+
+
+def _summary_record(
+    name: str, length: int, *, consensus: dict[str, object] | None
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "length": length,
+        "status": "ok" if consensus is not None else "no_hit",
+        "hits": [{"rank": 1}] if consensus is not None else [],
+        "consensus": consensus,
+    }
+
+
+def test_chunk_summaries_add_up_to_the_whole_run() -> None:
+    records = [
+        _summary_record("a", 10_000, consensus={"rank": "genus", "taxon": "Bacillus"}),
+        _summary_record("b", 20_000, consensus={"rank": "species", "taxon": "X"}),
+        _summary_record("c", 30_000, consensus=None),
+        _summary_record("d", 40_000, consensus={"rank": "species", "taxon": "X"}),
+    ]
+    parts = [
+        per_contig.summarize(records[:2]),
+        per_contig.summarize(records[2:]),
+    ]
+    merged = per_contig.finalize_summary(per_contig.merge_summaries(parts))
+    assert merged == per_contig.finalize_summary(per_contig.summarize(records))
+    assert merged["contigs"] == 4
+    assert merged["queried_bp"] == 100_000
+    assert merged["no_hit_contigs"] == 1
+    # every taxon of every chunk survives, not just the top five per chunk
+    assert [(item["rank"], item["taxon"]) for item in merged["consensus_bp"]] == [
+        ("species", "X"),  # 20 000 + 40 000 bp
+        (None, "unassigned"),  # 30 000 bp
+        ("genus", "Bacillus"),  # 10 000 bp
+    ]
+
+
+def test_summary_counts_unsent_chunks_and_truncates_the_breakdown() -> None:
+    records = [
+        _summary_record(f"c{index}", 1_000, consensus={"rank": "genus", "taxon": f"G{index}"})
+        for index in range(7)
+    ]
+    summary = per_contig.finalize_summary(per_contig.summarize(records))
+    assert len(summary["consensus_bp"]) == 5
+    assert summary["consensus_bp"][0]["fraction"] == pytest.approx(1 / 7, abs=1e-4)

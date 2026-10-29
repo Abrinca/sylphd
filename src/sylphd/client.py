@@ -5,19 +5,23 @@ The client speaks HTTP over a Unix socket (default), TCP, or an ``http://`` /
 ``c``/``k``.  ``/assembly`` takes either such a sketch (``assembly_sketch``,
 the default of ``sylphd assembly``: the sequence never leaves the machine) or
 raw sequences (``assembly``, only if the server runs with ``--allow-sequences``).
+``/contigs`` takes one sketch per contig of a fragmented assembly plus the
+record's measurements (``contigs``) and returns the server-side per-contig
+classification.
 """
 
 from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Self
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from .protocol import ProfileParams, params_json
+from .protocol import ProfileParams, contigs_json, params_json
 
 #: ``Content-Type`` of an ``/assembly`` body that is a sketch (see the server).
 SKETCH_CONTENT_TYPE = "application/vnd.sylph.sketch"
@@ -43,7 +47,7 @@ def normalize_base_url(url: str) -> str:
     if not parts.hostname:
         raise ValueError(f"server URL has no host: {url!r}")
     try:
-        parts.port
+        _ = parts.port
     except ValueError as error:
         raise ValueError(f"invalid port in server URL {url!r}") from error
     if parts.query or parts.fragment:
@@ -234,6 +238,83 @@ class SylphClient:
             raise ClientError("cannot determine the request size")
         return int(length)
 
+    # -- per contig -------------------------------------------------------
+    def contigs(
+        self,
+        samples: Sequence[tuple[str, bytes]],
+        *,
+        contigs: Sequence[Mapping[str, Any]],
+        options: Mapping[str, Any] | None = None,
+        fields: Sequence[str] | None = None,
+        tax_sources: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Classify the contigs of one fragmented assembly (``POST /contigs``).
+
+        ``samples`` holds one ``(name, sketch bytes)`` per contig, ``contigs``
+        one object per sketch in the same order with ``name``,
+        ``contig_kmers`` (the record's genome-style k-mer count), ``length``
+        and ``gc``.  ``options`` are the server-side scoring and reporting
+        options (``top``, ``min_ani``, ``consensus_ratio``, ``consensus_z``).
+        The server computes the contig-relative ANI, the ranking, the
+        classification and the consensus; the response carries one result per
+        contig plus a summary of the request.
+        """
+        if not samples:
+            raise ValueError("no contigs to send")
+        if len(samples) != len(contigs):
+            raise ValueError(
+                f"{len(contigs)} contig entries for {len(samples)} sketches"
+            )
+        response = self._send(
+            self._prepare_contigs(samples, contigs, options, fields, tax_sources)
+        )
+        result = response.json()
+        if not isinstance(result, dict) or "contigs" not in result:
+            raise ClientError("unexpected response from /contigs")
+        return result
+
+    def contigs_size(
+        self,
+        samples: Sequence[tuple[str, bytes]],
+        *,
+        contigs: Sequence[Mapping[str, Any]],
+        options: Mapping[str, Any] | None = None,
+        fields: Sequence[str] | None = None,
+        tax_sources: Sequence[str] | None = None,
+    ) -> int:
+        """Exact size in bytes of the multipart body :meth:`contigs` would send."""
+        request = self._prepare_contigs(samples, contigs, options, fields, tax_sources)
+        length = request.headers.get("content-length")
+        if length is None:  # pragma: no cover - bytes payloads always have one
+            raise ClientError("cannot determine the request size")
+        return int(length)
+
+    def _prepare_contigs(
+        self,
+        samples: Sequence[tuple[str, bytes]],
+        contigs: Sequence[Mapping[str, Any]],
+        options: Mapping[str, Any] | None,
+        fields: Sequence[str] | None,
+        tax_sources: Sequence[str] | None,
+    ) -> httpx.Request:
+        files: list[tuple[str, tuple[str, bytes, str]]] = [
+            (
+                "sketch",
+                (f"{name or 'contig'}.sylsp", data, "application/octet-stream"),
+            )
+            for name, data in samples
+        ]
+        return self._client.build_request(
+            "POST",
+            "contigs",
+            data={
+                "params": contigs_json(
+                    contigs, options=options, fields=fields, tax_sources=tax_sources
+                )
+            },
+            files=files,
+        )
+
     def _prepare_post(
         self,
         mode: str,
@@ -279,7 +360,7 @@ class SylphClient:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "SylphClient":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:

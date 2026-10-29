@@ -630,32 +630,97 @@ def run_sample(
 
     profiler = databases.profiler(params)
     results = _run_profiler(profiler, sketch, mode)
-
-    rows: list[dict[str, Any]] = []
-    if metadata is None:
-        for result in results:
-            rows.append(result_row(result, name, mode=mode, hide_ani_ci=hide_ani_ci))
-    else:
-        accessions = [accession_from_genome_name(result.genome_sketch.name) for result in results]
-        found = metadata.lookup(accession for accession in accessions if accession)
-        resolved = metadata.resolve(
-            [
-                (result.genome_sketch.name, result.genome_sketch.description)
-                for result in results
-            ],
-            sources=tax_sources,
-        )
-        for result, accession, taxonomy in zip(results, accessions, resolved):
-            record: dict[str, Any] = dict(found.get(accession, {})) if accession else {}
-            record.update(taxonomy.columns())
-            rows.append(
-                result_row(
-                    result,
-                    name,
-                    mode=mode,
-                    metadata=record,
-                    fields=fields,
-                    hide_ani_ci=hide_ani_ci,
-                )
-            )
+    rows = result_rows(
+        metadata,
+        results,
+        name,
+        mode=mode,
+        fields=fields,
+        hide_ani_ci=hide_ani_ci,
+        tax_sources=tax_sources,
+    )
     return {"name": name, "kind": mode, "rows": rows}
+
+
+def run_contig_query(
+    databases: DatabaseSet,
+    metadata: MetadataDB | None,
+    name: str,
+    payload: bytes,
+    params: ProfileParams,
+    fields: Sequence[str] | None,
+    tax_sources: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Query one contig sketch for ``POST /contigs``.  Runs in a worker thread.
+
+    This is the identity-only half of the endpoint: it validates and decodes
+    the sketch, runs the query with ``params`` (the per-contig permissive set)
+    and joins the metadata.  The contig-relative ANI, the ranking and the
+    classification happen in :mod:`sylphd.per_contig`, which needs the contig's
+    genome-style k-mer count and so cannot live here.
+    """
+    sketch, header = _decode_sketch(databases, name, payload)
+    profiler = databases.profiler(params)
+    results = _run_profiler(profiler, sketch, "query")
+    return {
+        "sketch_kmers": header.kmer_count,
+        "rows": result_rows(
+            metadata,
+            results,
+            name,
+            mode="query",
+            fields=fields,
+            hide_ani_ci=True,
+            tax_sources=tax_sources,
+        ),
+    }
+
+
+def result_rows(
+    metadata: MetadataDB | None,
+    results: Sequence[Any],
+    name: str,
+    *,
+    mode: str = "query",
+    fields: Sequence[str] | None = None,
+    hide_ani_ci: bool = False,
+    tax_sources: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Convert ``pysylph`` results into JSON rows, joining the metadata.
+
+    Without a metadata database the rows are sylph's own columns only.  With
+    one, the hit's metadata record and the taxonomy a sylph-tax source
+    resolved for it are merged first, so ``fields`` selects from both.
+    """
+    if metadata is None:
+        return [
+            result_row(result, name, mode=mode, hide_ani_ci=hide_ani_ci)
+            for result in results
+        ]
+    accessions = [
+        accession_from_genome_name(result.genome_sketch.name) for result in results
+    ]
+    found = metadata.lookup(accession for accession in accessions if accession)
+    resolved = metadata.resolve(
+        [
+            (result.genome_sketch.name, result.genome_sketch.description)
+            for result in results
+        ],
+        sources=tax_sources,
+    )
+    rows: list[dict[str, Any]] = []
+    for result, accession, taxonomy in zip(results, accessions, resolved):
+        record: dict[str, Any] = dict(found.get(accession, {})) if accession else {}
+        record.update(taxonomy.columns())
+        rows.append(
+            result_row(
+                result,
+                name,
+                mode=mode,
+                metadata=record,
+                fields=fields,
+                hide_ani_ci=hide_ani_ci,
+            )
+        )
+    return rows
+
