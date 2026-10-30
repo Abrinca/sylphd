@@ -190,6 +190,8 @@ install -d -o "$SYLPH_USER" -g "$SYLPH_USER" -m 0755 \
     "$ROOT/db" "$ROOT/run" "$ROOT/python" "$ROOT/.local" "$ROOT/.local/share"
 install -d -o "$SYLPH_USER" -g "$SYLPH_USER" -m 0700 \
     "$ROOT/.cache" "$ROOT/.local/share/uv"
+# Where --usage-db may live (opt-in; nothing is written here without the flag).
+install -d -o "$SYLPH_USER" -g "$SYLPH_USER" -m 0750 "$ROOT/usage"
 
 # ---------------------------------------------------------------------------
 # 2. firewalld

@@ -10,8 +10,6 @@ from urllib.parse import quote
 
 from starlette.responses import JSONResponse
 
-from .limits import client_identity
-
 log = logging.getLogger("uvicorn.error")
 
 
@@ -60,12 +58,12 @@ class BodyLimitMiddleware:
 class AccessLogMiddleware:
     """Tag each response with ``X-Request-Id`` and log one line per request.
 
-    ``serve`` turns uvicorn's own access log off, so this is the only one.
+    ``serve`` turns uvicorn's own access log off, so this is the only one.  A
+    line carries no client address.
     """
 
-    def __init__(self, app: Any, trusted: frozenset[str] = frozenset()) -> None:
+    def __init__(self, app: Any) -> None:
         self.app = app
-        self.trusted = trusted
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -89,12 +87,11 @@ class AccessLogMiddleware:
             await self.app(scope, receive, tagged_send)
         finally:
             log.info(
-                "%s %s -> %d in %.1f ms client=%s request_id=%s",
+                "%s %s -> %d in %.1f ms request_id=%s",
                 scope["method"],
                 quote(scope["path"]),
                 status,
                 (time.perf_counter() - start) * 1000.0,
-                client_identity(scope, self.trusted),
                 request_id,
             )
 

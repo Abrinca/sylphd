@@ -139,3 +139,26 @@ def test_systemd_values_are_escaped(tmp_path: Path) -> None:
     result = _run(tmp_path, SYLPH_DB="gtdb.syl2db", SYLPH_NAME="two\nlines")
     assert result.returncode == 1
     assert "newline" in result.stderr
+
+
+def test_caddy_access_log_drops_client_addresses() -> None:
+    text = (DEPLOY / "Caddyfile").read_text()
+    log = text[text.index("\tlog {"):]
+    assert "format filter" in log
+    for field in (
+        "request>remote_ip",
+        "request>remote_port",
+        "request>client_ip",
+        "request>headers>X-Forwarded-For",
+    ):
+        assert f"{field} delete" in log
+    assert "wrap console" in log
+
+
+def test_usage_statistics_are_off_by_default_but_writable() -> None:
+    unit = (DEPLOY / "sylphd.service").read_text()
+    serve_args = next(
+        line for line in unit.splitlines() if line.startswith('Environment="SYLPH_SERVE_ARGS=')
+    )
+    assert "--usage-db" not in serve_args
+    assert "ReadWritePaths=/srv/sylphd/run -/srv/sylphd/usage" in unit

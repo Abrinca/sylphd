@@ -25,7 +25,12 @@
 # raise sylphd's --max-upload-mb.
 #
 # Access logs go to stderr, which systemd collects in the journal
-# (journalctl -u caddy).
+# (journalctl -u caddy).  They carry no client address: `format filter` below
+# drops the peer (remote_ip, remote_port), the "real client" (client_ip) and
+# the forwarding headers a client or an upstream proxy may have set.
+#
+# Caddy's own runtime log (not this access log) can still name a peer when a
+# TLS handshake fails; that is outside the `log` directive.
 
 {$SYLPHD_DOMAIN:example.org} {
 	encode zstd gzip
@@ -41,6 +46,14 @@
 	}
 
 	log {
-		format console
+		format filter {
+			request>remote_ip delete
+			request>remote_port delete
+			request>client_ip delete
+			request>headers>X-Forwarded-For delete
+			request>headers>X-Real-Ip delete
+			request>headers>Forwarded delete
+			wrap console
+		}
 	}
 }

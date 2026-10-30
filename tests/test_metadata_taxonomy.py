@@ -1039,6 +1039,7 @@ class TestOverlaps:
                 ],
             },
             "limits": {},
+            "usage": {"enabled": False},
             "version": "0.0.0",
             "pysylph_version": "0.0.0",
             "python_version": "3.14.0",

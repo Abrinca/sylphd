@@ -64,6 +64,7 @@ from .taxonomy import (
     resolve_taxonomy_columns,
     write_outputs,
 )
+from .usage import Usage
 
 log = logging.getLogger("sylphd")
 
@@ -140,6 +141,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     about = About(Path(args.about) if args.about else None)
     try:
         specs = parse_db_specs(args.db)
+        usage = Usage(Path(args.usage_db)) if args.usage_db else None
     except ValueError as error:
         _print_error(str(error))
         return 2
@@ -158,6 +160,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         cors_origins=tuple(args.cors_origin or ()),
         name=name,
         about=about,
+        usage=usage,
     )
     socket_path = None
     tcp = None
@@ -245,6 +248,8 @@ def _log_startup(
         extras.append(f"cors={','.join(config.cors_origins)}")
     if config.about.path:
         extras.append(f"about={config.about.path}")
+    if config.usage is not None:
+        extras.append(f"usage-db={config.usage.path}")
     print(
         f"{PROG}: {databases.name} ({kind}, c={databases.c}, k={databases.k}, "
         f"{databases.genomes} genomes) listening on {address} "
@@ -269,7 +274,18 @@ def cmd_info(args: argparse.Namespace) -> int:
     _print_database(info)
     _print_metadata(info.get("metadata"))
     _print_limits(info)
+    _print_usage(info["usage"])
     return 0
+
+
+def _print_usage(usage: dict[str, Any]) -> None:
+    if not usage["enabled"]:
+        print("usage statistics: off")
+        return
+    print(
+        f"usage statistics: on (policy {usage['policy']}, "
+        f"{usage['window_minutes']}-minute windows, public at /usage)"
+    )
 
 
 def _print_database(info: dict[str, Any]) -> None:
@@ -472,6 +488,7 @@ def _run_contain(
         requested_taxonomies = None
     with _client_from_args(args) as client:
         info = client.info()
+        _note_usage(client, info)
         database = info["database"]
         metadata = info.get("metadata")
         fields = _resolve_fields(args.fields, metadata)
@@ -558,6 +575,16 @@ def _profile_caveats(samples: Sequence[dict[str, Any]]) -> list[str]:
             if note and note not in notes:
                 notes.append(note)
     return notes
+
+
+def _note_usage(client: Any, info: dict[str, Any], *, quiet: bool = False) -> None:
+    """Say once per run that the server keeps usage statistics, and where to read them."""
+    if info["usage"]["enabled"] and not quiet:
+        where = f"{client.base_url}/usage" if client.base_url else "GET /usage"
+        print(
+            f"{PROG}: note: this server keeps usage statistics, see {where}",
+            file=sys.stderr,
+        )
 
 
 def _client_from_args(args: argparse.Namespace):
@@ -753,10 +780,11 @@ def cmd_assembly(args: argparse.Namespace) -> int:
     top = args.top if args.top is not None else 10
     _check_output_file(args.output)
     with _client_from_args(args) as client:
+        info = client.info()
+        _note_usage(client, info, quiet=args.quiet or args.json)
         if args.local_sketch:
             # The assembly is sketched here and only the sketch is uploaded: the sequence
             # never leaves this machine and has no size limit.
-            info = client.info()
             database = info["database"]
             sketch, stats = sketch_assembly(
                 path, name, c=int(database["c"]), k=int(database["k"])
@@ -881,6 +909,7 @@ def _cmd_assembly_per_contig(args: argparse.Namespace, path: Path) -> int:
     _check_output_file(args.output)
     with _client_from_args(args) as client:
         info = client.info()
+        _note_usage(client, info, quiet=args.quiet or args.json)
         metadata = info.get("metadata")
         options = per_contig_client.PerContigOptions(
             top=args.top if args.top is not None else per_contig_client.DEFAULT_TOP,

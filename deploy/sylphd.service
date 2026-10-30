@@ -61,6 +61,11 @@ Environment=SYLPH_META=meta-r232-reps.sqlite
 #   --rate-limit 10/min      per-client limit on the four POST endpoints
 #   --trusted-proxy unix     believe X-Forwarded-For from the local socket
 #   --cors-origin *          any origin may call the API from a browser
+#   --usage-db /srv/sylphd/usage/usage.sqlite
+#                            opt-in usage statistics (public at /usage); off
+#                            unless you add it.  The directory is writable for
+#                            the service (ReadWritePaths below) and created by
+#                            setup-server.sh.
 # Drop any of them, raise the limits, or narrow CORS to your own page.
 # `--cors-origin *` is written unquoted: systemd splits the value on
 # whitespace and passes the asterisk through literally.
@@ -90,7 +95,8 @@ KillSignal=SIGINT
 # cap would only produce OOM kills under profiling load.
 OOMScoreAdjust=-200
 
-# Hardening.  The server only needs its own tree (read) and run/ (socket).
+# Hardening.  The server only needs its own tree (read), run/ (socket) and,
+# with --usage-db, usage/ (the SQLite file and its journal).
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
@@ -104,7 +110,7 @@ ProtectClock=yes
 ProtectHostname=yes
 ProtectProc=invisible
 ProcSubset=pid
-ReadWritePaths=/srv/sylphd/run
+ReadWritePaths=/srv/sylphd/run -/srv/sylphd/usage
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=yes
 RestrictSUIDSGID=yes

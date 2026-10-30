@@ -390,6 +390,7 @@ def _info_document(databases: list[dict[str, object]]) -> dict[str, object]:
         },
         "databases": databases,
         "metadata": None,
+        "usage": {"enabled": False},
         "limits": {
             "max_jobs": 2,
             "max_upload_mb": 512,
@@ -565,6 +566,7 @@ class TestSingleDatabaseGoldens:
         info["endpoints"].remove("/contigs")
         info["limits"].pop("max_params_bytes")
         info["limits"].pop("max_contigs")
+        info.pop("usage")
         assert web_golden.normalise(info) == web_golden.load("info")
 
     def test_assembly(self) -> None:

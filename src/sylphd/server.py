@@ -34,13 +34,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from . import __version__, per_contig
 from .about import About
 from .assembly import INTERPRETATION_THRESHOLDS
-from .limits import JobSlots, RateLimiter, RateLimitMiddleware
+from .limits import JobSlots, JobTimes, RateLimiter, RateLimitMiddleware
 from .metadata import MetadataDB
 from .paths import SOCKET_MODE
 from .profiling import (
@@ -62,6 +62,7 @@ from .server_upload import (
     read_upload,
     require_multipart,
 )
+from .usage import POLICY, WINDOW_MINUTES, Usage
 
 log = logging.getLogger("uvicorn.error")
 
@@ -147,6 +148,9 @@ class ServerConfig:
     #: Contigs accepted in one ``POST /contigs`` request (``--max-contigs``);
     #: kept after the historical positional fields so their order is unchanged.
     max_contigs: int = DEFAULT_MAX_CONTIGS
+    #: Usage statistics (``--usage-db``); the caller opens the file, so a bad
+    #: path fails before the database is loaded.  ``None`` records nothing.
+    usage: Usage | None = None
 
     def __post_init__(self) -> None:
         if self.max_contigs < 1:
@@ -208,14 +212,40 @@ async def _info(request: Request) -> JSONResponse:
                 "rate_limit": _rate_limit_dict(state.rate_limit),
                 "max_queue": state.max_queue,
             },
-            "endpoints": _endpoints(),
+            "usage": _usage_info(state.usage),
+            "endpoints": _endpoints(state),
             "params": _params_info(),
         }
     )
 
 
-def _endpoints() -> list[str]:
-    return ["/health", "/info", "/profile", "/query", "/assembly", "/contigs"]
+def _usage_info(usage: Usage | None) -> dict[str, Any]:
+    if usage is None:
+        return {"enabled": False}
+    return {"enabled": True, "policy": POLICY, "window_minutes": WINDOW_MINUTES}
+
+
+def _endpoints(state: Any) -> list[str]:
+    endpoints = ["/health", "/info", "/profile", "/query", "/assembly", "/contigs"]
+    return [*endpoints, "/usage"] if state.usage is not None else endpoints
+
+
+async def _usage(request: Request) -> Response:
+    """The aggregated usage statistics (only routed with ``--usage-db``)."""
+    body = await anyio.to_thread.run_sync(request.app.state.usage.report_json)
+    return Response(body, media_type="application/json")
+
+
+def _count(
+    request: Request,
+    endpoint: str,
+    jobs: Sequence[JobTimes],
+    **counts: int,
+) -> None:
+    """Count a successful request in the usage statistics, if they are on."""
+    usage = request.app.state.usage
+    if usage is not None:
+        usage.record(endpoint, request.headers, jobs=jobs, **counts)
 
 
 def _params_info() -> dict[str, list[str]]:
@@ -249,7 +279,7 @@ async def _index(request: Request) -> JSONResponse:
         {
             "service": "sylphd",
             "version": __version__,
-            "endpoints": _endpoints(),
+            "endpoints": _endpoints(request.app.state),
         }
     )
 
@@ -335,7 +365,7 @@ async def _assembly(request: Request) -> JSONResponse:
     start = time.perf_counter()
     run, last = (run_assembly_sketch, stats) if is_sketch else (run_assembly, limit)
     with job_errors("assembly profiling"), state.jobs.admit():
-        async with state.jobs.slot():
+        async with state.jobs.slot() as job:
             result = await anyio.to_thread.run_sync(
                 run,
                 state.database,
@@ -347,6 +377,14 @@ async def _assembly(request: Request) -> JSONResponse:
                 last,
             )
 
+    _count(
+        request,
+        "/assembly",
+        [job],
+        samples=1,
+        bases=result["query"]["length"] or 0,
+        sketch_bytes=len(payload) if is_sketch else 0,
+    )
     elapsed_ms = round((time.perf_counter() - start) * 1000.0, 1)
     return JSONResponse(
         {
@@ -454,7 +492,7 @@ async def _contigs(request: Request) -> JSONResponse:
         options.fields, _metadata_columns(state.metadata)
     )
     with job_errors("contig profiling"), state.jobs.admit():
-        async with state.jobs.slot():
+        async with state.jobs.slot() as job:
             for index, (contig, payload) in enumerate(zip(contigs, payloads)):
                 results[index] = await anyio.to_thread.run_sync(
                     _contig_job,
@@ -467,6 +505,14 @@ async def _contigs(request: Request) -> JSONResponse:
                     row_fields,
                 )
 
+    _count(
+        request,
+        "/contigs",
+        [job],
+        contigs=len(contigs),
+        bases=sum(contig.length for contig in contigs),
+        sketch_bytes=sum(len(payload) for payload in payloads),
+    )
     elapsed_ms = round((time.perf_counter() - start) * 1000.0, 1)
     contig_results = [result for result in results if result is not None]
     return JSONResponse(
@@ -551,6 +597,7 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
     )
 
     samples: list[dict[str, Any] | None] = [None] * len(payloads)
+    jobs: list[JobTimes] = []
     with job_errors("profiling"), state.jobs.admit(len(payloads)):
         async with anyio.create_task_group() as task_group:
             for index, (name, payload) in enumerate(zip(names, payloads)):
@@ -563,10 +610,18 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
                     name,
                     payload,
                     samples,
+                    jobs,
                     index,
                     tax_sources,
                     taxprof,
                 )
+    _count(
+        request,
+        f"/{mode}",
+        jobs,
+        samples=len(payloads),
+        sketch_bytes=sum(len(payload) for payload in payloads),
+    )
     return JSONResponse(samples)
 
 
@@ -579,11 +634,13 @@ async def _run_slot(
     name: str,
     payload: bytes,
     samples: list[dict[str, Any] | None],
+    jobs: list[JobTimes],
     index: int,
     tax_sources: Sequence[str] | None = None,
     taxprof: Sequence[str] | None = None,
 ) -> None:
-    async with state.jobs.slot():
+    async with state.jobs.slot() as job:
+        jobs.append(job)
         samples[index] = await anyio.to_thread.run_sync(
             run_sample,
             state.database,
@@ -613,9 +670,14 @@ def _lifespan(config: ServerConfig) -> Any:
                 os.chmod(config.socket_path, SOCKET_MODE)
             except FileNotFoundError:
                 pass
+        usage = app.state.usage
+        if usage is not None:
+            usage.start()
         try:
             yield
         finally:
+            if usage is not None:
+                usage.close()
             metadata = app.state.metadata
             if metadata is not None:
                 metadata.close()
@@ -647,6 +709,8 @@ def create_app(
         Route("/assembly", _assembly, methods=["POST"]),
         Route("/contigs", _contigs, methods=["POST"]),
     ]
+    if config.usage is not None:
+        routes.append(Route("/usage", _usage, methods=["GET"]))
     app = Starlette(
         routes=routes,
         exception_handlers={
@@ -667,6 +731,7 @@ def create_app(
     app.state.max_queue = config.max_queue
     app.state.name = config.name
     app.state.about = config.about
+    app.state.usage = config.usage
     app.state.jobs = JobSlots(config.max_jobs, config.max_queue)
     # Starlette middleware: the last added is the outermost, so CORS wraps
     # rate-limit and body-limit errors too.
@@ -678,7 +743,7 @@ def create_app(
         app.add_middleware(
             RateLimitMiddleware,
             limiter=RateLimiter(count, window),
-            paths=frozenset(("/profile", "/query", "/assembly", "/contigs")),
+            paths=frozenset(("/profile", "/query", "/assembly", "/contigs", "/usage")),
             trusted=frozenset(config.trusted_proxies),
         )
     if config.cors_origins:
@@ -695,7 +760,7 @@ def create_app(
             max_age=600,
         )
     app.add_middleware(GZipMiddleware, minimum_size=1024)
-    app.add_middleware(AccessLogMiddleware, trusted=frozenset(config.trusted_proxies))
+    app.add_middleware(AccessLogMiddleware)
     return app
 
 

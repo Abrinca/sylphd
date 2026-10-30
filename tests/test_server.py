@@ -75,7 +75,7 @@ class TestBasics:
         assert len(lines) == 1
         assert "-> 200" in lines[0]
         assert f"request_id={response.headers['x-request-id']}" in lines[0]
-        assert "ms client=" in lines[0]
+        assert "client=" not in lines[0]
 
     def test_access_log_escapes_the_path(self, client: TestClient, caplog) -> None:
         with caplog.at_level("INFO", logger="uvicorn.error"):

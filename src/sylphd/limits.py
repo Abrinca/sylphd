@@ -13,6 +13,7 @@ import time
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 import anyio
@@ -20,8 +21,9 @@ import anyio
 #: Identity used for peers that have no IP address, i.e. Unix sockets.
 UNIX_CLIENT = "unix"
 
-#: Methods limited by the rate limiter (only the expensive POST endpoints).
-LIMITED_METHODS = frozenset({"POST"})
+#: Methods limited by the rate limiter, on the paths it is given (the
+#: expensive POST endpoints and ``GET /usage``).
+LIMITED_METHODS = frozenset({"POST", "GET"})
 
 #: Value of ``Retry-After`` on a full queue, in seconds.
 QUEUE_RETRY_SECONDS = 1
@@ -126,7 +128,7 @@ def client_identity(scope: dict, trusted: frozenset[str] | set[str]) -> str:
 
 
 class RateLimitMiddleware:
-    """Answer 429 for POSTs that exceed the limiter, before reading the body."""
+    """Answer 429 for requests to ``paths`` that exceed the limiter, before reading the body."""
 
     def __init__(
         self,
@@ -221,7 +223,27 @@ class JobSlots:
             self._admitted -= count
 
     @asynccontextmanager
-    async def slot(self) -> AsyncIterator[None]:
-        """Wait for a free job slot (the job must have been admitted)."""
+    async def slot(self) -> AsyncIterator[JobTimes]:
+        """Wait for a free job slot (the job must have been admitted).
+
+        Yields the job's :class:`JobTimes`; ``ran`` is set when the slot is left.
+        """
+        job = JobTimes(backlog=max(0, self._admitted - self.max_jobs))
+        asked = time.perf_counter()
         async with self._semaphore:
-            yield
+            began = time.perf_counter()
+            job.waited = began - asked
+            try:
+                yield job
+            finally:
+                job.ran = time.perf_counter() - began
+
+
+@dataclass
+class JobTimes:
+    """How one job fared: the jobs beyond capacity when it asked for a slot
+    (``backlog``), and the seconds it ``waited`` for the slot and ``ran`` in it."""
+
+    backlog: int = 0
+    waited: float = 0.0
+    ran: float = 0.0

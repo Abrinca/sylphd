@@ -212,6 +212,16 @@ def add_serve_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     serve_parser.add_argument(
+        "--usage-db",
+        metavar="FILE",
+        default=None,
+        help=(
+            "SQLite file for opt-in usage statistics: counts of successful "
+            "requests per 10-minute window, never addresses or names; public "
+            "at GET /usage (off by default, nothing is recorded without it)"
+        ),
+    )
+    serve_parser.add_argument(
         "--log-level",
         default="info",
         choices=["critical", "error", "warning", "info", "debug"],
