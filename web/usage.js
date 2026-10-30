@@ -51,7 +51,7 @@
     const choice = await S.choiceModal({
       title: 'This server keeps usage statistics',
       paragraphs: [
-        'For each successful request it counts, per ten-minute window: the endpoint, the kind of client (this web page, the sylphd command line or something else), the number of samples or contigs, the size of the sketch, and how long the job waited and ran.',
+        'For each successful request it counts, per ten-minute window: the endpoint, the kind of client (this web page, the sylphd command line or something else), the number of samples or contigs, the bases and sketch size, and how long the job waited and ran.',
         el('p', { class: 'detail' },
           'No IP addresses, file, sample or contig names, results, taxa or settings are stored, and nothing per person. The totals are public: see the ',
           el('a', { href: usageUrl(), target: '_blank', rel: 'noopener', text: 'Usage view' }),
