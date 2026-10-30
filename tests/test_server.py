@@ -53,6 +53,59 @@ class TestBasics:
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
 
+    def test_health_reports_load(self, client: TestClient) -> None:
+        health = client.get("/health").json()
+        assert health["uptime_seconds"] >= 0
+        assert health["jobs_running"] == 0
+        assert health["jobs_queued"] == 0
+
+    def test_request_id_header_is_unique(self, client: TestClient) -> None:
+        first = client.get("/health").headers["x-request-id"]
+        second = client.get("/health").headers["x-request-id"]
+        assert first and first != second
+
+    def test_error_responses_carry_request_id(self, client: TestClient) -> None:
+        response = client.post("/query", content=b"x")
+        assert response.status_code == 415
+        assert "x-request-id" in response.headers
+
+    def test_one_access_log_line_per_request(self, client: TestClient, caplog) -> None:
+        with caplog.at_level("INFO", logger="uvicorn.error"):
+            response = client.get("/health")
+        lines = [r.getMessage() for r in caplog.records if "GET /health" in r.getMessage()]
+        assert len(lines) == 1
+        assert "-> 200" in lines[0]
+        assert f"request_id={response.headers['x-request-id']}" in lines[0]
+        assert "ms client=" in lines[0]
+
+    def test_access_log_escapes_the_path(self, client: TestClient, caplog) -> None:
+        with caplog.at_level("INFO", logger="uvicorn.error"):
+            client.get("/nope%0Aforged")
+        assert all("\n" not in r.getMessage() for r in caplog.records)
+
+    def test_large_json_is_gzipped_on_request(self, client: TestClient) -> None:
+        response = client.get("/info", headers={"accept-encoding": "gzip"})
+        assert len(json.dumps(response.json())) > 1024
+        assert response.headers["content-encoding"] == "gzip"
+        assert response.json()["service"] == "sylphd"  # httpx decoded it
+
+    def test_gzip_is_opt_in_and_skips_small_bodies(self, client: TestClient) -> None:
+        plain = client.get("/info", headers={"accept-encoding": "identity"})
+        assert "content-encoding" not in plain.headers
+        small = client.get("/health", headers={"accept-encoding": "gzip"})
+        assert "content-encoding" not in small.headers
+
+    def test_busy_response_keeps_retry_after(self, client: TestClient) -> None:
+        app = create_app(
+            ServerConfig(db_path=ECOLI_TWO_STAGE, max_jobs=1, max_queue=0),
+            database=client.app.state.database,
+        )
+        with TestClient(app) as test_client:
+            app.state.jobs._admitted = 1  # one job already running
+            response = _post(test_client, "query", [("o157", O157_SKETCH.read_bytes())])
+            assert response.status_code == 503
+            assert response.headers["retry-after"] == "1"
+
     def test_index(self, client: TestClient) -> None:
         response = client.get("/")
         assert response.status_code == 200

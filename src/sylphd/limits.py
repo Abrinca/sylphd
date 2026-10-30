@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any
@@ -47,7 +48,7 @@ class RateLimiter:
         self.count = count
         self.window = window
         self._clock = clock
-        self._hits: dict[str, list[float]] = {}
+        self._hits: dict[str, deque[float]] = {}
 
     def check(self, key: str) -> int | None:
         """Record a request for ``key``.
@@ -57,9 +58,9 @@ class RateLimiter:
         """
         now = self._clock()
         cutoff = now - self.window
-        hits = self._hits.setdefault(key, [])
+        hits = self._hits.setdefault(key, deque())
         while hits and hits[0] <= cutoff:
-            hits.pop(0)
+            hits.popleft()
         if len(hits) >= self.count:
             retry = self.window - (now - hits[0])
             return max(1, math.ceil(retry))
@@ -184,6 +185,16 @@ class JobSlots:
         self.max_queue = max_queue
         self._admitted = 0
         self._semaphore = anyio.Semaphore(max_jobs)
+
+    @property
+    def running(self) -> int:
+        """Jobs holding a slot right now."""
+        return self.max_jobs - self._semaphore.value
+
+    @property
+    def queued(self) -> int:
+        """Admitted jobs that have not got a slot yet."""
+        return max(0, self._admitted - self.running)
 
     def check(self, count: int = 1) -> None:
         """Raise :class:`QueueFullError` unless ``count`` more jobs fit now."""

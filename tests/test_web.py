@@ -300,6 +300,35 @@ class TestRateLimit:
                 parse_rate_limit(bad)
 
 
+class TestJobSlotCounts:
+    def test_running_and_queued(self) -> None:
+        slots = JobSlots(max_jobs=2, max_queue=4)
+        assert (slots.running, slots.queued) == (0, 0)
+
+        async def scenario() -> None:
+            with slots.admit(3):
+                assert (slots.running, slots.queued) == (0, 3)
+                async with slots.slot():
+                    assert (slots.running, slots.queued) == (1, 2)
+            assert (slots.running, slots.queued) == (0, 0)
+
+        anyio.run(scenario)
+
+
+class TestAssemblyContentLength:
+    def test_non_integer_content_length_is_a_400(self, assembly_client) -> None:
+        response = assembly_client.post(
+            "/assembly",
+            content=b">x\nACGT\n",
+            headers={
+                "content-type": "application/octet-stream",
+                "content-length": "lots",
+            },
+        )
+        assert response.status_code == 400
+        assert "Content-Length" in response.json()["error"]
+
+
 class TestClientIdentity:
     @staticmethod
     def _scope(peer: str | None, xff: str | None = None) -> dict:
@@ -327,6 +356,40 @@ class TestClientIdentity:
         scope = self._scope(None, "203.0.113.9")
         assert client_identity(scope, frozenset({"unix"})) == "203.0.113.9"
         assert client_identity(scope, frozenset()) == "unix"
+
+    @pytest.mark.parametrize(
+        ("peer", "xff", "trusted", "expected"),
+        [
+            # the header of an untrusted peer is never believed
+            ("198.51.100.7", "203.0.113.9", set(), "198.51.100.7"),
+            ("198.51.100.7", "203.0.113.9", {"127.0.0.1"}, "198.51.100.7"),
+            # a trusted peer without the header is itself
+            ("127.0.0.1", None, {"127.0.0.1"}, "127.0.0.1"),
+            ("127.0.0.1", "", {"127.0.0.1"}, "127.0.0.1"),
+            ("127.0.0.1", "203.0.113.9", {"127.0.0.1"}, "203.0.113.9"),
+            # a spoofed left part of the chain is ignored: rightmost wins
+            ("127.0.0.1", "6.6.6.6, 203.0.113.9", {"127.0.0.1"}, "203.0.113.9"),
+            # trusted hops on the right are skipped
+            ("127.0.0.1", "203.0.113.9, 10.0.0.2", {"127.0.0.1", "10.0.0.2"}, "203.0.113.9"),
+            ("127.0.0.1", "10.0.0.3, 203.0.113.9, 10.0.0.2", {"127.0.0.1", "10.0.0.2", "10.0.0.3"}, "203.0.113.9"),
+            # every hop trusted: fall back to the peer
+            ("127.0.0.1", "10.0.0.2, 127.0.0.1", {"127.0.0.1", "10.0.0.2"}, "127.0.0.1"),
+            # blanks and whitespace
+            ("127.0.0.1", " 203.0.113.9 ,, ", {"127.0.0.1"}, "203.0.113.9"),
+            (None, "203.0.113.9", {"unix"}, "203.0.113.9"),
+            (None, "203.0.113.9", {"127.0.0.1"}, "unix"),
+        ],
+    )
+    def test_forwarded_chain_table(self, peer, xff, trusted, expected) -> None:
+        assert client_identity(self._scope(peer, xff), frozenset(trusted)) == expected
+
+    def test_last_forwarded_header_line_wins(self) -> None:
+        scope = self._scope("127.0.0.1")
+        scope["headers"] = [
+            (b"x-forwarded-for", b"6.6.6.6"),
+            (b"X-Forwarded-For", b"203.0.113.9"),
+        ]
+        assert client_identity(scope, frozenset({"127.0.0.1"})) == "203.0.113.9"
 
     def test_trusted_proxy_changes_bucket(self) -> None:
         def app():

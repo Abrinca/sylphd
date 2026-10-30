@@ -521,20 +521,20 @@ def _profile_caveats(samples: Sequence[dict[str, Any]]) -> list[str]:
 
 
 def _client_from_args(args: argparse.Namespace):
-    timeout = args.timeout
+    options = {"timeout": args.timeout, "retries": args.retries}
     if getattr(args, "url", None) is not None:
-        return connect(url=args.url, timeout=timeout)
+        return connect(url=args.url, **options)
     if getattr(args, "tcp", None) is not None:
-        return connect(url=args.tcp, timeout=timeout)
+        return connect(url=args.tcp, **options)
     if getattr(args, "socket", None) is not None:
-        return connect(socket_path=args.socket, timeout=timeout)
+        return connect(socket_path=args.socket, **options)
     env_url = os.environ.get("SYLPHD_URL")
     if env_url:
-        return connect(url=env_url, timeout=timeout)
+        return connect(url=env_url, **options)
     env_socket = os.environ.get("SYLPHD_SOCKET")
     if env_socket:
-        return connect(socket_path=env_socket, timeout=timeout)
-    return connect(socket_path=default_socket_path(), timeout=timeout)
+        return connect(socket_path=env_socket, **options)
+    return connect(socket_path=default_socket_path(), **options)
 
 
 def _resolve_fields(text: str | None, metadata: dict[str, Any] | None) -> list[str] | None:

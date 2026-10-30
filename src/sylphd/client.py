@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Self
@@ -25,6 +26,12 @@ from .protocol import ProfileParams, contigs_json, params_json
 
 #: ``Content-Type`` of an ``/assembly`` body that is a sketch (see the server).
 SKETCH_CONTENT_TYPE = "application/vnd.sylph.sketch"
+
+#: Statuses that mean "try again shortly" (queue full, rate limited).
+RETRY_STATUSES = frozenset({429, 503})
+
+#: Longest wait between two attempts, in seconds.
+MAX_RETRY_DELAY = 30.0
 
 
 def normalize_base_url(url: str) -> str:
@@ -81,6 +88,7 @@ class SylphClient:
         socket_path: str | os.PathLike[str] | None = None,
         base_url: str | None = None,
         timeout: httpx.Timeout | float | None = None,
+        retries: int = 0,
     ) -> None:
         if (socket_path is None) == (base_url is None):
             raise ValueError("exactly one of socket_path and base_url is required")
@@ -89,6 +97,8 @@ class SylphClient:
             normalize_base_url(base_url) if base_url is not None else None
         )
         self.timeout = timeout if timeout is not None else default_timeout()
+        #: How often a 429/503 reply is retried (after its ``Retry-After``).
+        self.retries = max(0, retries)
         transport = None
         if self.socket_path is not None:
             transport = httpx.HTTPTransport(uds=str(self.socket_path), retries=0)
@@ -107,10 +117,14 @@ class SylphClient:
         return self._send(self._client.build_request(method, path, **kwargs))
 
     def _send(self, request: httpx.Request) -> httpx.Response:
-        try:
-            response = self._client.send(request)
-        except httpx.HTTPError as error:
-            raise ClientError(self._connection_message(error)) from error
+        for attempt in range(self.retries + 1):
+            try:
+                response = self._client.send(request)
+            except httpx.HTTPError as error:
+                raise ClientError(self._connection_message(error)) from error
+            if response.status_code not in RETRY_STATUSES or attempt == self.retries:
+                break
+            time.sleep(_retry_delay(response, attempt))
         if response.status_code >= 400:
             raise ClientError(_error_message(response), response.status_code)
         return response
@@ -384,6 +398,16 @@ class SylphClient:
         self.close()
 
 
+def _retry_delay(response: httpx.Response, attempt: int) -> float:
+    """Seconds to wait before retry ``attempt + 1``: ``Retry-After``, but at
+    least 1, 2, 4... s, and at most :data:`MAX_RETRY_DELAY`."""
+    try:
+        advised = float(response.headers.get("retry-after", 0))
+    except ValueError:  # an HTTP date: not worth parsing
+        advised = 0.0
+    return min(MAX_RETRY_DELAY, max(advised, 2.0**attempt))
+
+
 def _error_message(response: httpx.Response) -> str:
     try:
         payload = response.json()
@@ -406,6 +430,7 @@ def connect(
     socket_path: str | os.PathLike[str] | None = None,
     url: str | None = None,
     timeout: float | None = None,
+    retries: int = 0,
 ) -> SylphClient:
     """Build a client for a socket path or an HTTP(S) base URL / ``host:port``.
 
@@ -414,7 +439,9 @@ def connect(
     """
     http_timeout = default_timeout() if timeout is None else httpx.Timeout(timeout, connect=30.0)
     if socket_path is not None:
-        return SylphClient(socket_path=socket_path, timeout=http_timeout)
+        return SylphClient(socket_path=socket_path, timeout=http_timeout, retries=retries)
     if url is None:
         raise ValueError("either a socket path or a URL is required")
-    return SylphClient(base_url=normalize_base_url(url), timeout=http_timeout)
+    return SylphClient(
+        base_url=normalize_base_url(url), timeout=http_timeout, retries=retries
+    )

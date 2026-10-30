@@ -258,8 +258,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="BP",
         help=(
-            "with --per-contig: contigs shorter than this are listed as too_short "
-            "and not sketched or sent [default: 20000]"
+            "with --per-contig: contigs shorter than this are not sketched or sent, "
+            "produce no row and are counted in the summary [default: 20000]"
         ),
     )
     assembly_parser.add_argument(
@@ -491,6 +491,14 @@ def _add_client_options(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="SECONDS",
         help="read timeout in seconds [default: no timeout]",
+    )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=0,
+        metavar="N",
+        help="retry up to N times when the server answers 429 or 503, waiting "
+        "for its Retry-After (at most 30 s) [default: 0]",
     )
 
 

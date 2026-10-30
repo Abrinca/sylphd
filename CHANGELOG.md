@@ -6,7 +6,21 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Server observability.** Every response carries `X-Request-Id`, and `sylphd serve` logs one
+  line per request (method, path, status, elapsed ms, client identity, request id) instead of
+  uvicorn's access log. `/health` gains `jobs_running` and `jobs_queued`.
+- **Gzip.** JSON responses of 1 KB or more are gzip-compressed when the client sends
+  `Accept-Encoding: gzip`.
+- **`--retries N`** for the commands that talk to a server: 429 and 503 answers are retried after
+  `Retry-After` (exponential backoff, capped at 30 s). Default 0, the old behaviour.
+
 ### Changed
+
+- `server.py` refuses requests through one `RequestError` path and maps job failures in one place;
+  response bodies and status codes are unchanged. A non-integer `Content-Length` on `/assembly`
+  is a 400.
 
 - **Web per-contig results follow the Reads and single-assembly look.** A Summary stat grid; a
   Composition card with one stacked-bar segment per queried contig coloured by consensus taxon

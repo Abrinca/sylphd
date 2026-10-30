@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from sylphd import cli
-from sylphd.client import SylphClient, connect, normalize_base_url
+from sylphd.client import ClientError, SylphClient, connect, normalize_base_url
 
 from conftest import ECOLI_TWO_STAGE
 
@@ -199,3 +199,75 @@ class TestHttpRoundTrip:
         )
         assert result.returncode == 1
         assert "cannot talk to sylphd at http://127.0.0.1:9" in result.stderr
+
+
+class TestRetries:
+    @staticmethod
+    def _client(replies: list[httpx.Response], retries: int, sleeps: list[float], monkeypatch):
+        calls: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return replies[min(len(calls), len(replies)) - 1]
+
+        monkeypatch.setattr("sylphd.client.time.sleep", sleeps.append)
+        client = SylphClient(base_url="http://example.test", retries=retries)
+        client._client = httpx.Client(
+            transport=httpx.MockTransport(handler), base_url="http://example.test/"
+        )
+        return client, calls
+
+    def test_retries_503_after_retry_after_then_succeeds(self, monkeypatch) -> None:
+        busy = httpx.Response(503, json={"error": "busy"}, headers={"Retry-After": "3"})
+        sleeps: list[float] = []
+        client, calls = self._client(
+            [busy, busy, httpx.Response(200, json=[])], 2, sleeps, monkeypatch
+        )
+        assert client.profile([("a", b"sketch")]) == []
+        assert len(calls) == 3
+        assert sleeps == [3.0, 3.0]
+        # the retried request carries the same multipart body
+        assert calls[0].content == calls[2].content
+
+    def test_gives_up_after_the_retries(self, monkeypatch) -> None:
+        limited = httpx.Response(429, json={"error": "slow down"})
+        sleeps: list[float] = []
+        client, calls = self._client([limited], 2, sleeps, monkeypatch)
+        with pytest.raises(ClientError, match="slow down") as raised:
+            client.info()
+        assert raised.value.status_code == 429
+        assert len(calls) == 3
+        assert sleeps == [1.0, 2.0]  # exponential without a Retry-After
+
+    def test_delay_is_capped(self, monkeypatch) -> None:
+        huge = httpx.Response(503, json={"error": "busy"}, headers={"Retry-After": "9999"})
+        sleeps: list[float] = []
+        client, _ = self._client([huge, httpx.Response(200, json={})], 1, sleeps, monkeypatch)
+        client.info()
+        assert sleeps == [30.0]
+
+    def test_default_does_not_retry(self, monkeypatch) -> None:
+        sleeps: list[float] = []
+        client, calls = self._client(
+            [httpx.Response(503, json={"error": "busy"})], 0, sleeps, monkeypatch
+        )
+        with pytest.raises(ClientError):
+            client.info()
+        assert len(calls) == 1 and sleeps == []
+
+    def test_other_errors_are_not_retried(self, monkeypatch) -> None:
+        sleeps: list[float] = []
+        client, calls = self._client(
+            [httpx.Response(400, json={"error": "bad"})], 3, sleeps, monkeypatch
+        )
+        with pytest.raises(ClientError):
+            client.info()
+        assert len(calls) == 1 and sleeps == []
+
+    def test_cli_flag(self) -> None:
+        args = cli.build_parser().parse_args(["info", "--retries", "4"])
+        with cli._client_from_args(args) as client:
+            assert client.retries == 4
+        args = cli.build_parser().parse_args(["info"])
+        with cli._client_from_args(args) as client:
+            assert client.retries == 0
