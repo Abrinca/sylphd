@@ -913,65 +913,12 @@
 
   function refreshResetLink() {
     const link = $('pc-reset-remembered');
-    if (link) link.hidden = !(storedSmallChoice() || storedManyChoice());
+    if (link) link.hidden = !(storedSmallChoice() || storedManyChoice() || window.SylphdUsage.hasAgreements());
   }
 
   /* ----------------------------------------------------------- modal */
-  // One accessible modal per run. Resolves the chosen value (or `escape`), and
-  // rejects with AbortError when the run is cancelled from the page.
-  function choiceModal({ title, paragraphs, buttons, escape, signal }) {
-    return new Promise((resolve, reject) => {
-      const titleId = 'pc-modal-title';
-      const backdrop = el('div', { class: 'pc-modal-backdrop' });
-      const dialog = el('div', {
-        class: 'pc-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId,
-      });
-      let done = false;
-      const onAbort = () => {
-        if (done) return;
-        done = true;
-        document.removeEventListener('keydown', onKey, true);
-        backdrop.remove();
-        reject(cancelledError());
-      };
-      const finish = (choice) => {
-        if (done) return;
-        done = true;
-        document.removeEventListener('keydown', onKey, true);
-        if (signal) signal.removeEventListener('abort', onAbort);
-        backdrop.remove();
-        resolve(choice);
-      };
-      const nodes = buttons.map((button) => el('button', {
-        type: 'button',
-        class: button.primary ? 'btn btn-primary' : button.ghost ? 'btn btn-ghost' : 'btn',
-        text: button.label,
-        onclick: () => finish(button.value),
-      }));
-      const onKey = (event) => {
-        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(escape); return; }
-        if (event.key !== 'Tab') return;
-        const first = nodes[0];
-        const last = nodes[nodes.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-      };
-      dialog.append(
-        el('h3', { id: titleId, text: title }),
-        ...paragraphs.map((text) => (text instanceof Node ? text : el('p', { class: 'detail', text }))),
-        el('div', { class: 'pc-modal-actions' }, nodes),
-        el('p', { class: 'detail', text: '“Always” choices are remembered in this browser. Use “Reset remembered choices” next to “Minimum contig length” to forget them.' }));
-      backdrop.append(dialog);
-      backdrop.addEventListener('click', (event) => { if (event.target === backdrop) finish(escape); });
-      document.body.append(backdrop);
-      document.addEventListener('keydown', onKey, true);
-      if (signal) {
-        if (signal.aborted) { onAbort(); return; }
-        signal.addEventListener('abort', onAbort, { once: true });
-      }
-      nodes[0].focus();
-    });
-  }
+  const REMEMBER_NOTE = '“Always” choices are remembered in this browser. Use “Reset remembered choices” next to “Minimum contig length” to forget them.';
+  const choiceModal = (options) => S.choiceModal({ ...options, note: REMEMBER_NOTE });
 
   // More contigs at or above the threshold than the browser will classify.
   function askManyContigs({ contigs, threshold, signal }) {
@@ -1029,10 +976,13 @@
     resetLink.addEventListener('click', () => {
       storeSmallChoice(null);
       storeManyChoice(null);
+      window.SylphdUsage.forgetAgreements();
       S.updateSubmit();
     });
   }
   refreshResetLink();
+  // an agreement to a server's usage statistics is a remembered choice too
+  document.addEventListener('sylphd:choices', refreshResetLink);
 
   // Keeps the `limit` longest contigs (a min-heap by length); on a tie the earlier record stays.
   function longestKept(limit) {

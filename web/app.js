@@ -101,12 +101,14 @@
   const exportName = (name, mode, ext) => `sylphd_${fileStem(name, 'sample')}_${mode}.${ext}`;
 
   /* ------------------------------------------------------------- modes */
-  // One page, three views selected by the hash: '' (landing), '#assembly', '#reads'.
-  const MODES = { assembly: 'Assembly', reads: 'Reads' };
+  // One page, views selected by the hash: '' (landing), '#assembly', '#reads', and '#usage'
+  // (the server's usage statistics; reached from the status line, not a tab).
+  const MODES = { assembly: 'Assembly', reads: 'Reads', usage: 'Usage' };
   const TITLES = {
     landing: 'sylphd – identify assemblies and profile reads against GTDB',
     assembly: 'sylphd – identify an assembly',
     reads: 'sylphd – profile reads',
+    usage: 'sylphd – usage statistics',
   };
   let mode = 'landing';
   const modeListeners = [];
@@ -398,6 +400,13 @@
         const w = Math.round(lim.rate_limit.window_seconds);
         facts.push(fact('Rate', `${lim.rate_limit.count} / ${w === 60 ? 'min' : `${w} s`}`, 'Requests allowed per client address'));
       }
+      // self-reported by the server, like its about text
+      if (usageOn()) {
+        facts.push(el('a', {
+          class: 'fact fact-link', href: '#usage',
+          title: 'this server reports that it keeps usage statistics',
+        }, el('span', { class: 'fact-value', text: 'usage statistics on' })));
+      }
       const frag = [el('span', { class: 'facts' }, ...facts)];
       ui.statusDetail.replaceChildren(...frag);
       renderPanelHead();
@@ -489,6 +498,9 @@
     setTimeout(() => c.abort(), ms);
     return c.signal;
   }
+
+  // The server's `usage` object when it keeps usage statistics, else null (self-reported).
+  const usageOn = () => (serverInfo && serverInfo.usage && serverInfo.usage.enabled ? serverInfo.usage : null);
 
   // The sketch is checked against the server's upload limit before it is sent.
   const sketchLimitBytes = () => ((serverInfo && serverInfo.limits && serverInfo.limits.max_upload_mb) || 0) * 1024 * 1024;
@@ -781,6 +793,8 @@
   ui.form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     if (ui.submit.disabled) return;
+    // nothing is sketched or sent until the visitor has agreed (once per server and policy)
+    if (!(await window.SylphdUsage.ensureAgreed())) return;
     if (window.SylphdContigs && window.SylphdContigs.active()) {
       await runPerContig();
       return;
@@ -897,6 +911,66 @@
       el('h3', { text: 'Could not reach the server' }),
       el('p', null, 'The request to ', el('code', { text: API }), ' failed before getting a response (a proxy may also have closed the connection on a very large upload). The server status is shown at the top of the page.')));
     loadInfo();
+  }
+
+  /* ------------------------------------------------------------- modal */
+  const abortError = () => Object.assign(new Error('cancelled'), { name: 'AbortError' });
+
+  // One accessible modal. Resolves the chosen button's value (or `escape` for Esc and a click
+  // outside), and rejects with AbortError when `signal` aborts. `paragraphs` are strings or
+  // nodes; `buttons` are { label, value, primary?, ghost? }; `note` is a closing detail line.
+  function choiceModal({ title, paragraphs, buttons, escape, signal, note }) {
+    return new Promise((resolve, reject) => {
+      const titleId = 'pc-modal-title';
+      const backdrop = el('div', { class: 'pc-modal-backdrop' });
+      const dialog = el('div', {
+        class: 'pc-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId,
+      });
+      let done = false;
+      const onAbort = () => {
+        if (done) return;
+        done = true;
+        document.removeEventListener('keydown', onKey, true);
+        backdrop.remove();
+        reject(abortError());
+      };
+      const finish = (choice) => {
+        if (done) return;
+        done = true;
+        document.removeEventListener('keydown', onKey, true);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        backdrop.remove();
+        resolve(choice);
+      };
+      const nodes = buttons.map((button) => el('button', {
+        type: 'button',
+        class: button.primary ? 'btn btn-primary' : button.ghost ? 'btn btn-ghost' : 'btn',
+        text: button.label,
+        onclick: () => finish(button.value),
+      }));
+      const onKey = (event) => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(escape); return; }
+        if (event.key !== 'Tab') return;
+        const first = nodes[0];
+        const last = nodes[nodes.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      };
+      dialog.append(
+        el('h3', { id: titleId, text: title }),
+        ...paragraphs.map((text) => (text instanceof Node ? text : el('p', { class: 'detail', text }))),
+        el('div', { class: 'pc-modal-actions' }, nodes),
+        note ? el('p', { class: 'detail', text: note }) : null);
+      backdrop.append(dialog);
+      backdrop.addEventListener('click', (event) => { if (event.target === backdrop) finish(escape); });
+      document.body.append(backdrop);
+      document.addEventListener('keydown', onKey, true);
+      if (signal) {
+        if (signal.aborted) { onAbort(); return; }
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+      nodes[0].focus();
+    });
   }
 
   /* ------------------------------------------------- shared result widgets */
@@ -1492,13 +1566,14 @@
   /* ----------------------------------------------- shared with the other scripts */
   window.Sylphd = {
     el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtPct, fmtSecs, fmtDur, isNum, has, notice,
-    readChoice, writeChoice, stem, fileStem, exportName, download, downloadJson,
+    readChoice, writeChoice, choiceModal, stem, fileStem, exportName, download, downloadJson,
     RANK_NAMES, DEPTH, rankTitle, parseLineage, lineageName, genericRanks, genericTaxon, hitSource, relClass,
     exportButtons, seg, barRow, sortableTable,
     accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal, updateSubmit,
     assemblyInput: () => input,
     api: API, apiOverride,
     info: () => serverInfo,
+    usage: usageOn,
     problem: () => (API ? serverProblem : 'none'),
     mode: () => mode,
     onInfo: (f) => infoListeners.push(f),

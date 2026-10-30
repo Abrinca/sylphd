@@ -462,6 +462,9 @@
     if (!db || !st.files.length || !o.ok) return;
     const name = (ui.name.value.trim() || sampleFromName(st.files[0].name, st.layout === 'paired')).slice(0, NAME_MAX);
     const fromSketch = st.kind === 'sketch' && st.header && !st.header.error;
+    // "Only sketch" sends nothing; a ready-made sketch is always uploaded. Anything that sends
+    // needs the agreement to the server's usage statistics first.
+    if ((fromSketch || !o.sketchOnly) && !(await window.SylphdUsage.ensureAgreed())) return;
     const run = {
       fromSketch, files: st.files.slice(), layout: st.layout, name, c: fromSketch ? st.header.c : db.c, k: fromSketch ? st.header.k : db.k, opts: o,
       total: st.files.reduce((n, f) => n + f.size, 0), t0: performance.now(), phase: fromSketch ? 'upload' : 'sketch', phaseAt: performance.now(),
@@ -493,6 +496,8 @@
   }
 
   async function profilePhase(run) {
+    // an earlier "Only sketch" run is uploaded from here; declining leaves its result as it was
+    if (!(await window.SylphdUsage.ensureAgreed())) return;
     clearInterval(run.timer);
     run.cancelled = false;
     run.timer = setInterval(() => renderProgress(run), 200);

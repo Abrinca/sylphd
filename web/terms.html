@@ -51,7 +51,31 @@
         which the server sketches in memory. Raw sequences are not stored or
         logged either, but unlike a sketch they do reach the server.</p>
       <p>Only sizes, timings and request outcomes may be
-        recorded, to run and monitor the service.</p>
+        recorded, to run and monitor the service. The request log of the
+        public service contains the method, path, status, duration and a
+        random request id, and no IP address; client addresses are held in
+        memory only, to apply the rate limit.</p>
+
+      <h3>Usage statistics</h3>
+      <p>A sylphd server can keep usage statistics, and says so in the status
+        line at the top of the page (the page cannot verify this). When it
+        does, each successful request to <code>/assembly</code>,
+        <code>/contigs</code>, <code>/profile</code> or <code>/query</code>
+        adds to counters kept per ten-minute window, endpoint and kind of
+        client (this web page, the sylphd command line with its version, or
+        other): the number of requests, samples and contigs, the bases and
+        sketch bytes reported, and coarse histograms of job time and queue
+        wait. Sylphd never stores IP addresses (or hashes of them), counts of
+        unique visitors, file, sample or contig names, results, taxa or
+        settings in them, and nothing per person; failed requests are not
+        counted. The totals are public, in the
+        <a href="./#usage">Usage view</a> and at <code>/usage</code> of the
+        server.</p>
+      <p>Before the first upload to such a server this page asks you to agree
+        to this; if you cancel, nothing is sent. Command line clients print a
+        note instead. If you do not want your requests counted, use another
+        server or run your own: usage statistics are off unless the operator
+        turns them on.</p>
 
       <h3>No warranty, availability</h3>
       <p>The service is provided as-is, without warranty of any kind. We do not

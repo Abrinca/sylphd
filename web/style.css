@@ -854,3 +854,30 @@ table.pc-table tr.pc-detail > td { background: var(--soft); padding: 10px 12px; 
   .pc-modal { animation: pc-modal-in .14s ease-out; }
   @keyframes pc-modal-in { from { transform: translateY(6px); opacity: .6; } to { transform: none; opacity: 1; } }
 }
+
+/* usage statistics: the status-line chip, the #usage view and its chart */
+.fact-link { text-decoration: none; border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.fact-link:hover { border-color: var(--accent); text-decoration: none; }
+.fact-link .fact-value { color: var(--accent); font-weight: 500; }
+.usage-summary { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.uchart { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; }
+.uchart-y {
+  display: flex; flex-direction: column; justify-content: space-between; height: 160px;
+  font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right;
+}
+.uchart-plot { min-width: 0; }
+.uchart-svg { display: block; width: 100%; height: 160px; border-bottom: 1px solid var(--border); background: var(--bg); border-radius: 6px 6px 0 0; }
+.uchart-svg .uc-web { fill: var(--cat-1); }
+.uchart-svg .uc-cli { fill: var(--cat-2); }
+.uchart-svg .uc-other { fill: var(--cat-other); }
+.uchart-hit { fill: transparent; }
+.uchart-hit:hover { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
+.uchart-x { display: flex; justify-content: space-between; margin-top: 4px; font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ulegend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 12px 0 0; padding: 0; list-style: none; font-size: .85rem; color: var(--muted); }
+.ulegend .sw { margin-right: 6px; vertical-align: -1px; }
+.usage-breakdowns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 8px 28px; }
+.usage-breakdown h3 { margin: 0; font-size: .95rem; }
+.usage-breakdown .alist { margin-top: 6px; }
+.usage-view .card > .detail { margin: 10px 0 0; color: var(--muted); font-size: .88rem; }
+.usage-statement { margin-bottom: 14px; }
+.usage-back { margin: 0 0 8px; }
