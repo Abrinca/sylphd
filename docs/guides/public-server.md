@@ -132,8 +132,8 @@ rightmost address that is not itself a trusted proxy is used.
 requests per ten-minute window, endpoint and kind of client (web page, `sylphd` command line and
 its version, other), with contigs, samples, bases and sketch bytes, a coarse histogram of job time
 and queue wait, and the peak queue depth. Never IP addresses or hashes of them, unique visitors,
-names, results or parameters. The totals are public at `GET /usage`, summarised by the web page
-at `#usage`; the exact fields are in the [HTTP API](../reference/http-api.md#get-usage) and the
+names, results or parameters. The totals are public at `GET /usage`, summarised by the web page in a modal
+dialog (and at `/#usage`); the exact fields are in the [HTTP API](../reference/http-api.md#get-usage) and the
 flag in [`sylphd serve`](../commands/serve.md#usage-statistics).
 
 Because it is a statement to your users, it is announced:

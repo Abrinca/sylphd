@@ -195,9 +195,9 @@ main.wrap { padding-top: 22px; padding-bottom: 36px; }
   border-radius: 12px; padding: 18px 20px; margin-bottom: 18px;
   box-shadow: var(--shadow);
 }
-.card > h2, .card-head h2 { margin: 0 0 12px; font-size: 1.15rem; }
+.card > h2, .card-head h2, .card-head h3 { margin: 0 0 12px; font-size: 1.15rem; }
 .card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; margin-bottom: 10px; }
-.card-head h2 { margin: 0; }
+.card-head h2, .card-head h3 { margin: 0; }
 
 /* input */
 .drop { position: relative; }
@@ -829,6 +829,7 @@ table.pc-table tr.pc-detail > td { background: var(--soft); padding: 10px 12px; 
 
 /* per-contig short-contig modal */
 .pc-reset { align-self: flex-end; padding-bottom: 8px; }
+body.modal-open { overflow: hidden; }
 .pc-modal-backdrop {
   position: fixed; inset: 0; z-index: 1000;
   display: grid; place-items: center;
@@ -854,11 +855,21 @@ table.pc-table tr.pc-detail > td { background: var(--soft); padding: 10px 12px; 
   .pc-modal { animation: pc-modal-in .14s ease-out; }
   @keyframes pc-modal-in { from { transform: translateY(6px); opacity: .6; } to { transform: none; opacity: 1; } }
 }
+@media (max-width: 600px) {
+  .pc-modal-backdrop { padding: 12px; }
+  .pc-modal { padding: 16px 14px; }
+}
 
-/* usage statistics: the status-line chip, the #usage view and its chart */
+/* usage statistics: the status-line chip, modal and its chart */
 .fact-link { text-decoration: none; border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .fact-link:hover { border-color: var(--accent); text-decoration: none; }
 .fact-link .fact-value { color: var(--accent); font-weight: 500; }
+.usage-backdrop { z-index: 1010; }
+.usage-modal { width: min(52rem, 100%); background: var(--bg); }
+.usage-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.usage-head h2 { margin: 0; font-size: 1.25rem; }
+.usage-close { font-size: 1.1rem; line-height: 1; padding: 4px 10px; }
+.usage-modal .card > .detail { margin: 10px 0 0; color: var(--muted); font-size: .88rem; }
 .usage-summary { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 .uchart { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; }
 .uchart-y {
@@ -878,6 +889,4 @@ table.pc-table tr.pc-detail > td { background: var(--soft); padding: 10px 12px; 
 .usage-breakdowns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 8px 28px; }
 .usage-breakdown h3 { margin: 0; font-size: .95rem; }
 .usage-breakdown .alist { margin-top: 6px; }
-.usage-view .card > .detail { margin: 10px 0 0; color: var(--muted); font-size: .88rem; }
-.usage-statement { margin-bottom: 14px; }
-.usage-back { margin: 0 0 8px; }
+.usage-statement { margin-bottom: 0; }

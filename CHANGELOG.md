@@ -6,6 +6,13 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Web: usage statistics modal.** The `#usage` view is replaced with an accessible modal
+  dialog over the current page, keeping the user's input, mode and results intact underneath. The
+  modal opens from the status-line chip and can be dismissed by clicking outside, Escape, or the
+  close button; `/#usage` opens the modal over the default page and clears the hash on close.
+
 ### Fixed
 
 - The example `deploy/Caddyfile` also drops the query string from Caddy's access log: `/assembly`

@@ -2,7 +2,7 @@
 
 Runs the real script under node with a stand-in for the page helpers and for
 ``localStorage``; the modal itself is a stub whose answer the test chooses.
-The rendering of the dialog and of the ``#usage`` view is covered by the
+The rendering of the dialog and of the usage modal is covered by the
 browser walkthrough, not here.
 """
 

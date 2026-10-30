@@ -101,14 +101,12 @@
   const exportName = (name, mode, ext) => `sylphd_${fileStem(name, 'sample')}_${mode}.${ext}`;
 
   /* ------------------------------------------------------------- modes */
-  // One page, views selected by the hash: '' (landing), '#assembly', '#reads', and '#usage'
-  // (the server's usage statistics; reached from the status line, not a tab).
-  const MODES = { assembly: 'Assembly', reads: 'Reads', usage: 'Usage' };
+  // One page, views selected by the hash: '' (landing), '#assembly', and '#reads'.
+  const MODES = { assembly: 'Assembly', reads: 'Reads' };
   const TITLES = {
     landing: 'sylphd – identify assemblies and profile reads against GTDB',
     assembly: 'sylphd – identify an assembly',
     reads: 'sylphd – profile reads',
-    usage: 'sylphd – usage statistics',
   };
   let mode = 'landing';
   const modeListeners = [];
@@ -405,6 +403,10 @@
         facts.push(el('a', {
           class: 'fact fact-link', href: '#usage',
           title: 'this server reports that it keeps usage statistics',
+          onclick: (ev) => {
+            ev.preventDefault();
+            if (window.SylphdUsage) window.SylphdUsage.openModal();
+          },
         }, el('span', { class: 'fact-value', text: 'usage statistics on' })));
       }
       const frag = [el('span', { class: 'facts' }, ...facts)];
@@ -932,6 +934,7 @@
         done = true;
         document.removeEventListener('keydown', onKey, true);
         backdrop.remove();
+        if (!document.querySelector('.pc-modal-backdrop')) document.body.classList.remove('modal-open');
         reject(abortError());
       };
       const finish = (choice) => {
@@ -940,6 +943,7 @@
         document.removeEventListener('keydown', onKey, true);
         if (signal) signal.removeEventListener('abort', onAbort);
         backdrop.remove();
+        if (!document.querySelector('.pc-modal-backdrop')) document.body.classList.remove('modal-open');
         resolve(choice);
       };
       const nodes = buttons.map((button) => el('button', {
@@ -949,6 +953,7 @@
         onclick: () => finish(button.value),
       }));
       const onKey = (event) => {
+        if (backdrop !== document.querySelector('.pc-modal-backdrop:last-of-type')) return;
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(escape); return; }
         if (event.key !== 'Tab') return;
         const first = nodes[0];
@@ -963,6 +968,7 @@
         note ? el('p', { class: 'detail', text: note }) : null);
       backdrop.append(dialog);
       backdrop.addEventListener('click', (event) => { if (event.target === backdrop) finish(escape); });
+      document.body.classList.add('modal-open');
       document.body.append(backdrop);
       document.addEventListener('keydown', onKey, true);
       if (signal) {

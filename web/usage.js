@@ -1,5 +1,5 @@
 // Usage statistics: the agreement asked before the first upload to a server that keeps
-// them, and the #usage view that shows them. Loaded after app.js; exposes window.SylphdUsage.
+// them, and the modal dialog that shows them. Loaded after app.js; exposes window.SylphdUsage.
 // All server strings are inserted with textContent / text nodes only.
 (() => {
   'use strict';
@@ -48,13 +48,20 @@
   async function ensureAgreed() {
     const usage = S.usage();
     if (!usage || isAgreed(S.api, usage.policy)) return true;
+    const usageLink = el('a', {
+      href: usageUrl(), text: 'Usage view',
+      onclick: (ev) => {
+        ev.preventDefault();
+        openModal({ returnFocusTo: usageLink });
+      },
+    });
     const choice = await S.choiceModal({
       title: 'This server keeps usage statistics',
       paragraphs: [
         'For each successful request it counts, per ten-minute window: the endpoint, the kind of client (this web page, the sylphd command line or something else), the number of samples or contigs, the bases and sketch size, and how long the job waited and ran.',
         el('p', { class: 'detail' },
           'No IP addresses, file, sample or contig names, results, taxa or settings are stored, and nothing per person. The totals are public: see the ',
-          el('a', { href: usageUrl(), target: '_blank', rel: 'noopener', text: 'Usage view' }),
+          usageLink,
           ' and the ', el('a', { href: 'terms.html', target: '_blank', rel: 'noopener', text: 'terms of use' }), '.'),
       ],
       buttons: [
@@ -69,12 +76,10 @@
     return true;
   }
 
-  window.SylphdUsage = { ensureAgreed, isAgreed, agree, hasAgreements, forgetAgreements, agreedKey };
-
-  /* ----------------------------------------------------------------- view */
+  /* ---------------------------------------------------------------- modal */
   const KINDS = [
     ['web', 'Web page', 'seg-cat-1'],
-    ['cli', 'sylphd command line', 'seg-cat-2'],
+    ['cli', 'sylphd CLI', 'seg-cat-2'],
     ['other', 'Other clients', 'seg-cat-other'],
   ];
   const KIND_NAME = Object.fromEntries(KINDS.map(([key, name]) => [key, name]));
@@ -82,27 +87,20 @@
   const DAYS = 90;
   const CHART_H = 60;
 
-  let host = null;
-  let token = 0;
-
   // A bucket upper bound in seconds, e.g. "≤ 250 ms".
   const bound = (seconds) => (S.isNum(seconds) ? `≤ ${S.fmtDur(seconds * 1000)}` : '–');
   const pair = (distribution) => (distribution && distribution.count ? `${bound(distribution.median)} / ${bound(distribution.p95)}` : '–');
   const isoDay = (date) => date.toISOString().slice(0, 10);
 
   function card(title, ...body) {
-    return el('section', { class: 'card', 'aria-label': title }, el('div', { class: 'card-head' }, el('h2', { text: title })), ...body);
+    return el('section', { class: 'card', 'aria-label': title }, el('div', { class: 'card-head' }, el('h3', { text: title })), ...body);
   }
-  function message(kind, title, ...body) {
-    return el('div', { class: 'usage-view' }, S.notice(kind, title, ...body), backLink());
-  }
-  const backLink = () => el('p', { class: 'usage-back' }, el('a', { href: '#', text: '← Back to sylphd' }));
 
   function summaryCard(data) {
     const t = data.totals;
     const item = (label, value, small) => el('div', null, el('dt', { text: label }), el('dd', null, value, small ? el('small', { text: small }) : null));
     return el('section', { class: 'card', 'aria-label': 'Totals' },
-      el('div', { class: 'card-head' }, el('h2', { text: 'Usage statistics' }),
+      el('div', { class: 'card-head' }, el('h3', { text: 'Totals' }),
         el('span', { class: 'badge badge-plain', title: 'what is tracked changes only with a new policy version' }, `policy ${data.policy}`)),
       el('dl', { class: 'summary usage-summary' },
         item('Requests', S.fmtInt(t.requests), 'successful'),
@@ -200,38 +198,98 @@
         el('a', { href: 'terms.html', text: 'terms of use' }), '.'));
   }
 
-  async function show() {
-    if (!host) host = document.getElementById('mode-usage');
-    if (!host) return;
-    const mine = (token += 1);
+  let activeModal = null;
+
+  function closeModal() {
+    if (!activeModal) return;
+    const { backdrop, onKey, trigger } = activeModal;
+    activeModal = null;
+    document.removeEventListener('keydown', onKey, true);
+    backdrop.remove();
+    if (!document.querySelector('.pc-modal-backdrop')) document.body.classList.remove('modal-open');
+    if (location.hash === '#usage') history.replaceState(null, '', location.pathname + location.search);
+    if (trigger && typeof trigger.focus === 'function') trigger.focus();
+  }
+
+  function openModal(options = {}) {
+    if (typeof document === 'undefined') return;
+    if (activeModal) return;
+    const trigger = options.returnFocusTo || (document.activeElement && document.activeElement !== document.body ? document.activeElement : document.querySelector('.fact-link'));
+    const backdrop = el('div', { class: 'pc-modal-backdrop usage-backdrop' });
+    const closeBtn = el('button', {
+      type: 'button', class: 'btn btn-ghost btn-small usage-close',
+      'aria-label': 'Close dialog', onclick: closeModal, text: '✕',
+    });
+    const body = el('div', { class: 'usage-body' });
+    const dialog = el('div', {
+      class: 'pc-modal usage-modal', role: 'dialog', 'aria-modal': 'true',
+      'aria-labelledby': 'usage-dialog-title', tabIndex: -1,
+    },
+      el('div', { class: 'usage-head' },
+        el('h2', { id: 'usage-dialog-title', text: 'Usage statistics' }),
+        closeBtn),
+      body);
+    backdrop.append(dialog);
+    backdrop.addEventListener('click', (ev) => { if (ev.target === backdrop) closeModal(); });
+
+    const onKey = (ev) => {
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closeModal(); return; }
+      if (ev.key !== 'Tab') return;
+      const nodes = dialog.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), [tabindex]:not([tabindex="-1"])');
+      if (!nodes.length) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+    };
+
+    activeModal = { backdrop, dialog, body, onKey, trigger, token: 0 };
+    document.body.classList.add('modal-open');
+    document.body.append(backdrop);
+    document.addEventListener('keydown', onKey, true);
+    closeBtn.focus();
+    loadUsage();
+  }
+
+  async function loadUsage() {
+    if (!activeModal) return;
+    const modal = activeModal;
+    const mine = (modal.token += 1);
     const info = S.info();
     if (!info) {
       const problem = S.problem();
-      host.replaceChildren(problem
-        ? message('error', 'Server offline', 'The usage statistics come from the server, and it cannot be reached right now. The server status is shown at the top of the page.')
-        : message('info', 'Checking the server…', 'The usage statistics will appear when the server answers.'));
+      modal.body.replaceChildren(problem
+        ? S.notice('error', 'Server offline', 'The usage statistics come from the server, and it cannot be reached right now. The server status is shown at the top of the page.')
+        : S.notice('info', 'Checking the server…', 'The usage statistics will appear when the server answers.'));
       return;
     }
     if (!S.usage()) {
-      host.replaceChildren(message('info', 'Usage statistics are off', 'This server does not keep usage statistics: nothing about your requests is counted.'));
+      modal.body.replaceChildren(S.notice('info', 'Usage statistics are off', 'This server does not keep usage statistics: nothing about your requests is counted.'));
       return;
     }
-    // the page refreshes /info every minute: keep showing the numbers while they reload
-    if (!host.querySelector('.usage-ready')) host.replaceChildren(message('info', 'Loading the usage statistics…'));
+    if (!modal.body.querySelector('.usage-ready')) modal.body.replaceChildren(S.notice('info', 'Loading the usage statistics…'));
     try {
       const res = await fetch(`${S.api}/usage`, { signal: S.timeoutSignal(15000), cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (mine !== token) return;
+      if (activeModal !== modal || mine !== modal.token) return;
       if (!data || !data.totals || !data.windows || !Array.isArray(data.windows.rows)) throw new Error('unexpected response');
-      host.replaceChildren(el('div', { class: 'usage-view usage-ready' }, summaryCard(data), chartCard(data), breakdownCard(data), statementCard(), backLink()));
+      modal.body.replaceChildren(el('div', { class: 'usage-ready' }, summaryCard(data), chartCard(data), breakdownCard(data), statementCard()));
     } catch (e) {
-      if (mine !== token) return;
-      host.replaceChildren(message('error', 'Could not load the usage statistics', `GET ${S.api}/usage failed: ${e.message || e}.`));
+      if (activeModal !== modal || mine !== modal.token) return;
+      modal.body.replaceChildren(S.notice('error', 'Could not load the usage statistics', `GET ${S.api}/usage failed: ${e.message || e}.`));
     }
   }
 
-  S.onMode((mode) => { if (mode === 'usage') show(); });
-  S.onInfo(() => { if (S.mode() === 'usage') show(); });
-  if (S.mode() === 'usage') show();
+  S.onInfo(() => { if (activeModal) loadUsage(); });
+
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    if (location.hash === '#usage') openModal();
+    window.addEventListener('hashchange', () => {
+      if (location.hash === '#usage') openModal();
+      else if (activeModal) closeModal();
+    });
+  }
+
+  window.SylphdUsage = { ensureAgreed, isAgreed, agree, hasAgreements, forgetAgreements, agreedKey, openModal, closeModal };
 })();
