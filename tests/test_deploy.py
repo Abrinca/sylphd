@@ -146,13 +146,13 @@ def test_caddy_access_log_drops_client_addresses() -> None:
     log = text[text.index("\tlog {"):]
     assert "format filter" in log
     for field in (
-        "request>uri regexp",
         "request>remote_ip",
         "request>remote_port",
         "request>client_ip",
         "request>headers>X-Forwarded-For",
     ):
         assert f"{field} delete" in log
+    assert 'request>uri regexp \\?.* ""' in log  # the query string names the sample
     assert "wrap console" in log
 
 
