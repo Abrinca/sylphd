@@ -283,6 +283,112 @@ def _write_info(connection: sqlite3.Connection, info: dict[str, str]) -> None:
     )
 
 
+def _check_output(output: Path, *, replaceable: bool) -> None:
+    if output.exists() and not replaceable:
+        raise FileExistsError(f"{output} already exists (pass --force to overwrite it)")
+    if not output.parent.exists():
+        raise FileNotFoundError(f"output directory does not exist: {output.parent}")
+
+
+def _tune_for_writing(connection: sqlite3.Connection) -> None:
+    connection.execute("PRAGMA journal_mode = OFF")
+    connection.execute("PRAGMA synchronous = OFF")
+    connection.execute("PRAGMA cache_size = -200000")  # 200 MB
+
+
+def _gtdb_row_count(connection: sqlite3.Connection) -> int:
+    return connection.execute(
+        "SELECT COUNT(*) FROM metadata_data WHERE gtdb_taxonomy IS NOT NULL"
+    ).fetchone()[0]
+
+
+def _insert_virtual_gtdb_source(
+    connection: sqlite3.Connection, release: object | None, rows: int
+) -> None:
+    """Register the GTDB metadata as the virtual source: its entries are the
+    accessions and their ``gtdb_taxonomy``, so no lineage is stored twice."""
+    _insert_source_row(
+        connection,
+        name=_gtdb_source_name(release),
+        kind="metadata",
+        ord_value=0,
+        origin="metadata_data",
+        md5=None,
+        rows=int(rows),
+        has_host=False,
+        built=datetime.now(UTC).isoformat(timespec="seconds"),
+    )
+
+
+def _import_taxonomy(
+    connection: sqlite3.Connection,
+    sources: Sequence[TaxonomySource],
+    *,
+    release: str | None,
+    has_virtual: bool,
+    first_ord: int,
+    lineages: _Dictionary,
+    hosts: _Dictionary,
+    progress: object,
+) -> tuple[list[str], list[TaxonomyOverlap]]:
+    """Add sylph-tax ``sources`` after the existing ones; return ``(skipped, overlaps)``.
+
+    Only the catalogue file of the release whose metadata is already the
+    virtual source is redundant (``is_redundant_gtdb_source``); it is skipped
+    rather than stored twice.
+    """
+    skipped: list[str] = []
+    overlaps: list[TaxonomyOverlap] = []
+    for source in sources:
+        if has_virtual and is_redundant_gtdb_source(source, release):
+            skipped.append(source.name)
+            continue
+        imported = _add_taxonomy_source(
+            connection,
+            source,
+            ord_value=max(_next_ord(connection), first_ord),
+            lineages=lineages,
+            hosts=hosts,
+            progress=progress,
+        )
+        overlaps.extend(cast(list[TaxonomyOverlap], imported["overlaps"]))
+    lineages.flush(connection, "dict_tax_lineage")
+    hosts.flush(connection, "dict_tax_host")
+    return skipped, overlaps
+
+
+def _finish(connection: sqlite3.Connection, info: dict[str, str]) -> None:
+    _write_info(connection, info)
+    connection.commit()
+    connection.execute("ANALYZE")
+    connection.commit()
+
+
+def _summary(
+    output: Path,
+    *,
+    rows: int,
+    sources: list[dict[str, object]],
+    taxonomy_sources: list[dict[str, object]],
+    skipped: list[str],
+    overlaps: list[TaxonomyOverlap],
+    release: str | None,
+) -> dict[str, object]:
+    """What ``build_metadata_db`` and ``update_metadata_db`` return."""
+    _report_taxonomy_overlaps(overlaps)
+    return {
+        "path": str(output),
+        "rows": rows,
+        "sources": sources,
+        "taxonomy_sources": taxonomy_sources,
+        "skipped_taxonomy": skipped,
+        "taxonomy_overlaps": [overlap.as_dict() for overlap in overlaps],
+        "size": output.stat().st_size,
+        "release": release,
+        "format_version": METADATA_FORMAT_VERSION,
+    }
+
+
 def build_metadata_db(
     files: Sequence[str | os.PathLike[str]],
     output: str | os.PathLike[str],
@@ -310,17 +416,11 @@ def build_metadata_db(
     if not files and not taxonomy:
         raise ValueError("at least one metadata file or taxonomy source is required")
     output = Path(output)
-    if output.exists() and not force:
-        raise FileExistsError(
-            f"{output} already exists (pass --force to overwrite it)"
-        )
-    if not output.parent.exists():
-        raise FileNotFoundError(f"output directory does not exist: {output.parent}")
+    _check_output(output, replaceable=force)
 
     placeholders = ", ".join("?" * (1 + len(COLUMNS)))
     sources: list[dict[str, object]] = []
     seen = 0
-    rows_written = 0
     callback = progress if callable(progress) else None
     # value -> id, plus values in id order, for each dictionary-encoded column.
     dictionaries: dict[str, dict[str, int]] = {
@@ -333,9 +433,6 @@ def build_metadata_db(
     release_text = None if release is None else str(release)
     lineages = _Dictionary()
     hosts = _Dictionary()
-    taxonomy_source_rows: list[dict[str, object]] = []
-    skipped_taxonomy: list[str] = []
-    overlaps: list[TaxonomyOverlap] = []
 
     def encode(accession: str, values: list[object]) -> tuple[object, ...]:
         for position, name in _DICT_POSITIONS:
@@ -359,9 +456,7 @@ def build_metadata_db(
         closing(sqlite3.connect(temporary)) as connection,
     ):
         connection.execute(f"PRAGMA page_size = {METADATA_PAGE_SIZE}")
-        connection.execute("PRAGMA journal_mode = OFF")
-        connection.execute("PRAGMA synchronous = OFF")
-        connection.execute("PRAGMA cache_size = -200000")  # 200 MB
+        _tune_for_writing(connection)
         _create_schema(connection)
 
         for file in files:
@@ -375,12 +470,12 @@ def build_metadata_db(
                     continue
                 batch.append(encode(accession, values))
                 if len(batch) >= 20_000:
-                    rows_written += _insert_batch(connection, placeholders, batch)
+                    _insert_batch(connection, placeholders, batch)
                     batch.clear()
                     if callback is not None:
                         callback(seen, path)
             if batch:
-                rows_written += _insert_batch(connection, placeholders, batch)
+                _insert_batch(connection, placeholders, batch)
             sources.append({"file": path.name, "rows": file_rows})
             if callback is not None:
                 callback(seen, path)
@@ -395,44 +490,21 @@ def build_metadata_db(
             "SELECT COUNT(*) FROM metadata_data"
         ).fetchone()[0]
 
-        # The GTDB metadata is a virtual source: its entries are the accessions
-        # and their gtdb_taxonomy, so no lineage is stored twice.
         if files:
-            virtual_rows = connection.execute(
-                "SELECT COUNT(*) FROM metadata_data WHERE gtdb_taxonomy IS NOT NULL"
-            ).fetchone()[0]
-            _insert_source_row(
-                connection,
-                name=_gtdb_source_name(release),
-                kind="metadata",
-                ord_value=0,
-                origin="metadata_data",
-                md5=None,
-                rows=int(virtual_rows),
-                has_host=False,
-                built=datetime.now(UTC).isoformat(timespec="seconds"),
-            )
-
-        ord_value = 1
-        for source in taxonomy:
-            if files and is_redundant_gtdb_source(source, release_text):
-                skipped_taxonomy.append(source.name)
-                continue
-            imported = _add_taxonomy_source(
-                connection,
-                source,
-                ord_value=ord_value,
-                lineages=lineages,
-                hosts=hosts,
-                progress=callback,
-            )
-            overlaps.extend(cast(list[TaxonomyOverlap], imported["overlaps"]))
-            ord_value += 1
-        lineages.flush(connection, "dict_tax_lineage")
-        hosts.flush(connection, "dict_tax_host")
+            _insert_virtual_gtdb_source(connection, release, _gtdb_row_count(connection))
+        skipped_taxonomy, overlaps = _import_taxonomy(
+            connection,
+            taxonomy,
+            release=release_text,
+            has_virtual=bool(files),
+            first_ord=1,
+            lineages=lineages,
+            hosts=hosts,
+            progress=callback,
+        )
         taxonomy_source_rows = _taxonomy_source_list(connection)
 
-        info = {
+        _finish(connection, {
             "format_version": METADATA_FORMAT_VERSION,
             "sylphd_version": __version__,
             "release": "" if release is None else str(release),
@@ -443,36 +515,28 @@ def build_metadata_db(
             "reps_only": "true" if reps_only else "false",
             "sylphtax_rules": SYLPHTAX_VERSION,
             "taxonomy_sources": json.dumps(taxonomy_source_rows),
-        }
-        _write_info(connection, info)
-        connection.commit()
-        connection.execute("ANALYZE")
-        connection.commit()
-    _report_taxonomy_overlaps(overlaps)
+        })
 
-    return {
-        "path": str(output),
-        "rows": rows_written,
-        "sources": sources,
-        "taxonomy_sources": taxonomy_source_rows,
-        "skipped_taxonomy": skipped_taxonomy,
-        "taxonomy_overlaps": [overlap.as_dict() for overlap in overlaps],
-        "size": output.stat().st_size,
-        "release": None if release is None else str(release),
-        "format_version": METADATA_FORMAT_VERSION,
-    }
+    return _summary(
+        output,
+        rows=rows_written,
+        sources=sources,
+        taxonomy_sources=taxonomy_source_rows,
+        skipped=skipped_taxonomy,
+        overlaps=overlaps,
+        release=release_text,
+    )
 
 
 def _insert_batch(
     connection: sqlite3.Connection, placeholders: str, batch: list[tuple[object, ...]]
-) -> int:
+) -> None:
     # Identifiers come from the COLUMNS constants, never from input; values are bound.
     names = ", ".join(["accession", *(column.name for column in COLUMNS)])
-    cursor = connection.executemany(
+    connection.executemany(
         f"INSERT OR REPLACE INTO metadata_data ({names}) VALUES ({placeholders})",
         batch,
     )
-    return cursor.rowcount
 
 
 def _taxonomy_source_list(connection: sqlite3.Connection) -> list[dict[str, object]]:
@@ -526,18 +590,11 @@ def update_metadata_db(
     if not source_path.is_file():
         raise FileNotFoundError(f"metadata database not found: {source_path}")
     same_file = output_path.exists() and source_path.resolve() == output_path.resolve()
-    if output_path.exists() and not force and not same_file:
-        raise FileExistsError(
-            f"{output_path} already exists (pass --force to overwrite it)"
-        )
-    if not output_path.parent.exists():
-        raise FileNotFoundError(f"output directory does not exist: {output_path.parent}")
+    _check_output(output_path, replaceable=force or same_file)
     # In-place updates read the source from the same directory, and the new
     # file gets the destination's permissions.
     mode = stat.S_IMODE(output_path.stat().st_mode) if output_path.exists() else None
 
-    skipped_taxonomy: list[str] = []
-    overlaps: list[TaxonomyOverlap] = []
     uri = f"{source_path.resolve().as_uri()}?mode=ro"
     with (
         _replace_on_success(output_path, mode=mode) as temporary,
@@ -545,9 +602,7 @@ def update_metadata_db(
     ):
         reader = sqlite3.connect(uri, uri=True)
         # The copy keeps the page size, dictionaries and rows of the source.
-        connection.execute("PRAGMA journal_mode = OFF")
-        connection.execute("PRAGMA synchronous = OFF")
-        connection.execute("PRAGMA cache_size = -200000")
+        _tune_for_writing(connection)
         try:
             reader.backup(connection)
         finally:
@@ -596,54 +651,40 @@ def update_metadata_db(
 
         lineages = _load_dictionary(connection, "dict_tax_lineage")
         hosts = _load_dictionary(connection, "dict_tax_host")
-        # Only the catalogue file of the release whose metadata is already the
-        # virtual source is redundant; --update must not replace the virtual
-        # source with it (is_redundant_gtdb_source covers both paths).
-        virtual_source = connection.execute(
-            "SELECT 1 FROM taxonomy_source WHERE kind = 'metadata' LIMIT 1"
-        ).fetchone()
-        release = info.get("release") or None
-        for entry in taxonomy:
-            if virtual_source is not None and is_redundant_gtdb_source(entry, release):
-                skipped_taxonomy.append(entry.name)
-                continue
-            imported = _add_taxonomy_source(
-                connection,
-                entry,
-                ord_value=_next_ord(connection),
-                lineages=lineages,
-                hosts=hosts,
-                progress=progress,
-            )
-            overlaps.extend(cast(list[TaxonomyOverlap], imported["overlaps"]))
-        lineages.flush(connection, "dict_tax_lineage")
-        hosts.flush(connection, "dict_tax_host")
-        _write_info(
-            connection,
-            {
-                "taxonomy_sources": json.dumps(_taxonomy_source_list(connection)),
-                "format_version": METADATA_FORMAT_VERSION,
-                "sylphtax_rules": info.get("sylphtax_rules", SYLPHTAX_VERSION),
-            },
+        # --update must not replace the virtual source with the catalogue file.
+        has_virtual = (
+            connection.execute(
+                "SELECT 1 FROM taxonomy_source WHERE kind = 'metadata' LIMIT 1"
+            ).fetchone()
+            is not None
         )
-        connection.commit()
-        connection.execute("ANALYZE")
-        connection.commit()
-        rows = connection.execute("SELECT COUNT(*) FROM metadata_data").fetchone()[0]
+        skipped_taxonomy, overlaps = _import_taxonomy(
+            connection,
+            taxonomy,
+            release=info.get("release") or None,
+            has_virtual=has_virtual,
+            first_ord=0,
+            lineages=lineages,
+            hosts=hosts,
+            progress=progress,
+        )
         sources = _taxonomy_source_list(connection)
-    _report_taxonomy_overlaps(overlaps)
+        _finish(connection, {
+            "taxonomy_sources": json.dumps(sources),
+            "format_version": METADATA_FORMAT_VERSION,
+            "sylphtax_rules": info.get("sylphtax_rules", SYLPHTAX_VERSION),
+        })
+        rows = connection.execute("SELECT COUNT(*) FROM metadata_data").fetchone()[0]
 
-    return {
-        "path": str(output_path),
-        "rows": int(rows),
-        "sources": [],
-        "taxonomy_sources": sources,
-        "skipped_taxonomy": skipped_taxonomy,
-        "taxonomy_overlaps": [overlap.as_dict() for overlap in overlaps],
-        "size": output_path.stat().st_size,
-        "release": info.get("release") or None,
-        "format_version": METADATA_FORMAT_VERSION,
-    }
+    return _summary(
+        output_path,
+        rows=int(rows),
+        sources=[],
+        taxonomy_sources=sources,
+        skipped=skipped_taxonomy,
+        overlaps=overlaps,
+        release=info.get("release") or None,
+    )
 
 
 def _add_virtual_gtdb_source(
@@ -651,21 +692,8 @@ def _add_virtual_gtdb_source(
 ) -> None:
     """Register the GTDB rows of a version 2 file as the virtual source."""
     try:
-        rows = connection.execute(
-            "SELECT COUNT(*) FROM metadata_data WHERE gtdb_taxonomy IS NOT NULL"
-        ).fetchone()[0]
+        rows = _gtdb_row_count(connection)
     except sqlite3.OperationalError:
         return
-    if not rows:
-        return
-    _insert_source_row(
-        connection,
-        name=_gtdb_source_name(info.get("release") or None),
-        kind="metadata",
-        ord_value=0,
-        origin="metadata_data",
-        md5=None,
-        rows=int(rows),
-        has_host=False,
-        built=datetime.now(UTC).isoformat(timespec="seconds"),
-    )
+    if rows:
+        _insert_virtual_gtdb_source(connection, info.get("release") or None, rows)
