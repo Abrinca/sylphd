@@ -46,7 +46,8 @@ from .taxonomy_sources import TaxonomySource
 from .paths import check_socket_path, default_socket_path, parse_tcp
 from .profiling import DatabaseSet, DatabaseSpec
 from .protocol import ProfileParams, ProtocolError, rows_to_tsv_lines
-from .server import ServerConfig, create_app, serve
+from .server import ServerConfig, create_app
+from .server_launch import serve
 from .sketching import (
     InputError,
     SampleInput,

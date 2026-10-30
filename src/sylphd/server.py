@@ -16,32 +16,21 @@ Design notes
 
 from __future__ import annotations
 
-import functools
-import json
 import logging
 import math
 import os
-import signal
-import socket
-import stat
 import sys
-import threading
 import time
-import uuid
-from collections.abc import AsyncIterator, Callable, Iterator, Sequence
-from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass, field, replace
+from collections.abc import Sequence
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 import anyio
 import pysylph
-import uvicorn
 from starlette.applications import Starlette
-from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.formparsers import MultiPartException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
@@ -50,19 +39,11 @@ from starlette.routing import Route
 
 from . import __version__, per_contig
 from .about import About
-from .assembly import INTERPRETATION_THRESHOLDS, SequenceError, SequenceTooLarge
-from .limits import (
-    QUEUE_RETRY_SECONDS,
-    JobSlots,
-    QueueFullError,
-    RateLimiter,
-    RateLimitMiddleware,
-    client_identity,
-)
+from .assembly import INTERPRETATION_THRESHOLDS
+from .limits import JobSlots, RateLimiter, RateLimitMiddleware
 from .metadata import MetadataDB
 from .paths import SOCKET_MODE
 from .profiling import (
-    BadRequest,
     DatabaseSet,
     DatabaseSpec,
     check_sketch_header,
@@ -71,15 +52,18 @@ from .profiling import (
     run_contig_query,
     run_sample,
 )
-from .protocol import PROFILE_PARAM_KEYS, ProfileParams, ProtocolError
-from .sketching import InputError, check_sample_name, sample_name_from_path
-from .taxonomy import TaxonomyError, parse_taxonomies, resolve_taxonomy_columns
+from .protocol import PROFILE_PARAM_KEYS, ProfileParams
+from .server_errors import RequestError, answers_errors, check_queue, job_errors
+from .server_middleware import AccessLogMiddleware, BodyLimitMiddleware
+from .server_upload import (
+    MAX_PARAMS_BYTES,
+    MAX_SKETCHES,
+    read_contigs,
+    read_upload,
+    require_multipart,
+)
 
 log = logging.getLogger("uvicorn.error")
-
-#: Maximum number of sketches accepted in one ``/profile`` or ``/query``
-#: request.
-MAX_SKETCHES = 4096
 
 #: Default of ``--max-contigs``: the maximum number of contigs accepted in one
 #: ``/contigs`` request.  The whole request is one job (its contigs run
@@ -87,11 +71,6 @@ MAX_SKETCHES = 4096
 #: multi-database server, so the operator can tighten it; ``/info`` advertises
 #: the effective value as ``limits.max_contigs`` and clients batch by it.
 DEFAULT_MAX_CONTIGS = MAX_SKETCHES
-
-#: Largest non-file form field (``params``) Starlette accepts in one request.
-#: ``/contigs`` repeats every contig name, length and k-mer count there, so the
-#: limit is advertised in ``/info`` for clients that budget their requests.
-MAX_PARAMS_BYTES = 1024 * 1024
 
 #: Accepted ``Content-Type`` values of a raw-sequence ``/assembly`` upload.
 SEQUENCE_CONTENT_TYPES = frozenset(
@@ -185,138 +164,6 @@ class ServerConfig:
             self.db_paths = (DatabaseSpec(Path(self.db_path)),)
 
 
-class BodyLimitMiddleware:
-    """Reject request bodies larger than ``max_bytes``.
-
-    The check uses ``Content-Length`` when present, and otherwise counts the
-    received body chunks as they arrive.
-    """
-
-    def __init__(self, app: Any, max_bytes: int) -> None:
-        self.app = app
-        self.max_bytes = max_bytes
-
-    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-        headers = {key.lower(): value for key, value in scope.get("headers", [])}
-        raw_length = headers.get(b"content-length")
-        if raw_length is not None:
-            try:
-                if int(raw_length) > self.max_bytes:
-                    await _too_large(send, self.max_bytes)
-                    return
-            except ValueError:
-                pass
-
-        received = 0
-
-        async def limited_receive() -> dict:
-            nonlocal received
-            message = await receive()
-            if message["type"] == "http.request":
-                received += len(message.get("body", b""))
-                if received > self.max_bytes:
-                    raise _BodyTooLarge
-            return message
-
-        try:
-            await self.app(scope, limited_receive, send)
-        except _BodyTooLarge:
-            await _too_large(send, self.max_bytes)
-
-
-class AccessLogMiddleware:
-    """Tag each response with ``X-Request-Id`` and log one line per request.
-
-    ``serve`` turns uvicorn's own access log off, so this is the only one.
-    """
-
-    def __init__(self, app: Any, trusted: frozenset[str] = frozenset()) -> None:
-        self.app = app
-        self.trusted = trusted
-
-    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-        request_id = uuid.uuid4().hex[:12]
-        start = time.perf_counter()
-        status = 500  # what the client sees if the app dies before responding
-
-        async def tagged_send(message: dict) -> None:
-            nonlocal status
-            if message["type"] == "http.response.start":
-                status = message["status"]
-                message["headers"] = [
-                    *message.get("headers", ()),
-                    (b"x-request-id", request_id.encode()),
-                ]
-            await send(message)
-
-        try:
-            await self.app(scope, receive, tagged_send)
-        finally:
-            log.info(
-                "%s %s -> %d in %.1f ms client=%s request_id=%s",
-                scope["method"],
-                quote(scope["path"]),
-                status,
-                (time.perf_counter() - start) * 1000.0,
-                client_identity(scope, self.trusted),
-                request_id,
-            )
-
-
-class _BodyTooLarge(Exception):
-    pass
-
-
-async def _too_large(send: Any, max_bytes: int) -> None:
-    response = JSONResponse(
-        {"error": f"request body exceeds the {max_bytes // (1024 * 1024)} MB limit"},
-        status_code=413,
-    )
-    await response({"type": "http"}, _never_receive, send)
-
-
-async def _never_receive() -> dict:
-    return {"type": "http.disconnect"}
-
-
-class RequestError(Exception):
-    """A request to refuse: ``str(error)`` is the message, ``status`` the code.
-
-    Raised anywhere below a handler and answered once by :func:`_answers_errors`.
-    """
-
-    def __init__(
-        self, message: str, status: int = 400, headers: dict[str, str] | None = None
-    ) -> None:
-        super().__init__(message)
-        self.status = status
-        self.headers = headers
-
-    def response(self) -> JSONResponse:
-        return JSONResponse(
-            {"error": str(self)}, status_code=self.status, headers=self.headers
-        )
-
-
-def _answers_errors(handler: Callable[..., Any]) -> Callable[..., Any]:
-    """Turn a :class:`RequestError` raised by ``handler`` into its response."""
-
-    @functools.wraps(handler)
-    async def wrapper(request: Request, *args: Any) -> JSONResponse:
-        try:
-            return await handler(request, *args)
-        except RequestError as error:
-            return error.response()
-
-    return wrapper
-
-
 async def _health(request: Request) -> JSONResponse:
     state = request.app.state
     return JSONResponse(
@@ -407,17 +254,17 @@ async def _index(request: Request) -> JSONResponse:
     )
 
 
-@_answers_errors
+@answers_errors
 async def _profile(request: Request) -> JSONResponse:
     return await _handle(request, "profile")
 
 
-@_answers_errors
+@answers_errors
 async def _query(request: Request) -> JSONResponse:
     return await _handle(request, "query")
 
 
-@_answers_errors
+@answers_errors
 async def _assembly(request: Request) -> JSONResponse:
     """Find the closest genomes of one assembly.
 
@@ -473,7 +320,7 @@ async def _assembly(request: Request) -> JSONResponse:
             raise RequestError("invalid Content-Length header") from None
         if size > limit:
             raise _too_large_error(limit, is_sketch)
-    _check_queue(state)
+    check_queue(state)
     chunks: list[bytes] = []
     received = 0
     async for chunk in request.stream():
@@ -487,7 +334,7 @@ async def _assembly(request: Request) -> JSONResponse:
 
     start = time.perf_counter()
     run, last = (run_assembly_sketch, stats) if is_sketch else (run_assembly, limit)
-    with _job_errors("assembly profiling"), state.jobs.admit():
+    with job_errors("assembly profiling"), state.jobs.admit():
         async with state.jobs.slot():
             result = await anyio.to_thread.run_sync(
                 run,
@@ -580,7 +427,7 @@ def _query_float(
     return value
 
 
-@_answers_errors
+@answers_errors
 async def _contigs(request: Request) -> JSONResponse:
     """Classify every contig of one fragmented assembly.
 
@@ -597,8 +444,8 @@ async def _contigs(request: Request) -> JSONResponse:
     :mod:`sylphd.per_contig`, so every client gets the same answer.
     """
     state = request.app.state
-    _require_multipart(request, "one 'sketch' part per contig")
-    contigs, options, tax_sources, payloads = await _read_contigs(request)
+    require_multipart(request, "one 'sketch' part per contig")
+    contigs, options, tax_sources, payloads = await read_contigs(request)
 
     start = time.perf_counter()
     results: list[dict[str, Any] | None] = [None] * len(contigs)
@@ -606,7 +453,7 @@ async def _contigs(request: Request) -> JSONResponse:
     row_fields = per_contig.classification_fields(
         options.fields, _metadata_columns(state.metadata)
     )
-    with _job_errors("contig profiling"), state.jobs.admit():
+    with job_errors("contig profiling"), state.jobs.admit():
         async with state.jobs.slot():
             for index, (contig, payload) in enumerate(zip(contigs, payloads)):
                 results[index] = await anyio.to_thread.run_sync(
@@ -694,192 +541,17 @@ def _metadata_columns(metadata: MetadataDB | None) -> tuple[str, ...]:
     return tuple(metadata.field_columns) if metadata is not None else ()
 
 
-def _too_many_contigs(limit: int) -> str:
-    return (
-        "too many contigs in one request; send at most "
-        f"{limit} contigs per POST /contigs (one 'sketch' part each; the "
-        "server's limits.max_contigs in GET /info) and batch the rest "
-        "yourself, or use 'sylphd assembly --per-contig', which batches by "
-        "that limit"
-    )
 
-
-def _is_too_many_files(message: str) -> bool:
-    # Starlette stops at the first file beyond ``max_files``, so the count in
-    # its message is that limit, not the number of parts the request carried.
-    return message.startswith("Too many files")
-
-
-def _require_multipart(request: Request, hint: str) -> None:
-    """Refuse a non-multipart body, or any request while the queue is full."""
-    content_type = request.headers.get("content-type", "")
-    if not content_type.lower().startswith("multipart/form-data"):
-        raise RequestError(f"expected a multipart/form-data body with {hint}", 415)
-    _check_queue(request.app.state)
-
-
-def _check_queue(state: Any) -> None:
-    """Refuse the request now (before its body is read) if the queue is full."""
-    try:
-        state.jobs.check()
-    except QueueFullError:
-        raise _busy() from None
-
-
-def _busy() -> RequestError:
-    return RequestError(
-        "the server is busy; retry shortly",
-        503,
-        {"Retry-After": str(QUEUE_RETRY_SECONDS)},
-    )
-
-
-#: Exceptions of a job that are the client's fault, with their status.
-#: ``SequenceTooLarge`` is a ``SequenceError``, so it comes first.
-_CLIENT_ERRORS: tuple[tuple[type[Exception], int], ...] = (
-    (BadRequest, 400),
-    (SequenceTooLarge, 413),
-    (SequenceError, 400),
-)
-
-
-def _client_error(error: BaseException) -> RequestError | None:
-    if isinstance(error, QueueFullError):
-        return _busy()
-    for kind, status in _CLIENT_ERRORS:
-        if isinstance(error, kind):
-            return RequestError(str(error), status)
-    return None
-
-
-@contextmanager
-def _job_errors(what: str) -> Iterator[None]:
-    """Run profiling jobs; raise a :class:`RequestError` for any failure.
-
-    Client mistakes and a full queue keep their message and status; anything
-    else is logged and answered with a generic 500 (``"<what> failed"``).
-    """
-    try:
-        yield
-    except BaseExceptionGroup as group:  # from the task group of /profile
-        for error in group.exceptions:
-            if (refusal := _client_error(error)) is not None:
-                raise refusal from None
-        log.exception("%s failed", what)
-        raise RequestError(f"{what} failed", 500) from None
-    except Exception as error:
-        if (refusal := _client_error(error)) is not None:
-            raise refusal from error
-        log.exception("%s failed", what)
-        raise RequestError(f"{what} failed", 500) from None
-
-
-@asynccontextmanager
-async def _read_form(
-    request: Request, max_files: int, too_many: str | None = None
-) -> AsyncIterator[Any]:
-    """Open the multipart form, answering Starlette's parse errors.
-
-    ``too_many`` replaces the message of Starlette's too-many-files error.  The
-    form (and its temporary files) is closed on exit.
-    """
-    try:
-        async with request.form(
-            # Exactly the limit: the parser raises on the (N+1)th file part,
-            # so N+1 uploads are not spooled to disk before the 400.
-            max_files=max_files,
-            max_fields=16,
-            max_part_size=MAX_PARAMS_BYTES,
-        ) as form:
-            yield form
-    except StarletteHTTPException as error:
-        if too_many is not None and _is_too_many_files(str(error.detail)):
-            raise RequestError(too_many) from None
-        raise RequestError(str(error.detail), error.status_code) from None
-    except MultiPartException as error:
-        # Starlette re-raises this as a 400 HTTPException when the app is in
-        # the scope; translating it here too keeps the message independent of
-        # that. Other multipart errors (bad boundary, oversized part) keep
-        # their own message.
-        if too_many is not None and _is_too_many_files(error.message):
-            raise RequestError(too_many) from None
-        raise RequestError(error.message) from None
-
-
-def _params_object(form: Any) -> dict[str, Any]:
-    """The JSON object in the ``params`` field (empty when absent)."""
-    raw_params = form.get("params")
-    try:
-        params_data: Any = {} if raw_params is None else json.loads(str(raw_params))
-    except json.JSONDecodeError as error:
-        raise RequestError(f"invalid JSON in 'params': {error}") from None
-    if not isinstance(params_data, dict):
-        raise RequestError("'params' must be a JSON object")
-    return params_data
-
-
-def _sketch_parts(form: Any) -> list[UploadFile]:
-    sketches = form.getlist("sketch")
-    if not sketches:
-        raise RequestError("no 'sketch' part in the request")
-    if not all(isinstance(part, UploadFile) for part in sketches):
-        raise RequestError("'sketch' parts must be file uploads")
-    return sketches
-
-
-async def _read_payloads(sketches: Sequence[UploadFile]) -> list[bytes]:
-    try:
-        return [await part.read() for part in sketches]
-    except Exception:
-        log.exception("failed to read an uploaded sketch part")
-        raise RequestError("failed to read a 'sketch' part", 500) from None
-
-
-async def _read_contigs(
-    request: Request,
-) -> tuple[
-    tuple[per_contig.ContigInput, ...],
-    per_contig.ContigOptions,
-    Sequence[str] | None,
-    list[bytes],
-]:
-    """Parse the ``/contigs`` form, or raise the :class:`RequestError`."""
-    state = request.app.state
-    limit = state.max_contigs
-    async with _read_form(request, limit, _too_many_contigs(limit)) as form:
-        params_data = _params_object(form)
-        sketches = _sketch_parts(form)
-        if len(sketches) > limit:
-            raise RequestError(_too_many_contigs(limit))
-        try:
-            contigs, options = per_contig.parse_params(
-                params_data, k=state.database.k, count=len(sketches)
-            )
-        except ProtocolError as error:
-            raise RequestError(str(error)) from None
-        fields = _validate_fields(params_data.get("fields"), state.metadata)
-        tax_sources = _validate_tax_sources(
-            params_data.get("tax_sources"), state.metadata
-        )
-        payloads = await _read_payloads(sketches)
-        return (
-            contigs,
-            replace(options, fields=tuple(fields or ())),
-            tax_sources,
-            payloads,
-        )
-
-
-@_answers_errors
+@answers_errors
 async def _handle(request: Request, mode: str) -> JSONResponse:
     state = request.app.state
-    _require_multipart(request, "one 'sketch' part per sample")
-    params, fields, names, payloads, tax_sources, taxprof = await _read_upload(
+    require_multipart(request, "one 'sketch' part per sample")
+    params, fields, names, payloads, tax_sources, taxprof = await read_upload(
         request, mode
     )
 
     samples: list[dict[str, Any] | None] = [None] * len(payloads)
-    with _job_errors("profiling"), state.jobs.admit(len(payloads)):
+    with job_errors("profiling"), state.jobs.admit(len(payloads)):
         async with anyio.create_task_group() as task_group:
             for index, (name, payload) in enumerate(zip(names, payloads)):
                 task_group.start_soon(
@@ -897,44 +569,6 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
                 )
     return JSONResponse(samples)
 
-
-async def _read_upload(
-    request: Request, mode: str
-) -> tuple[
-    ProfileParams,
-    Sequence[str] | None,
-    list[str],
-    list[bytes],
-    Sequence[str] | None,
-    Sequence[str] | None,
-]:
-    """Parse the form into ``(params, fields, names, payloads, tax_sources, taxprof)``.
-
-    Raises the :class:`RequestError` when the request is invalid.
-    """
-    state = request.app.state
-    async with _read_form(request, MAX_SKETCHES) as form:
-        params_data = _params_object(form)
-        try:
-            params = ProfileParams.from_mapping(params_data)
-        except ProtocolError as error:
-            raise RequestError(str(error)) from None
-
-        declared_mode = params_data.get("mode")
-        if declared_mode is not None and declared_mode != mode:
-            raise RequestError(
-                f"params.mode is {declared_mode!r} but this is the /{mode} endpoint"
-            )
-
-        fields = _validate_fields(params_data.get("fields"), state.metadata)
-        tax_sources = _validate_tax_sources(
-            params_data.get("tax_sources"), state.metadata
-        )
-        taxprof = _validate_taxprof(params_data.get("taxprof"), state.metadata, mode)
-        sketches = _sketch_parts(form)
-        names = _resolve_names(params_data.get("names"), sketches)
-        payloads = await _read_payloads(sketches)
-        return params, fields, names, payloads, tax_sources, taxprof
 
 
 async def _run_slot(
@@ -965,114 +599,6 @@ async def _run_slot(
         )
 
 
-def _validate_fields(value: Any, metadata: MetadataDB | None) -> Sequence[str] | None:
-    """Validate ``params.fields``: metadata column names, in request order.
-
-    Duplicates are removed (a repeated column must not duplicate the key of a
-    hit or the work of the metadata join), and the result cannot be longer
-    than the number of columns the server's metadata file has.
-    """
-    if value is None:
-        return None if metadata is None else tuple(metadata.field_columns)
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise RequestError("'params.fields' must be a list of column names")
-    if not value:
-        return ()
-    if metadata is None:
-        raise RequestError(
-            "this server has no metadata database; --fields is not available"
-        )
-    unknown = [column for column in value if column not in metadata.field_columns]
-    if unknown:
-        raise RequestError(f"unknown metadata column(s): {', '.join(unknown)}")
-    columns = tuple(dict.fromkeys(value))
-    if len(columns) > len(metadata.field_columns):
-        raise RequestError(
-            f"'params.fields' has {len(columns)} columns; this server's metadata "
-            f"file has only {len(metadata.field_columns)}"
-        )
-    return columns
-
-
-def _validate_tax_sources(
-    value: Any, metadata: MetadataDB | None
-) -> Sequence[str] | None:
-    """Validate ``params.tax_sources``: source names of the metadata file.
-
-    ``None`` means all sources (sylph-tax given every file).  A name the file
-    does not have is a 400, since silently resolving against another source
-    would produce a profile that looks right and is not.
-    """
-    if value is None:
-        return None
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise RequestError("'params.tax_sources' must be a list of source names")
-    if not value:  # an empty list is "no restriction", like an omitted field
-        return None
-    available = metadata.source_names() if metadata is not None else []
-    if not available:
-        raise RequestError(
-            "this server has no sylph-tax taxonomy sources; "
-            "'params.tax_sources' is not available"
-        )
-    unknown = [name for name in value if name not in available]
-    if unknown:
-        raise RequestError(
-            "unknown taxonomy source(s): "
-            + ", ".join(unknown)
-            + f" (available: {', '.join(available)})"
-        )
-    return tuple(dict.fromkeys(value))
-
-
-def _validate_taxprof(
-    value: Any, metadata: MetadataDB | None, mode: str
-) -> Sequence[str] | None:
-    """Validate ``params.taxprof``: taxonomies the server can aggregate.
-
-    The server is the only place that knows which metadata columns and
-    sylph-tax sources its file has, so the request is checked against them
-    (:func:`sylphd.taxonomy.resolve_taxonomy_columns`): a taxonomy the file
-    cannot produce is a 400, not a silently empty table.
-    """
-    if value is None:
-        return None
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise RequestError("'params.taxprof' must be a list of taxonomy names")
-    if not value:
-        return None
-    if mode != "profile":
-        raise RequestError("'params.taxprof' is only available on /profile")
-    try:
-        taxonomies = parse_taxonomies(value)
-        summary = metadata.summary() if metadata is not None else None
-        resolve_taxonomy_columns(taxonomies, summary)
-    except (TaxonomyError, ProtocolError) as error:
-        raise RequestError(str(error)) from None
-    return taxonomies
-
-
-def _resolve_names(value: Any, sketches: Sequence[Any]) -> list[str]:
-    if value is None:
-        names = []
-        for index, part in enumerate(sketches):
-            filename = getattr(part, "filename", None)
-            name = sample_name_from_path(filename) if filename else ""
-            names.append(name or f"sample-{index + 1}")
-    elif not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise RequestError("'params.names' must be a list of strings")
-    elif len(value) != len(sketches):
-        raise RequestError(
-            f"'params.names' has {len(value)} entries for {len(sketches)} sketches"
-        )
-    else:
-        names = value
-    try:
-        return [check_sample_name(name) for name in names]
-    except InputError as error:
-        raise RequestError(str(error)) from None
-
-
 async def _json_http_error(request: Request, exc: Exception) -> JSONResponse:
     if isinstance(exc, StarletteHTTPException):
         return RequestError(str(exc.detail), exc.status_code).response()
@@ -1080,8 +606,6 @@ async def _json_http_error(request: Request, exc: Exception) -> JSONResponse:
 
 
 def _lifespan(config: ServerConfig) -> Any:
-    from contextlib import asynccontextmanager
-
     @asynccontextmanager
     async def lifespan(app: Starlette):
         if config.socket_path is not None:
@@ -1178,141 +702,3 @@ def create_app(
 #: Origins accepted by ``--cors-origin local``: loopback hosts on any port,
 #: for developing the web page against a local server.
 LOCAL_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?"
-
-
-def _socket_identity(path: Path) -> tuple[int, int] | None:
-    """Return the ``(st_dev, st_ino)`` identity of ``path``, or ``None``."""
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    return (st.st_dev, st.st_ino)
-
-
-def _unlink_socket_if_owned(path: Path, identity: tuple[int, int] | None) -> None:
-    """Unlink ``path`` only if it is still the socket this process bound."""
-    if identity is None:
-        return
-    try:
-        st = path.stat()
-    except OSError:
-        return
-    if (st.st_dev, st.st_ino) != identity:
-        return
-    if not stat.S_ISSOCK(st.st_mode):
-        return
-    try:
-        path.unlink()
-    except OSError:
-        pass
-
-
-def prepare_unix_socket(path: Path) -> None:
-    """Remove a stale socket file, refusing to steal a live one."""
-    if not path.exists() and not path.is_symlink():
-        return
-    if not path.is_socket():
-        raise RuntimeError(f"{path} exists and is not a socket; refusing to remove it")
-    # A server that has just bound but not yet called listen() also gets
-    # ECONNREFUSED.  Retry briefly before declaring the socket stale.
-    last_refused = False
-    for attempt in range(3):
-        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        probe.settimeout(1.0)
-        try:
-            probe.connect(str(path))
-        except FileNotFoundError:
-            return
-        except ConnectionRefusedError:
-            last_refused = True
-            if attempt < 2:
-                time.sleep(0.1)
-                continue
-        except OSError as error:
-            raise RuntimeError(
-                f"cannot check whether {path} is in use: {error}"
-            ) from error
-        else:
-            raise RuntimeError(f"another server is already listening on {path}")
-        finally:
-            probe.close()
-    if last_refused:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
-
-
-def bind_unix_socket(path: Path) -> socket.socket:
-    """Bind a Unix socket ourselves, so its mode is ``SOCKET_MODE``.
-
-    ``uvicorn.run(uds=...)`` forces ``0o666`` on the socket file, which is
-    world-writable.  Binding here and handing uvicorn the descriptor instead
-    keeps the stricter ``0o660``.
-    """
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.bind(str(path))
-        os.chmod(path, SOCKET_MODE)
-    except BaseException:
-        sock.close()
-        raise
-    return sock
-
-
-def serve(
-    config: ServerConfig,
-    *,
-    socket_path: Path | None = None,
-    tcp: tuple[str, int] | None = None,
-    log_level: str = "info",
-    app: Starlette | None = None,
-) -> None:
-    """Run the server until interrupted.  ``socket_path``/``tcp`` are exclusive."""
-    if (socket_path is None) == (tcp is None):
-        raise ValueError("exactly one of socket_path and tcp must be given")
-    application = app if app is not None else create_app(config)
-    kwargs: dict[str, Any] = {
-        "log_level": log_level,
-        # create_app's AccessLogMiddleware logs each request (with its id).
-        "access_log": False,
-        # limits.client_identity() decides whom to trust; uvicorn must not
-        # rewrite scope["client"] from X-Forwarded-For first.
-        "proxy_headers": False,
-    }
-    sock: socket.socket | None = None
-    socket_identity: tuple[int, int] | None = None
-    if socket_path is not None:
-        socket_path.parent.mkdir(parents=True, exist_ok=True)
-        prepare_unix_socket(socket_path)
-        sock = bind_unix_socket(socket_path)
-        socket_identity = _socket_identity(socket_path)
-        kwargs["fd"] = sock.fileno()
-    else:
-        host, port = tcp  # type: ignore[misc]
-        kwargs["host"] = host
-        kwargs["port"] = port
-
-    def cleanup() -> None:
-        if sock is not None:
-            sock.close()
-        if socket_path is not None:
-            _unlink_socket_if_owned(socket_path, socket_identity)
-
-    previous_sigterm = None
-    if socket_path is not None and threading.current_thread() is threading.main_thread():
-        # uvicorn re-raises SIGTERM after its graceful shutdown, which would
-        # kill the process before the ``finally`` below runs.  Clean up first
-        # and exit normally instead.
-        def handle_sigterm(signum: int, frame: Any) -> None:
-            cleanup()
-            raise SystemExit(0)
-
-        previous_sigterm = signal.signal(signal.SIGTERM, handle_sigterm)
-
-    try:
-        uvicorn.run(application, **kwargs)
-    finally:
-        cleanup()
-        if previous_sigterm is not None:
-            signal.signal(signal.SIGTERM, previous_sigterm)

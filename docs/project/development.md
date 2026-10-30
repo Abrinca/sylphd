@@ -52,6 +52,11 @@ Two families of modules are split by role.
 | `catalog.py` | the static catalogues of pre-built databases and sylph-tax taxonomy files (data only) |
 | `download.py` | catalogue lookups and tables, and the transfer engine |
 | `cli_parser.py` | one `add_<command>_parser` per subcommand |
+| `server.py` | `ServerConfig`, `create_app` and the endpoint handlers |
+| `server_errors.py` | `RequestError`, its single answering path, and the mapping of job failures to responses |
+| `server_upload.py` | reading the multipart form of `/profile`, `/query` and `/contigs`, and validating its `params` |
+| `server_middleware.py` | the body-limit and access-log ASGI middleware |
+| `server_launch.py` | `serve`, the uvicorn entry point, and the Unix-socket handling |
 
 ## Test data credit
 

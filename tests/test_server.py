@@ -18,12 +18,11 @@ from starlette.testclient import TestClient
 
 from sylphd.metadata import METADATA_COLUMNS
 from sylphd.protocol import ProfileParams, columns_for_mode, format_row, format_value
-from sylphd.server import (
-    ServerConfig,
+from sylphd.server import ServerConfig, create_app
+from sylphd.server_launch import (
     _socket_identity,
     _unlink_socket_if_owned,
     bind_unix_socket,
-    create_app,
     prepare_unix_socket,
     serve,
 )
