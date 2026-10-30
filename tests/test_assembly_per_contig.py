@@ -193,7 +193,8 @@ def consensus_data(tmp_path_factory) -> ConsensusData:
     to one of them is a coin flip.  ``GCA_000001002.1`` is 3 % away: its own
     species (``Bacillus cereus``) of the same genus.
     """
-    from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
+    from sylphd.metadata import METADATA_COLUMNS
+    from sylphd.metadata_build import build_metadata_db
 
     directory = tmp_path_factory.mktemp("per-contig-consensus")
     reference = "".join(random.Random(20261101).choices("ACGT", k=1_000_000))
@@ -531,10 +532,6 @@ def test_chunk_size_for() -> None:
     assert per_contig_client.chunk_size_for({"limits": limits}) == 4096
     limits["max_contigs"] = 500
     assert per_contig_client.chunk_size_for({"limits": limits}) == 500
-    # A server that predates max_contigs still caps a request at max_sketches.
-    limits.pop("max_contigs")
-    limits["max_sketches"] = 4
-    assert per_contig_client.chunk_size_for({"limits": limits}) == 4
     assert per_contig_client.chunk_size_for({}) == 4096
 
 
@@ -1418,27 +1415,6 @@ def test_options_of_the_single_assembly_still_work(server, genome, tmp_path, cap
     # --top default is 10 without --per-contig; the flag combination is checked
     assert _run("assembly", path, "--socket", server, "--quiet") == 0
     assert capsys.readouterr().err == ""
-
-
-def test_per_contig_requires_the_server_endpoint(
-    server, genome, tmp_path, capsys, monkeypatch
-) -> None:
-    """An older server has no /contigs: say so instead of a bare 404."""
-    path = tmp_path / "one.fa"
-    path.write_text(">c\n" + genome + "\n")
-    original = SylphClient.info
-
-    def info(self):
-        document = original(self)
-        document["endpoints"] = [
-            endpoint for endpoint in document["endpoints"] if endpoint != "/contigs"
-        ]
-        return document
-
-    monkeypatch.setattr(SylphClient, "info", info)
-    assert cli.main(["assembly", str(path), "--per-contig", "--socket", str(server)]) == 1
-    err = capsys.readouterr().err
-    assert "POST /contigs" in err
 
 
 def test_per_contig_rejects_incompatible_options(genome, tmp_path, capsys) -> None:

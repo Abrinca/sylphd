@@ -44,7 +44,8 @@ def tiny_metadata(
     tmp_path_factory: pytest.TempPathFactory, tiny_database: Path
 ) -> Path:
     """Metadata for the single genome of :func:`tiny_database`."""
-    from sylphd.metadata import METADATA_COLUMNS, build_metadata_db
+    from sylphd.metadata import METADATA_COLUMNS
+    from sylphd.metadata_build import build_metadata_db
 
     directory = tmp_path_factory.mktemp("meta")
     source = directory / "tiny.tsv"

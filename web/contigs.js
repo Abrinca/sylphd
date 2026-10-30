@@ -307,7 +307,7 @@
     function chunkSizeFor(info) {
       const limits = (info && info.limits) || {};
       // A /contigs request is one job on the server, so only the per-request bound applies.
-      const size = Number(limits.max_contigs || limits.max_sketches || 4096);
+      const size = Number(limits.max_contigs || 4096);
       return Math.max(1, size);
     }
 
@@ -339,7 +339,6 @@
 
   const bar = $('per-contig-bar');
   const toggle = $('per-contig');
-  const note = $('per-contig-note');
   const optionsBox = $('per-contig-options');
   const assemblyOptions = $('assembly-options');
   const inputs = {
@@ -387,27 +386,17 @@
     S.updateSubmit();
   }
 
-  // The toggle exists when /info lists POST /contigs; without it, say why it is disabled.
+  // The toggle works once /info is known.
   function refreshEnabled() {
-    const info = S.info();
-    const known = !!info;
-    const has = known && Array.isArray(info.endpoints) && info.endpoints.includes('/contigs');
-    st.enabled = !!has;
+    const known = !!S.info();
+    st.enabled = known;
     const inAssembly = S.mode() === 'assembly';
     bar.hidden = !known || !inAssembly;
     if (!known) {
       if (st.active) setActive(false);
       return;
     }
-    if (has) {
-      note.hidden = true;
-      note.textContent = '';
-    } else {
-      note.hidden = false;
-      note.textContent = 'Per-contig mode is not available on this server: it does not offer POST /contigs. Use the single-assembly search, or connect to an updated server.';
-      if (st.active) setActive(false);
-    }
-    toggle.disabled = !has;
+    toggle.disabled = false;
     S.updateSubmit();
   }
 
@@ -450,13 +439,10 @@
   const helpId = () => `pc-nohit-help-${++helpSeq}`;
 
   // A plain database has no first-stage screen, so the screen sentence is only
-  // true when at least one loaded database is two-stage (/info databases[].kind,
-  // with the same fallbacks app.js uses for older servers).
+  // true when at least one loaded database is two-stage (/info databases[].kind).
   function hasTwoStageDatabase(info) {
     const dbs = info && Array.isArray(info.databases) ? info.databases : [];
-    const entries = dbs.length ? dbs : (info && info.database ? [info.database] : []);
-    return entries.some((d) => !!d && (d.kind ? d.kind === 'two-stage'
-      : /\.syl2db$/i.test(String(d.file || '')) || d.two_stage === true));
+    return dbs.some((d) => d.kind === 'two-stage');
   }
 
   function noHitHelp(info) {
@@ -909,9 +895,6 @@
       const secs = err.retryAfter != null ? err.retryAfter : 5;
       node = S.notice('warn', 'Server busy (503)',
         el('p', null, 'The server queue is full. Please retry in ', el('strong', { text: `${secs} s` }), '.'), msg);
-    } else if (status === 404) {
-      node = S.notice('error', 'Per-contig mode is not available here (404)',
-        'This server does not provide POST /contigs. Use the single-assembly search, or connect to an updated server.', msg);
     } else {
       node = S.notice('error', `Request failed (HTTP ${status})`, err.serverMessage || 'The server returned an error without a message.');
     }

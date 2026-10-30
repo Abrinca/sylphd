@@ -13,9 +13,9 @@ from sylphd.metadata import (
     METADATA_COLUMNS,
     MetadataDB,
     accession_from_genome_name,
-    build_metadata_db,
     normalize_accession,
 )
+from sylphd.metadata_build import build_metadata_db
 
 HEADER = ["accession", *METADATA_COLUMNS]
 

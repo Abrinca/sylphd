@@ -19,7 +19,7 @@ loading and serving; a version 3 file still opens with a version 2 reader,
 which ignores the new tables.
 
 The writers live in :mod:`sylphd.metadata_build` and the sylph-tax import in
-:mod:`sylphd.taxonomy_sources`; they are re-exported here.
+:mod:`sylphd.taxonomy_sources`.
 """
 
 from __future__ import annotations
@@ -785,13 +785,3 @@ class MetadataDB:
     def __exit__(self, *exc_info: object) -> None:
         self.close()
 
-
-# The writers import this module, so they are re-exported from the bottom, once
-# everything they need is defined (``from sylphd.metadata import build_metadata_db``).
-from .metadata_build import build_metadata_db, update_metadata_db  # noqa: F401
-from .taxonomy_sources import (  # noqa: F401
-    TaxonomyOverlap,
-    TaxonomySource,
-    is_redundant_gtdb_source,
-    iter_taxonomy_rows,
-)

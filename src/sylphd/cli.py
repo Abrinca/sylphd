@@ -41,7 +41,8 @@ from .download import (
     parse_taxonomy_spec,
     taxonomy_table,
 )
-from .metadata import TaxonomySource, build_metadata_db, update_metadata_db
+from .metadata_build import build_metadata_db, update_metadata_db
+from .taxonomy_sources import TaxonomySource
 from .paths import check_socket_path, default_socket_path, parse_tcp
 from .profiling import DatabaseSet, DatabaseSpec
 from .protocol import ProfileParams, ProtocolError, rows_to_tsv_lines
@@ -879,14 +880,6 @@ def _cmd_assembly_per_contig(args: argparse.Namespace, path: Path) -> int:
     _check_output_file(args.output)
     with _client_from_args(args) as client:
         info = client.info()
-        if "/contigs" not in (info.get("endpoints") or ()):
-            # The classification runs on the server now; say so instead of
-            # letting the first POST fail with a bare 404.
-            raise ClientError(
-                "--per-contig needs a server that offers POST /contigs; this one "
-                "does not (GET /info lists its endpoints). Upgrade the server, or "
-                "run `sylphd assembly` without --per-contig."
-            )
         metadata = info.get("metadata")
         options = per_contig_client.PerContigOptions(
             top=args.top if args.top is not None else per_contig_client.DEFAULT_TOP,

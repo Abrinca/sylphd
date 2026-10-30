@@ -16,14 +16,14 @@ from conftest import ECOLI_TWO_STAGE
 from starlette.testclient import TestClient
 
 from sylphd import cli, download
-from sylphd.download import TAXONOMIES, parse_taxonomy_spec, taxonomy_table
+from sylphd.catalog import DATABASES, TAXONOMIES
+from sylphd.download import parse_taxonomy_spec, taxonomy_table
 from sylphd.metadata import (
     METADATA_COLUMNS,
     MetadataDB,
-    TaxonomySource,
-    build_metadata_db,
-    update_metadata_db,
 )
+from sylphd.metadata_build import build_metadata_db, update_metadata_db
+from sylphd.taxonomy_sources import TaxonomySource
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -1338,15 +1338,15 @@ class TestCatalogue:
         assert size_only == ["GlobDB_r232"]
 
     def test_target_pairings(self) -> None:
-        assert download.DATABASES["gtdb-r232-c200-dbv2.syl2db"].taxonomy == "GTDB_r232"
-        assert download.DATABASES["uhgv_c200_dbv1.syldb"].taxonomy == "UHGV_default"
-        assert download.DATABASES["uhgv_c200_dbv1.syldb"].taxonomy_alternatives == (
+        assert DATABASES["gtdb-r232-c200-dbv2.syl2db"].taxonomy == "GTDB_r232"
+        assert DATABASES["uhgv_c200_dbv1.syldb"].taxonomy == "UHGV_default"
+        assert DATABASES["uhgv_c200_dbv1.syldb"].taxonomy_alternatives == (
             "UHGV_ictv",
         )
-        assert download.DATABASES["fungi-refseq-2025-10-11-c200-dbv1.syldb"].taxonomy == (
+        assert DATABASES["fungi-refseq-2025-10-11-c200-dbv1.syldb"].taxonomy == (
             "FungiRefSeq-latest"
         )
-        assert download.DATABASES["uhgg_all_c200_v0.3.0.syldb"].taxonomy is None
+        assert DATABASES["uhgg_all_c200_v0.3.0.syldb"].taxonomy is None
 
     def test_table(self) -> None:
         text = taxonomy_table()

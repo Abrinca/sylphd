@@ -351,29 +351,11 @@
     return db && isNum(db.c) && isNum(db.k) ? { c: db.c, k: db.k } : null;
   }
 
-  // Whether this server lists a /profile param. An older server (v0.2.0 and
-  // before) has no `params` in /info and rejects unknown keys with a 400, so
-  // an absent list means unsupported: never send the key, hide the option and
-  // fall back to the plain genome table instead.
-  function profileParamSupported(info, key) {
-    const keys = info && info.params && info.params['/profile'];
-    return Array.isArray(keys) && keys.includes(key);
-  }
-
-  function readCountsSupported(info) {
-    return profileParamSupported(info, 'estimate_read_counts');
-  }
-
   // The taxonomies this server can aggregate: the columns its metadata file
-  // has, plus its sylph-tax sources. An older server without the taxprof
-  // param gets no request and the page shows the plain genome table.
-  function taxprofSupported(info) {
-    return profileParamSupported(info, 'taxprof');
-  }
-
+  // has, plus its sylph-tax sources.
   function requestedTaxonomies() {
     const info = S.info();
-    if (!info || !taxprofSupported(info)) return [];
+    if (!info) return [];
     const meta = info.metadata;
     if (!meta) return [];
     const columns = Array.isArray(meta.columns) ? meta.columns : [];
@@ -390,9 +372,6 @@
     const info = S.info();
     const problem = S.problem();
     const profileOk = !info || !Array.isArray(info.endpoints) || info.endpoints.includes('/profile');
-    const readCountsOk = readCountsSupported(info);
-    if (!readCountsOk && ui.readCounts.checked) { ui.readCounts.checked = false; syncImpliedOptions(); }
-    ui.readCountsRow.hidden = !readCountsOk;
     if (unsupported()) hint = 'Not supported by this browser';
     else if (problem) hint = PROBLEM_HINT[problem] || 'Server unavailable';
     else if (!info) hint = 'Waiting for the server…';
@@ -525,7 +504,6 @@
     const t = performance.now();
     const o = run.opts;
     const params = { names: [run.name], estimate_unknown: o.unknown };
-    // Only when asked: a server older than the option rejects the key with a 400.
     if (o.readCounts) params.estimate_read_counts = true;
     if (o.ani !== null) params.minimum_ani = o.ani;
     if (o.kmers !== null) params.min_number_kmers = o.kmers;
@@ -578,12 +556,8 @@
       return { kind: 'error', title: 'Endpoint not available (404)', retry: null, body: [el('p', { text: 'This server does not provide POST /profile.' }), detail] };
     }
     if (status === 400) {
-      const body = [
-        el('p', { text: 'The server did not accept the sketch or the options. A sketch must use the database’s c and k; if the server was updated while you were on this page, reload it.' })];
-      if (run.opts && run.opts.readCounts && /unknown parameter|estimate_read_counts/i.test(msg || '')) {
-        body.push(el('p', { text: '“Estimate read counts” is newer than this server, which does not know the option. Uncheck it under Options and run again (the sketch is kept).' }));
-      }
-      return { kind: 'error', title: 'The server rejected the request (400)', retry: null, body: [...body, detail] };
+      return { kind: 'error', title: 'The server rejected the request (400)', retry: null, body: [
+        el('p', { text: 'The server did not accept the sketch or the options. A sketch must use the database’s c and k; if the server was updated while you were on this page, reload it.' }), detail] };
     }
     return { kind: 'error', title: `Request failed (HTTP ${status})`, retry: status >= 500 ? 10 : null,
       body: [el('p', { text: msg || 'The server returned an error without a message.' })] };
@@ -779,12 +753,9 @@
     if (!rows.length) out.push(emptyCard(run));
     else {
       if (!withData.length) {
-        const canTaxprof = taxprofSupported(S.info());
-        const body = !canTaxprof
-          ? 'This server is older than this page and cannot compute taxonomic profiles; the table and downloads still work. The server did not run the taxprof step, so the genome table below lists the hits with their own taxonomy only.'
-          : Object.keys(run.result.taxprof).length
-            ? 'The server’s taxonomic profile has no classified clade for these hits. The table below lists the genomes with their own taxonomy.'
-            : 'This server did not return a taxonomic profile (it has no taxonomy metadata). The table below lists the genomes only.';
+        const body = Object.keys(run.result.taxprof).length
+          ? 'The server’s taxonomic profile has no classified clade for these hits. The table below lists the genomes with their own taxonomy.'
+          : 'This server did not return a taxonomic profile (it has no taxonomy metadata). The table below lists the genomes only.';
         out.push(notice('warn', 'No taxonomic profile', body));
       } else {
         out.push(abundanceCard(run));

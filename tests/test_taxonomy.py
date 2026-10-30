@@ -12,6 +12,7 @@ from sylphd.taxonomy import (
     TaxonomyError,
     aggregate_rows,
     aggregate_samples,
+    build_taxprof,
     clade_matrix_lines,
     default_taxonomies,
     parse_lineage,
@@ -450,6 +451,23 @@ class TestFlags:
             resolve_taxonomy_columns(("ncbi",), {"columns": ["gtdb_taxonomy"]})
 
 
+def _served(
+    samples: list[dict[str, object]],
+    taxonomies: tuple[str, ...],
+    tax_sources: tuple[str, ...] = (),
+) -> list[dict[str, object]]:
+    """The samples as ``POST /profile`` returns them: with the server's ``taxprof``."""
+    return [
+        {
+            **sample,
+            "taxprof": build_taxprof(
+                str(sample["name"]), taxonomies, sample["rows"], tax_sources=tax_sources
+            ),
+        }
+        for sample in samples
+    ]
+
+
 class TestWriteOutputs:
     def test_file_names(self, tmp_path: Path) -> None:
         samples = [
@@ -457,7 +475,7 @@ class TestWriteOutputs:
             {"name": "two", "rows": [_row(ncbi=GTDB_SPECIES, accession="A")]},
         ]
         written = write_outputs(
-            samples,
+            _served(samples, ("gtdb", "ncbi")),
             taxonomies=("gtdb", "ncbi"),
             taxprof_prefix=str(tmp_path / "p-"),
             taxmatrix_prefix=str(tmp_path / "m-"),
@@ -476,14 +494,16 @@ class TestWriteOutputs:
     def test_sample_names_cannot_add_directories(self, tmp_path: Path) -> None:
         samples = [{"name": "a/b", "rows": []}]
         written = write_outputs(
-            samples, taxonomies=("gtdb",), taxprof_prefix=str(tmp_path / "p-")
+            _served(samples, ("gtdb",)),
+            taxonomies=("gtdb",),
+            taxprof_prefix=str(tmp_path / "p-"),
         )
         assert written[0].name == "p-a_b.gtdb.sylphmpa"
 
     def test_existing_directory_prefix_needs_no_slash(self, tmp_path: Path) -> None:
         samples = [{"name": "one", "rows": []}]
         written = write_outputs(
-            samples,
+            _served(samples, ("gtdb",)),
             taxonomies=("gtdb",),
             taxprof_prefix=str(tmp_path),
             taxmatrix_prefix=str(tmp_path / "m-"),  # not a directory: a prefix
@@ -498,7 +518,7 @@ class TestWriteOutputs:
         ]
         with pytest.raises(TaxonomyError, match="'a/b' and 'a_b'"):
             write_outputs(
-                samples,
+                _served(samples, ("gtdb", "ncbi")),
                 taxonomies=("gtdb", "ncbi"),
                 taxprof_prefix=str(tmp_path / "p-"),
                 taxmatrix_prefix=str(tmp_path / "m-"),
@@ -690,7 +710,7 @@ class TestSylphTaxFlags:
             {"name": "one", "rows": [_tax_row(lineage="a;b", key="K")]},
         ]
         written = write_outputs(
-            samples,
+            _served(samples, ("tax",), ("UHGV_default",)),
             taxonomies=("tax",),
             taxprof_prefix=str(tmp_path / "p-"),
             taxmatrix_prefix=str(tmp_path / "m-"),

@@ -31,7 +31,9 @@ from pathlib import Path
 
 import pytest
 
-from sylphd.metadata import MetadataDB, TaxonomySource, build_metadata_db
+from sylphd.metadata import MetadataDB
+from sylphd.metadata_build import build_metadata_db
+from sylphd.taxonomy_sources import TaxonomySource
 from sylphd.taxonomy import (
     aggregate_samples,
     aggregate_sylphtax_rows,

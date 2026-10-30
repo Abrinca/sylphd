@@ -31,7 +31,7 @@ from conftest import (
 from starlette.testclient import TestClient
 
 from sylphd import cli
-from sylphd.metadata import build_metadata_db
+from sylphd.metadata_build import build_metadata_db
 from sylphd.profiling import DatabaseSet, DatabaseSpec, _bounded_duplicate_summary
 from sylphd.protocol import ProfileParams
 from sylphd.server import SKETCH_CONTENT_TYPE, ServerConfig, create_app

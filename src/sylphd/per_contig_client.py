@@ -12,9 +12,8 @@ Batching
 --------
 One ``POST /contigs`` request is one server job, whatever the number of contigs
 it carries (the server runs them one after the other inside that job), so a
-batch is bounded by the server's advertised ``limits.max_contigs``
-(``max_sketches`` on older servers), by the advertised size of the JSON
-``params`` part (it repeats every contig name, length and k-mer count), and by
+batch is bounded by the server's advertised ``limits.max_contigs``, by the
+advertised size of the JSON ``params`` part (it repeats every contig name, length and k-mer count), and by
 the *measured* multipart body against ``max_upload_mb``.  A batch that is still
 too large is split in half, and a single sketch that cannot fit fails before it
 is sent.
@@ -411,11 +410,10 @@ def chunk_size_for(info: dict[str, Any]) -> int:
 
     A ``/contigs`` request is one job on the server, so neither ``max_jobs``
     nor ``max_queue`` limits its size: only the per-request contig cap does.
-    Use the advertised ``limits.max_contigs``; an older server without it
-    falls back to ``limits.max_sketches`` (4096, and the same hard bound).
+    Use the advertised ``limits.max_contigs``.
     """
     limits = info.get("limits") or {}
-    size = int(limits.get("max_contigs") or limits.get("max_sketches") or 4096)
+    size = int(limits.get("max_contigs") or 4096)
     return max(1, size)
 
 

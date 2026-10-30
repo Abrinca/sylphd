@@ -741,7 +741,6 @@ details.adv .options { margin-top: 10px; }
 .per-contig-bar { margin-top: 16px; }
 .pc-toggle { margin-top: 0; }
 .pc-toggle input:disabled + span { opacity: .6; }
-#per-contig-note { margin: 8px 0 0; color: var(--muted); max-width: 62em; }
 .pc-options { margin-top: 4px; }
 .pc-options .options { margin-top: 10px; }
 .pc-bar-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 0 0 8px; }

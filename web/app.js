@@ -375,9 +375,7 @@
       const pooled = dbs.length > 1;
       // Only call the database "GTDB r<release>" when a loaded database really is GTDB's:
       // a fungi-only server can have GTDB metadata for taxonomy lookups without serving it.
-      // A server older than the `gtdb` field keeps the historical label.
-      const knowsGtdb = dbs.some((d) => d && typeof d.gtdb === 'boolean');
-      const gtdbServed = knowsGtdb ? dbs.some((d) => d.gtdb === true) : !!meta.release;
+      const gtdbServed = dbs.some((d) => d.gtdb === true);
       setStatus('online', 'Server online');
       const lim = info.limits || {};
       const fact = (label, value, title) => el('span', { class: 'fact', title: title || null },
@@ -434,7 +432,7 @@
       parts.push(el('div', { class: 'sp-group' },
         el('span', { class: 'sp-group-label', text: 'Databases' }),
         el('ul', { class: 'sp-dbs' }, dbs.map((d) => {
-          const twoStage = d.kind ? d.kind === 'two-stage' : /\.syl2db$/i.test(String(d.file || '')) || d.two_stage;
+          const twoStage = d.kind === 'two-stage';
           const kind = twoStage ? '.syl2db' : '.syldb';
           return el('li', {
             class: 'sp-db',

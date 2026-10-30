@@ -69,10 +69,6 @@ contig. Each contig is one sample, so the ANI is *not* diluted by the rest of th
 contaminating contig shows its own species, not the species of the whole file. The sequence still
 never leaves your machine — only the sketches and a few numbers per record do.
 
-The endpoint is new; a server without it answers `404`, so `--per-contig` needs a server running
-this version of `sylphd` (or newer). `GET /info` always lists `/contigs` in `endpoints` here; if it
-is missing, the server is older.
-
 ```bash
 sylphd assembly mag.fasta --per-contig
 sylphd assembly mag.fasta --per-contig --top 3 --min-ani 90 --fields none
@@ -281,8 +277,8 @@ not detected: k-mer counts cannot tell them from a uniformly divergent contig.
 
 - **Requests are chunked.** Contigs are sent as batches to `POST /contigs`, each with the
   contig's genome-style k-mer count, length and GC content. A whole request is **one server job**,
-  so the chunk size is the server's `limits.max_contigs` (`--max-contigs`, 4096 by default;
-  `max_sketches` on an older server), not `max_jobs + max_queue`; it is also cut when the JSON
+  so the chunk size is the server's `limits.max_contigs` (`--max-contigs`, 4096 by default),
+  not `max_jobs + max_queue`; it is also cut when the JSON
   `params` part (which
   repeats every contig name, length and k-mer count; names may be up to 1024 characters) would
   exceed 90 % of `limits.max_params_bytes` (900 KiB at most), and when the *measured* multipart

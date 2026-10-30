@@ -217,7 +217,6 @@ NODE_CHUNK = r"""
 const F = require(process.argv[1]);
 console.log(JSON.stringify({
   configured: F.chunkSizeFor({ limits: { max_contigs: 2, max_sketches: 4096 } }),
-  fallback: F.chunkSizeFor({ limits: { max_sketches: 4 } }),
   default: F.chunkSizeFor({}),
   cap: F.MAX_CLASSIFIED,
 }));
@@ -231,7 +230,7 @@ def test_the_web_batches_by_max_contigs_and_keeps_its_own_cap() -> None:
         capture_output=True, text=True, check=True,
     )
     result = json.loads(done.stdout)
-    assert result == {"configured": 2, "fallback": 4, "default": 4096, "cap": 100}
+    assert result == {"configured": 2, "default": 4096, "cap": 100}
 
 
 def test_skipped_records_have_no_tsv_rows() -> None:

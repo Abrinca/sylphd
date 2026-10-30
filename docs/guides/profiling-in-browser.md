@@ -30,8 +30,7 @@ sketch leaves your computer.
 Under **Options** you can change the minimum ANI (default 95 %, as `sylph profile`) and the minimum
 number of k-mers per genome (10), turn on *Estimate unknown fraction* (`--estimate-unknown`) or
 *Estimate read counts* (`--estimate-read-counts`, experimental: reads per genome instead of a share
-of the sample; it implies *Estimate unknown fraction* and is hidden on a server that does not
-advertise it), or choose *Only sketch* to keep the sketch without uploading it.
+of the sample; it implies *Estimate unknown fraction*), or choose *Only sketch* to keep the sketch without uploading it.
 
 While it works the page shows the stages (reading and decompressing, sketching, uploading,
 profiling), the bytes read, the reads, bases and sketch k-mers counted, the elapsed time and the

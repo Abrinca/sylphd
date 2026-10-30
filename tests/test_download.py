@@ -16,12 +16,10 @@ import httpx
 import pytest
 
 from sylphd import download
+from sylphd.catalog import DATABASES, Database, Taxonomy
 from sylphd.download import (
-    DATABASES,
     MD5SUMS_FILE,
-    Database,
     DownloadError,
-    Taxonomy,
     download_database,
     download_release,
     download_taxonomy,

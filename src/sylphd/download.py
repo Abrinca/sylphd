@@ -22,14 +22,7 @@ from pathlib import Path
 
 import httpx
 
-from .catalog import (  # noqa: F401  (the catalogue is re-exported)
-    DATABASES,
-    SYLPHTAX_VERSION,
-    TAXONOMIES,
-    ZENODO_API,
-    Database,
-    Taxonomy,
-)
+from .catalog import DATABASES, TAXONOMIES, ZENODO_API, Database, Taxonomy
 
 #: GTDB release root, e.g. ``.../releases/release232/232.0/``.
 DEFAULT_BASE_URL = "https://data.gtdb.ecogenomic.org/releases/release{release}/{release}.0/"

@@ -80,9 +80,7 @@ per contig, which is what a MAG contamination check needs: a 200 kbp contig from
 shows that species even when the rest of the assembly is one genome. The contigs are sketched
 locally and sent as a batch to
 [`POST /contigs`](../reference/http-api.md#post-contigs), which does the classification on the
-server; the sequence never leaves the machine. The endpoint is new, so `--per-contig` needs a
-server running this version of `sylphd` (`GET /info` always lists `/contigs` here; if it is
-missing, the server is older).
+server; the sequence never leaves the machine.
 
 ```bash
 sylphd assembly mag.fasta --per-contig

@@ -3,7 +3,7 @@
     "Input rows for the --taxmatrix golden and parity tests (tests/test_taxmatrix_parity.py).",
     "Each sample is a `sylphd profile` response: a name and the rows the server returned.",
     "scripts/regen-taxmatrix-golden.py turns these into .sylphmpa files with sylphd's",
-    "write_taxprof, runs the real `sylph-tax merge` on them, and checks in the result as",
+    "taxprof_lines, runs the real `sylph-tax merge` on them, and checks in the result as",
     "<case>.<value>.tsv. Do not edit the goldens by hand."
   ],
   "three": {

@@ -2,9 +2,9 @@
 
 The server returns one row per ANI hit, with the metadata taxonomy strings
 (``gtdb_taxonomy``/``ncbi_taxonomy``) or the resolved sylph-tax taxonomy
-(``tax_lineage``/``tax_key``/``tax_source``) joined in.  This module folds
-those rows into the clade tables that ``sylph-tax`` writes, without any
-server-side aggregation:
+(``tax_lineage``/``tax_key``/``tax_source``) joined in, and folds those rows
+into the clade tables that ``sylph-tax`` writes (``taxprof``); the CLI only
+writes them out.  The aggregation lives here:
 
 * :func:`aggregate_rows` sums ``Taxonomic_abundance`` and
   ``Sequence_abundance`` up every lineage, so each ancestor clade gets the sum
@@ -17,8 +17,8 @@ server-side aggregation:
   clades sorted as pandas sorts the outer join (textually, for two or more
   samples).
 
-Everything here is pure: rows in, lines out.  File handling is limited to the
-two small ``write_*`` helpers.
+Everything here is pure: rows in, lines out.  File handling is limited to
+:func:`write_taxmatrix`.
 
 Lineage rules
 -------------
@@ -530,24 +530,6 @@ def taxprof_lines(
             yield f"{item.clade}\t{_cell(item.relative)}\t{_cell(item.sequence)}\tNA\tNA"
 
 
-def write_taxprof(
-    path: str | os.PathLike[str],
-    name: str,
-    taxonomy: str,
-    clades: Sequence[CladeAbundance],
-    *,
-    taxonomies_used: Sequence[str] | None = None,
-) -> Path:
-    """Write one ``.sylphmpa`` file and return its path."""
-    output = Path(path)
-    with open(output, "w", encoding="utf-8", newline="\n") as handle:
-        for line in taxprof_lines(
-            name, taxonomy, clades, taxonomies_used=taxonomies_used
-        ):
-            handle.write(line + "\n")
-    return output
-
-
 def clade_matrix_lines(
     samples: Sequence[tuple[str, Sequence[CladeAbundance]]],
     value: str = "relative",
@@ -734,25 +716,15 @@ def write_outputs(
 
     written: list[Path] = []
     for taxonomy in taxonomies:
-        # Prefer the server's aggregation (`/profile` `taxprof`): the CLI must
-        # not fold rows itself.  `aggregate_samples` stays for direct callers
-        # and tests; a response without `taxprof` (an older server) still works.
-        table, texts = _profile_tables(samples, taxonomy)
-        used = list(tax_sources) if taxonomy == SYLPHTAX else [taxonomy]
+        # The server aggregates (`/profile` `taxprof`): the CLI must not fold rows itself.
+        payloads = [(sample_name(sample), sample["taxprof"][taxonomy]) for sample in samples]
         if taxprof_prefix is not None:
-            for name, clades in table:
+            for name, payload in payloads:
                 path = taxprof_path(taxprof_prefix, name, taxonomy)
-                text = texts.get(name)
-                if text is None:
-                    written.append(
-                        write_taxprof(
-                            path, name, taxonomy, clades, taxonomies_used=used
-                        )
-                    )
-                else:
-                    with open(path, "w", encoding="utf-8", newline="\n") as handle:
-                        handle.write(text)
-                    written.append(path)
+                with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(payload["sylphmpa"])
+                written.append(path)
+        table = [(name, clades_from_dict(payload["clades"])) for name, payload in payloads]
         if taxmatrix_prefix is not None:
             written.append(
                 write_taxmatrix(
@@ -761,20 +733,3 @@ def write_outputs(
             )
     return written
 
-
-def _profile_tables(
-    samples: Sequence[Mapping[str, Any]], taxonomy: str
-) -> tuple[list[tuple[str, list[CladeAbundance]]], dict[str, str]]:
-    """Per-sample clades (and ready ``.sylphmpa`` text) for one taxonomy."""
-    table: list[tuple[str, list[CladeAbundance]]] = []
-    texts: dict[str, str] = {}
-    for sample in samples:
-        name = sample_name(sample)
-        payload = (sample.get("taxprof") or {}).get(taxonomy)
-        if isinstance(payload, Mapping) and isinstance(payload.get("clades"), list):
-            table.append((name, clades_from_dict(payload["clades"])))
-            if isinstance(payload.get("sylphmpa"), str):
-                texts[name] = payload["sylphmpa"]
-        else:
-            table.append((name, aggregate_rows(sample.get("rows") or (), taxonomy)))
-    return table, texts

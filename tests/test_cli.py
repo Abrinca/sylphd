@@ -19,7 +19,9 @@ import pytest
 
 from sylphd import cli
 from sylphd.client import ClientError, connect
-from sylphd.metadata import METADATA_COLUMNS, TaxonomySource, build_metadata_db
+from sylphd.metadata import METADATA_COLUMNS
+from sylphd.metadata_build import build_metadata_db
+from sylphd.taxonomy_sources import TaxonomySource
 
 from conftest import (
     CLODF13_FASTA,

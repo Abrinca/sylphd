@@ -26,10 +26,10 @@ from sylphd.metadata import (
     METADATA_COLUMNS,
     MetadataDB,
     SylphTaxProbes,
-    TaxonomySource,
-    build_metadata_db,
     sylphtax_probes,
 )
+from sylphd.metadata_build import build_metadata_db
+from sylphd.taxonomy_sources import TaxonomySource
 
 # ---------------------------------------------------------------------------
 # probes
