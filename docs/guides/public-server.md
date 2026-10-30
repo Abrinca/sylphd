@@ -37,6 +37,12 @@ See [Server address](../commands/address.md).
     check. The [deployment README](https://github.com/Abrinca/sylphd/blob/main/deploy/README.md)
     covers first-time setup, upgrades, logs and changing the domain.
 
+Two details matter behind a proxy. sylphd already gzips JSON bodies of 1 KB or more when the client
+asks for it, so the site block's `encode zstd gzip` only covers what sylphd sends uncompressed, and
+nothing is compressed twice. And the access log is sylphd's own, one line per request at INFO
+(`--log-level warning` silences it, see [`sylphd serve`](../commands/serve.md#logging)); Caddy's
+`log` block adds its own lines to the journal, so both are there when you investigate a report.
+
 ## Sketches only, or raw sequences too: `--allow-sequences`
 
 [`POST /assembly`](../reference/http-api.md#post-assembly) takes the **sketch** of an assembly,
@@ -122,7 +128,7 @@ rightmost address that is not itself a trusted proxy is used.
 
 A browser page on another origin may only call the API if the server allows its origin.
 `--cors-origin` (repeatable) controls this. Preflights allow `GET` and `POST` with the
-`Content-Type` request header, and `Retry-After` is exposed to JavaScript.
+`Content-Type` request header, and `Retry-After` and `X-Request-Id` are exposed to JavaScript.
 
 | Value | Effect |
 |---|---|

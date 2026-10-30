@@ -69,4 +69,4 @@ or more samples the matrix rows are sorted lexicographically, like `sylph-tax me
 
 ## Server
 
-`--socket`, `--tcp`, `--url` and `--timeout`: see [Server address](address.md).
+`--socket`, `--tcp`, `--url`, `--timeout` and `--retries`: see [Server address](address.md).

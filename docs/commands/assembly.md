@@ -6,6 +6,7 @@ sylphd assembly FILE [--top N] [--min-ani ANI] [--name NAME] [--local-sketch | -
                               [--consensus-ratio R] [--consensus-z Z]]
                 [--json] [-o FILE] [--quiet]
                 [--socket PATH | --tcp HOST:PORT | --url URL] [--timeout SECONDS]
+                [--retries N]
 ```
 
 Sketches one assembly (FASTA or FASTQ, plain or gzip) on this machine, sends the sketch to

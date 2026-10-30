@@ -7,7 +7,7 @@ authentication; see the [security notes](security.md).
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/` | GET | service name, version and the endpoints this server offers |
-| `/health` | GET | liveness: status, version, uptime |
+| `/health` | GET | liveness: status, version, uptime, jobs running and queued |
 | `/info` | GET | database, metadata, limits and endpoints |
 | `/query` | POST | ANI hits of uploaded sketches |
 | `/profile` | POST | taxonomic profile of uploaded sketches |
@@ -21,11 +21,28 @@ the four POST endpoints only. With `curl` over a Unix socket:
 curl --unix-socket "$XDG_RUNTIME_DIR/sylphd.sock" http://localhost/info
 ```
 
+## Request id and compression
+
+Every response carries an **`X-Request-Id`** header, error responses included: 12 hex characters,
+unique per request. The same string is written to the server's access log with the request's
+outcome (see [`sylphd serve`](../commands/serve.md#logging)), so a user can quote the id of a
+failed request when reporting it. With `--cors-origin` it is exposed to JavaScript.
+
+JSON responses of **1 KB or more** are **gzip**-compressed when the request sends
+`Accept-Encoding: gzip`. Smaller bodies, and clients that do not ask for it, get the plain body
+with no `Content-Encoding`. A response is compressed once: a reverse proxy in front (the example
+`Caddyfile` in `deploy/` runs `encode zstd gzip`) only compresses what sylphd sent uncompressed.
+
 ## `GET /health`
 
 ```json
-{"status": "ok", "service": "sylphd", "version": "0.3.0", "uptime_seconds": 12.345}
+{"status": "ok", "service": "sylphd", "version": "0.3.0", "uptime_seconds": 12.345,
+ "jobs_running": 1, "jobs_queued": 0}
 ```
+
+`jobs_running` is the number of jobs holding a `--max-jobs` slot right now, `jobs_queued` the
+admitted jobs still waiting for one; both are `0` on an idle server. A `/contigs` request is one
+job, however many contigs it carries.
 
 ## `GET /info` { #get-info }
 
@@ -474,7 +491,7 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 
 | Status | When |
 |---|---|
-| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request (or more than the server's `max_contigs` for `/contigs`); for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, or malformed or non-`ACGTN` raw sequence; for `/contigs` a `contigs` list that does not match the sketch parts, a duplicate or unusable contig name, a `contig_kmers` that is not a positive integer or that no sequence of that `length` can have, or an out-of-range option |
+| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request (or more than the server's `max_contigs` for `/contigs`); for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, malformed or non-`ACGTN` raw sequence, or a `Content-Length` that is not an integer; for `/contigs` a `contigs` list that does not match the sketch parts, a duplicate or unusable contig name, a `contig_kmers` that is not a positive integer or that no sequence of that `length` can have, or an out-of-range option |
 | `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted) |
 | `413` | the body exceeds `--max-upload-mb`, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
 | `415` | `/query`, `/profile` and `/contigs` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |
@@ -486,4 +503,5 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 
 CORS is off unless `--cors-origin` is given; see
 [Running a public server](../guides/public-server.md#cors). When enabled, `GET` and `POST` and the
-`Content-Type` request header are allowed, and `Retry-After` is exposed to JavaScript.
+`Content-Type` request header are allowed, and `Retry-After` and `X-Request-Id` are exposed to
+JavaScript.

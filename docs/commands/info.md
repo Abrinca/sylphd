@@ -1,7 +1,8 @@
 # info
 
 ```text
-sylphd info [--socket PATH | --tcp HOST:PORT | --url URL] [--timeout SECONDS] [--json]
+sylphd info [--socket PATH | --tcp HOST:PORT | --url URL] [--timeout SECONDS]
+            [--retries N] [--json]
 ```
 
 Prints what the server reports about itself:
@@ -27,4 +28,5 @@ Prints what the server reports about itself:
   (`--allow-sequences`), rate-limit and queue settings.
 
 `--json` prints the raw `/info` payload instead. See [`GET /info`](../reference/http-api.md#get-info).
-The [server address](address.md) options select the server.
+The [server address](address.md) options select the server, and `--retries N` retries a `429` or
+`503` answer.

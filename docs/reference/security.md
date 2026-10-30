@@ -78,6 +78,11 @@ Sketches uploaded to `/assembly` go through the same structural header check as 
 instance runs with it). Raw sequences uploaded to `/assembly` are processed in memory and checked (FASTA or FASTQ, only `ACGTN`) and error messages say
 where a problem is, never what the sequence or its headers contain. Uploads are never logged.
 
+Each request is logged as one line — method, path, status, elapsed ms, client identity and request
+id — to the `uvicorn.error` logger at INFO. The identity follows `--trusted-proxy`, so the line
+names the real client only where you have declared the proxy; `--log-level warning` silences the
+access log. See [`sylphd serve`](../commands/serve.md#logging).
+
 ## What `/info` says about the host
 
 `GET /info` is public. It reports database and metadata **file names** and sizes, never absolute

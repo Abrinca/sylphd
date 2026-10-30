@@ -101,8 +101,23 @@ The details of the limits, client identity and CORS are in
 ## Logging
 
 `--log-level` takes `critical`, `error`, `warning`, `info` (default) or `debug` and is passed to
-uvicorn. Access lines are logged unless the level is `warning` or above. Uploads are never logged,
-only sizes, timings and request outcomes.
+uvicorn. sylphd writes the access log itself: **one line per request**, to the `uvicorn.error`
+logger at INFO.
+
+```text
+POST /query -> 200 in 3.4 ms client=203.0.113.9 request_id=9f2c1a4b7e01
+```
+
+That is the method, the path, the status, the elapsed milliseconds, the client identity and the
+request id. The identity is the one the rate limit uses: the socket peer, or the `X-Forwarded-For`
+address when the peer is a `--trusted-proxy`. The request id is the string the client received in
+its `X-Request-Id` header, so a report can be matched to a line. uvicorn's own access log is off,
+so there is exactly one line per request, failed ones included, and `--log-level warning` (or higher)
+silences it. Uploads are never logged, only their outcomes and timings.
+
+Behind a reverse proxy there is a second line per request, from the proxy: the example `Caddyfile`
+in `deploy/` logs to the journal (`journalctl -u caddy`) and runs `encode zstd gzip`, which
+compresses the bodies sylphd does not gzip itself (JSON of 1 KB or more is already compressed).
 
 ## Endpoints
 
