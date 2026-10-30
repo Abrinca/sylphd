@@ -18,6 +18,12 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **Web: one set of shared helpers for all three modes** (sortable table, segmented controls,
+  bar rows, formatters, lineage/rank tables, file names). The per-contig table gains the mobile
+  sort control; byte sizes are decimal (kB/MB/GB) everywhere and the in-browser input cap is
+  2 GB; downloads are named `sylphd_<file>_<assembly|contigs|reads>.<ext>`; JSON downloads are
+  pretty-printed; the per-contig scale and the reads taxonomy/rank/abundance choices are
+  remembered; per-contig progress counts a batch once it has been classified.
 - `server.py` refuses requests through one `RequestError` path and maps job failures in one place;
   response bodies and status codes are unchanged. A non-integer `Content-Length` on `/assembly`
   is a 400.

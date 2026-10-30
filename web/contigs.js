@@ -334,6 +334,7 @@
 
   const S = window.Sylphd;
   if (!S || !window.SylphdSketch) return;
+  const { el, parseLineage, lineageName, fmtPct } = S;
   const $ = (id) => document.getElementById(id);
 
   const bar = $('per-contig-bar');
@@ -347,9 +348,11 @@
   };
   if (!bar || !toggle || !optionsBox || !assemblyOptions || !S.updateSubmit) return;
 
+  const SCALE_KEY = 'sylphd.perContig.scale';
   const st = {
-    enabled: false, active: false, busy: false, sketchRun: null,
-    view: null, sortKey: 'contig', sortDir: 'asc', open: new Set(), filter: null, scale: 'sqrt',
+    enabled: false, active: false, sketchRun: null,
+    view: null, sortKey: 'contig', sortDir: 'asc', open: new Set(), filter: null,
+    scale: S.readChoice(SCALE_KEY, ['sqrt', 'linear']) || 'sqrt',
   };
 
   const num = (node) => { const v = node.value.trim(); return v === '' ? NaN : Number(v); };
@@ -416,30 +419,9 @@
   S.onMode(() => refreshEnabled());
 
   /* --------------------------------------------------------------- results */
-  const RANKING = { d: 'Domain', p: 'Phylum', c: 'Class', o: 'Order', f: 'Family', g: 'Genus', s: 'Species' };
-
-  function parseLineage(str) {
-    if (!S.has(str)) return [];
-    return String(str).split(';').map((part) => {
-      const m = /^([a-z]+)__(.*)$/.exec(part.trim());
-      return m ? { rank: m[1], name: m[2] } : { rank: '', name: part.trim() };
-    });
-  }
-  const lineageName = (lin, rank) => { const hit = lin.find((e) => e.rank === rank); return hit && hit.name ? hit.name : ''; };
-
-  function genericRanks(hit) {
-    const tax = hit && hit.taxonomy;
-    if (!tax || typeof tax !== 'object' || Array.isArray(tax)) return [];
-    return Object.entries(tax).filter(([, name]) => typeof name === 'string' && name.trim());
-  }
-
   function hitTaxon(hit) {
     if (S.has(hit.taxon)) return String(hit.taxon);
-    const lin = parseLineage(hit.gtdb_taxonomy);
-    const species = lineageName(lin, 's');
-    if (species) return species;
-    const ranks = genericRanks(hit);
-    return ranks.length ? ranks[ranks.length - 1][1] : '';
+    return lineageName(parseLineage(hit.gtdb_taxonomy), 's') || S.genericTaxon(hit);
   }
 
   function hitGenome(hit) {
@@ -449,8 +431,7 @@
     return '–';
   }
 
-  // A hit with a GTDB lineage links to GTDB whatever its source is called (GTDB_r232, ...).
-  const hitLinks = (hit) => S.accessionLinks(hit.accession, S.has(hit.gtdb_taxonomy) ? 'GTDB' : hit.tax_source);
+  const hitLinks = (hit) => S.accessionLinks(hit.accession, S.hitSource(hit));
 
   const consensusText = (c) => (c && S.has(c.taxon) ? String(c.taxon) : null);
 
@@ -460,10 +441,6 @@
     if (consensusText(c)) return c.rank ? `rank: ${c.rank}` : null;
     if ((record.hits || []).length) return 'no consensus';
     return null;
-  }
-
-  function fmtPct(ani) {
-    return S.isNum(ani) ? `${Number(ani).toFixed(2)} %` : '–';
   }
 
   /* ------------------------------------------------------- no-hit wording */
@@ -507,16 +484,15 @@
     return withHelp(node, noHitHelp(st.view && st.view.info), id);
   }
 
+  const CLOSE_TIP = 'Number of hits in the close set used for the consensus';
   const COLS = [
     { key: 'contig', label: 'Contig', get: (r) => r.id, dir: 'asc' },
     { key: 'length', label: 'Length', get: (r) => r.length, dir: 'desc' },
     { key: 'gc', label: 'GC %', get: (r) => r.gc, dir: 'desc' },
     { key: 'consensus', label: 'Consensus', get: (r) => consensusText(r.consensus) || (r.consensus && r.consensus.mixed_sources ? '~' : ''), dir: 'asc' },
-    { key: 'n_close', label: 'Close hits', title: 'Number of hits in the close set used for the consensus', get: (r) => (r.consensus ? r.consensus.n_close : null), dir: 'desc' },
+    { key: 'n_close', label: 'Close hits', hint: 'number of hits in the close set', get: (r) => (r.consensus ? r.consensus.n_close : null), dir: 'desc' },
     { key: 'best', label: 'Best ANI', get: (r) => (r.hits && r.hits[0] ? r.hits[0].ani : null), dir: 'desc' },
   ];
-
-  function el(tag, props, ...kids) { return S.el(tag, props, ...kids); }
 
   /* ---------------------------------------------------------------- groups */
   // Every queried contig belongs to one group: its consensus taxon, "no consensus"
@@ -533,16 +509,8 @@
   }
 
   const italicRank = (rank) => rank === 'species' || rank === 'genus';
-  const RANK_CLASS = { species: 1, genus: 1, family: 1, order: 1, class: 1, phylum: 1, domain: 1 };
-  const relOf = (rank) => (rank in RANK_CLASS ? rank : 'plain');
+  const relOf = (rank) => (rank in S.DEPTH ? rank : 'plain');
   const isTaxon = (group) => group.key !== NO_HIT && group.key !== NO_CONSENSUS;
-
-  // The ANI bar colour of a hit, as in the single-assembly table.
-  function hitRel(hit) {
-    if (hit.relation === 'closest relative') return 'closest';
-    if (hit.relation === 'related' || hit.relation === 'unknown lineage') return 'plain';
-    return hit.shared_rank in RANK_CLASS ? hit.shared_rank : 'none';
-  }
 
   // Groups by total bp (taxa first, then no consensus, then no hit), longest contig first
   // inside a group. The first ten taxa get their own colour, the rest share the grey one.
@@ -577,20 +545,6 @@
     return st.filter ? records.filter((r) => groupKey(r) === st.filter.key) : records;
   }
 
-  function sortedRecords() {
-    const records = visibleRecords();
-    const col = COLS.find((c) => c.key === st.sortKey) || COLS[0];
-    const sign = st.sortDir === 'asc' ? 1 : -1;
-    return records.slice().sort((x, y) => {
-      const a = col.get(x), b = col.get(y);
-      const an = a == null || a === '', bn = b == null || b === '';
-      if (an || bn) return an === bn ? x.index - y.index : an ? 1 : -1;
-      const cmp = typeof a === 'number' && typeof b === 'number' ? a - b
-        : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
-      return cmp * sign || x.index - y.index;
-    });
-  }
-
   /* ---------------------------------------------------------------- summary */
   const nContigs = (n) => `${S.fmtInt(n)} contig${n === 1 ? '' : 's'}`;
 
@@ -617,17 +571,6 @@
   }
 
   /* ------------------------------------------------------------ composition */
-  function seg(label, name, opts, value, onChange) {
-    const wrap = el('div', { class: 'seg', role: 'radiogroup', 'aria-label': label });
-    for (const [v, text, title] of opts) {
-      const input = el('input', { type: 'radio', name, value: v });
-      input.checked = v === value;
-      input.addEventListener('change', () => onChange(v));
-      wrap.append(el('label', { title: title || null }, input, el('span', { text })));
-    }
-    return wrap;
-  }
-
   function setFilter(group) {
     st.filter = st.filter && st.filter.key === group.key ? null : { key: group.key, label: groupLabel(group) };
     rerender();
@@ -681,12 +624,12 @@
     const taxa = groups.filter(isTaxon);
 
     const stack = el('div', { class: 'stack pc-stack', role: 'group', 'aria-label': 'Queried contigs, coloured by consensus taxon' },
-      segs.map((seg_) => {
-        const style = `flex-grow:${seg_.w}`;
-        if (seg_.skip) return el('span', { class: `pc-skip ${seg_.skip.cls}`, style, title: seg_.tip });
-        const cls = `seg-${seg_.group.cls}`;
-        const click = seg_.merged ? () => setFilter(seg_.group) : () => showContig(seg_.record);
-        return el('button', { type: 'button', class: cls, style, title: seg_.tip, 'aria-label': seg_.tip, onclick: click });
+      segs.map((part) => {
+        const style = `flex-grow:${part.w}`;
+        if (part.skip) return el('span', { class: `pc-skip ${part.skip.cls}`, style, title: part.tip });
+        const cls = `seg-${part.group.cls}`;
+        const click = part.merged ? () => setFilter(part.group) : () => showContig(part.record);
+        return el('button', { type: 'button', class: cls, style, title: part.tip, 'aria-label': part.tip, onclick: click });
       }));
 
     const headline = !taxa.length ? `${nContigs(queried.length)} queried, no consensus`
@@ -701,26 +644,18 @@
     const pill = hidden ? withHelp(el('span', { class: 'pc-alert', text: `⚠ ${nContigs(hidden)} not shown` }), parts.join('\n'), helpId()) : null;
 
     const maxBp = Math.max(1, ...groups.map((g) => g.bp), ...view.skipped.map((k) => k.bp));
-    const row = (swatch, name, bp, meta, active, onclick, tip) => {
-      const kids = [
-        el('i', { class: `sw ${swatch}`, 'aria-hidden': 'true' }),
-        el('span', { class: 'aname' }, name),
-        el('span', { class: 'abar', 'aria-hidden': 'true' }, el('span', { class: swatch, style: `width:${Math.max(0.5, (100 * bp) / maxBp).toFixed(2)}%` })),
-        el('b', { class: 'apct', text: meta })];
-      const node = onclick
-        ? el('button', { type: 'button', class: `arow pc-arow${active ? ' active' : ''}`, 'aria-pressed': active ? 'true' : 'false', title: tip, onclick }, kids)
-        : el('div', { class: 'arow pc-arow', title: tip }, kids);
-      return el('li', null, node);
-    };
+    const row = (props) => S.barRow({ max: maxBp, extra: 'pc-arow', ...props });
     const rows = groups.map((g) => {
       const label = isTaxon(g) ? [italicRank(g.rank) ? el('i', { text: g.taxon }) : g.taxon, g.rank ? el('small', { text: g.rank }) : null] : g.taxon;
       const pct = queriedBp ? (100 * g.bp) / queriedBp : 0;
-      return row(`seg-${g.cls}`, label, g.bp, `${nContigs(g.records.length)} · ${S.fmtBp(g.bp)} · ${pct.toFixed(1)} %`,
-        st.filter && st.filter.key === g.key, () => setFilter(g),
-        g.key === NO_HIT ? noHitHelp(view.info) : `Show only contigs whose consensus is ${groupLabel(g)}`);
+      return row({
+        swatch: `seg-${g.cls}`, name: label, value: g.bp, text: `${nContigs(g.records.length)} · ${S.fmtBp(g.bp)} · ${pct.toFixed(1)} %`,
+        active: st.filter && st.filter.key === g.key, onclick: () => setFilter(g),
+        tip: g.key === NO_HIT ? noHitHelp(view.info) : `Show only contigs whose consensus is ${groupLabel(g)}`,
+      });
     });
     for (const k of view.skipped.filter((x) => x.contigs)) {
-      rows.push(row(k.cls, k.label, k.bp, `${nContigs(k.contigs)} · ${S.fmtBp(k.bp)} · not queried`, false, null, k.tip));
+      rows.push(row({ swatch: k.cls, name: k.label, value: k.bp, text: `${nContigs(k.contigs)} · ${S.fmtBp(k.bp)} · not queried`, tip: k.tip }));
     }
 
     const limitNode = limit && limit.contigs
@@ -737,7 +672,11 @@
       el('div', { class: 'card-head' }, el('h2', { text: 'Composition' })),
       el('div', { class: 'abund-controls' },
         el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Scale' }),
-          seg('Segment width scale', 'pc-scale', [['sqrt', 'Compressed', SQRT_TIP], ['linear', 'Linear', SQRT_TIP]], st.scale, (v) => { st.scale = v; rerender(); }))),
+          S.seg('Segment width scale', 'pc-scale', [['sqrt', 'Compressed', SQRT_TIP], ['linear', 'Linear', SQRT_TIP]], st.scale, (v) => {
+            st.scale = v;
+            S.writeChoice(SCALE_KEY, v);
+            rerender();
+          }))),
       el('div', { class: 'pc-bar-head' }, el('p', { class: 'abund-head' }, headline), pill),
       stack,
       el('ul', { class: 'alist' }, rows),
@@ -784,7 +723,7 @@
     const pct = Math.max(0, Math.min(100, ((hit.ani - 70) / 30) * 100));
     return el('div', { class: 'pc-best' },
       el('div', { class: 'anibar' }, el('b', { text: S.isNum(hit.ani) ? Number(hit.ani).toFixed(2) : '–' }),
-        el('div', { class: `bar rel-${hitRel(hit)}`, 'aria-hidden': 'true' }, el('span', { style: `width:${pct.toFixed(1)}%` }))),
+        el('div', { class: `bar rel-${S.relClass(hit)}`, 'aria-hidden': 'true' }, el('span', { style: `width:${pct.toFixed(1)}%` }))),
       S.has(hit.accession) ? hitLinks(hit) : el('span', { class: 'sub mono', title: 'genome_id', text: hitGenome(hit) }),
       taxon && taxon !== consensusText(record.consensus) ? el('span', { class: 'pc-best-taxon', text: taxon }) : null,
       el('span', { class: 'sub', text: `explained ${frac} · reference ANI ${fmtPct(hit.reference_ani)}` }));
@@ -815,7 +754,7 @@
           el('td', { class: 'num', text: fmtPct(hit.reference_ani) }),
           el('td', S.has(hit.accession) ? null : { class: 'mono', title: hit.genome_file || hitGenome(hit) },
             S.has(hit.accession) ? hitLinks(hit) : hitGenome(hit)),
-          el('td', null, taxon || '–', lin.length ? el('div', { class: 'sub', text: `${RANKING[lin[0].rank] || lin[0].rank}: ${lin[0].name}` }) : null),
+          el('td', null, taxon || '–', lin.length ? el('div', { class: 'sub', text: `${S.rankTitle(lin[0].rank)}: ${lin[0].name}` }) : null),
           el('td', { text: S.has(hit.gtdb_species) ? hit.gtdb_species : '–' }));
       })));
     return table;
@@ -843,7 +782,7 @@
       el('td', { 'data-label': 'Length' }, lengthCell(record)),
       el('td', { 'data-label': 'GC %' }, gcCell(record)),
       el('td', { 'data-label': 'Consensus' }, consensusCell(record)),
-      el('td', { class: 'num', 'data-label': 'Close hits', title: COLS[4].title }, empty ? noHitCell(record) : el('span', { text: close })),
+      el('td', { class: 'num', 'data-label': 'Close hits', title: CLOSE_TIP }, empty ? noHitCell(record) : el('span', { text: close })),
       el('td', { 'data-label': 'Best ANI' }, bestCell(record)),
     ];
     const main = el('tr', { id: `pc-row-${record.index}`, class: open ? 'top-row' : null }, cells);
@@ -861,41 +800,19 @@
   }
 
   function tableCard() {
-    const table = el('table', { class: 'hits pc-table' });
-    const head = el('tr');
-    for (const col of COLS) {
-      const th = el('th', { scope: 'col' }, el('button', {
-        type: 'button', text: col.label, title: `Sort by ${col.label}${col.title ? `: ${col.title}` : ''}`,
-        onclick: () => {
-          if (st.sortKey === col.key) st.sortDir = st.sortDir === 'asc' ? 'desc' : 'asc';
-          else { st.sortKey = col.key; st.sortDir = col.dir; }
-          rerender();
-        },
-      }));
-      head.append(th);
-    }
-    table.append(el('thead', null, head), el('tbody'));
-    fillTable(table);
+    const table = S.sortableTable({
+      cols: COLS, state: st, items: visibleRecords, tiebreak: (x, y) => x.index - y.index,
+      row: contigRow, cls: 'hits pc-table', id: 'pc-sort-select', noun: 'contigs',
+    });
     const total = st.view.queried.length;
     const shown = visibleRecords().length;
     return el('section', { class: 'card', 'aria-label': 'Contigs' },
       el('div', { class: 'card-head' },
         el('h2', { text: st.filter ? `Contigs (${S.fmtInt(shown)} of ${S.fmtInt(total)})` : `Contigs (${S.fmtInt(total)})` }),
-        el('div', { class: 'export' },
-          el('button', { type: 'button', class: 'btn', text: 'Download TSV', onclick: downloadTsv }),
-          el('button', { type: 'button', class: 'btn', text: 'Download JSON', onclick: downloadJson }))),
+        S.exportButtons(downloadTsv, downloadJson)),
       el('p', { class: 'muted pc-hint', text: 'Click a contig to see its hits; click a segment or a taxon above to filter' }),
       filterChip(),
-      el('div', { class: 'table-wrap' }, table));
-  }
-
-  function fillTable(table) {
-    COLS.forEach((col, i) => {
-      const th = table.tHead.rows[0].cells[i];
-      if (col.key === st.sortKey) th.setAttribute('aria-sort', st.sortDir === 'asc' ? 'ascending' : 'descending');
-      else th.removeAttribute('aria-sort');
-    });
-    table.tBodies[0].replaceChildren(...sortedRecords().flatMap(contigRow));
+      ...table.nodes);
   }
 
   function emptyCard() {
@@ -938,16 +855,11 @@
   }
 
   /* -------------------------------------------------------------- downloads */
-  function fileBase() {
-    const name = (st.view && st.view.label) || 'assembly';
-    const safe = String(name).replace(/\.(fastq|fasta|fna|fas|fq|fa|gz)/gi, '')
-      .replace(/[^\w.-]+/g, '_').slice(0, 60) || 'assembly';
-    return `sylphd_${safe}_contigs`;
-  }
+  const exportAs = (ext) => S.exportName(st.view.label, 'contigs', ext);
 
   function downloadTsv() {
     if (!st.view) return;
-    S.download(`${fileBase()}.tsv`, Format.tsv(st.view.records, st.view.fields), 'text/tab-separated-values');
+    S.download(exportAs('tsv'), Format.tsv(st.view.records, st.view.fields), 'text/tab-separated-values');
   }
 
   function downloadJson() {
@@ -960,7 +872,7 @@
       skippedFewKmers: st.view.counts.skippedFewKmers,
       notClassified: st.view.counts.notClassified,
     });
-    S.download(`${fileBase()}.json`, `${JSON.stringify(doc)}\n`, 'application/json');
+    S.downloadJson(exportAs('json'), doc);
   }
 
   /* ------------------------------------------------------------------- run */
@@ -1010,23 +922,11 @@
   const SMALL_KEY = 'sylphd.perContig.smallContigs';
   const MANY_KEY = 'sylphd.perContig.manyContigs';
 
-  function readChoice(key, allowed) {
-    try {
-      const value = localStorage.getItem(key);
-      return allowed.includes(value) ? value : null;
-    } catch { return null; }
-  }
-  function writeChoice(key, value) {
-    try {
-      if (value) localStorage.setItem(key, value);
-      else localStorage.removeItem(key);
-    } catch { /* private mode: the choice simply is not remembered */ }
-    refreshResetLink();
-  }
-  const storedSmallChoice = () => readChoice(SMALL_KEY, ['yes', 'no']);
-  const storedManyChoice = () => readChoice(MANY_KEY, ['yes']);
-  const storeSmallChoice = (value) => writeChoice(SMALL_KEY, value);
-  const storeManyChoice = (value) => writeChoice(MANY_KEY, value);
+  // Only the modal choices count as "remembered choices" (the view preferences are not reset).
+  const storedSmallChoice = () => S.readChoice(SMALL_KEY, ['yes', 'no']);
+  const storedManyChoice = () => S.readChoice(MANY_KEY, ['yes']);
+  const storeSmallChoice = (value) => { S.writeChoice(SMALL_KEY, value); refreshResetLink(); };
+  const storeManyChoice = (value) => { S.writeChoice(MANY_KEY, value); refreshResetLink(); };
 
   function refreshResetLink() {
     const link = $('pc-reset-remembered');
@@ -1049,9 +949,7 @@
         done = true;
         document.removeEventListener('keydown', onKey, true);
         backdrop.remove();
-        const error = new Error('cancelled');
-        error.name = 'AbortError';
-        reject(error);
+        reject(cancelledError());
       };
       const finish = (choice) => {
         if (done) return;
@@ -1153,54 +1051,179 @@
   }
   refreshResetLink();
 
+  // Keeps the `limit` longest contigs (a min-heap by length); on a tie the earlier record stays.
+  function longestKept(limit) {
+    const heap = [];
+    const len = (i) => heap[i].record.length;
+    const swap = (i, j) => { [heap[i], heap[j]] = [heap[j], heap[i]]; };
+    const up = (i) => {
+      while (i > 0 && len((i - 1) >> 1) > len(i)) {
+        const parent = (i - 1) >> 1;
+        swap(parent, i);
+        i = parent;
+      }
+    };
+    const down = (i) => {
+      for (;;) {
+        let smallest = i;
+        for (const child of [2 * i + 1, 2 * i + 2]) if (child < heap.length && len(child) < len(smallest)) smallest = child;
+        if (smallest === i) return;
+        swap(smallest, i);
+        i = smallest;
+      }
+    };
+    return {
+      add(item) {
+        if (heap.length < limit) { heap.push(item); up(heap.length - 1); }
+        else if (item.record.length > len(0)) { heap[0] = item; down(0); }
+      },
+      items: () => heap.slice(),
+    };
+  }
+
+  const encoder = new TextEncoder();
+  const jsonBytes = (value) => encoder.encode(JSON.stringify(value)).length;
+
+  // Splits the kept contigs into requests that fit the server's limits, one request after
+  // the other (the CLI's batching, now over the kept longest).
+  function* batches(candidates, { base, chunkSize, budget, uploadLimit }) {
+    let index = 0;
+    while (index < candidates.length) {
+      const items = [];
+      let paramsBytes = jsonBytes({ ...base, contigs: [] });
+      let payloadBytes = 0;
+      while (index < candidates.length && items.length < chunkSize) {
+        const item = candidates[index];
+        const entryBytes = jsonBytes(item.spec) + (items.length ? 1 : 0);
+        const projected = paramsBytes + entryBytes + payloadBytes + item.payload.byteLength
+          + (items.length + 1) * (512 + encoder.encode(String(item.spec.name)).length) + 512;
+        if (items.length && (paramsBytes + entryBytes > budget || (uploadLimit && projected > uploadLimit))) break;
+        if (!items.length && uploadLimit && projected > uploadLimit) {
+          throw new Error(`the sketch of contig '${item.record.id}' needs a request larger than the server's ${Math.floor(uploadLimit / 1048576)} MB upload limit`);
+        }
+        items.push(item);
+        paramsBytes += entryBytes;
+        payloadBytes += item.payload.byteLength;
+        index += 1;
+      }
+      yield items;
+    }
+  }
+
+  // POST /contigs for one batch; resolves the parsed response.
+  async function postContigs(params, items, signal) {
+    const body = new FormData();
+    body.append('params', JSON.stringify(params));
+    for (const item of items) {
+      body.append('sketch', new Blob([item.payload], { type: 'application/octet-stream' }), `${item.record.id}.sylsp`);
+    }
+    let res;
+    try {
+      res = await fetch(`${S.api}/contigs`, { method: 'POST', body, signal });
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      const err = new Error('network');
+      err.network = true;
+      throw err;
+    }
+    const raw = await res.text();
+    let data = null;
+    try { data = JSON.parse(raw); } catch { /* not JSON */ }
+    if (!res.ok) {
+      const retry = parseInt(res.headers.get('Retry-After'), 10);
+      throw httpError(res.status, data && data.error, Number.isFinite(retry) ? retry : null, raw);
+    }
+    return data;
+  }
+
+  // Copies the server's answer for a batch into its records.
+  function applyResults(response, items) {
+    const list = response && response.contigs;
+    if (!Array.isArray(list) || list.length !== items.length) {
+      throw new Error('Unexpected response from /contigs: contig count mismatch.');
+    }
+    items.forEach(({ record }, i) => {
+      const result = list[i];
+      if (!result || String(result.name) !== record.id) {
+        throw new Error('Unexpected response from /contigs: contigs are out of order.');
+      }
+      record.hits = Array.isArray(result.hits) ? result.hits : [];
+      record.assignment = result.assignment == null ? null : result.assignment;
+      record.closest = result.closest == null ? null : result.closest;
+      record.consensus = result.consensus == null ? null : result.consensus;
+      if (result.contig_kmers != null) record.contig_kmers = result.contig_kmers;
+      record.status = result.status === 'ok' ? 'ok' : 'no_hit';
+      if (result.status === 'too_few_kmers') record.reason = String(result.reason || 'too few k-mers to score the contig');
+    });
+  }
+
+  function newRecord(contig) {
+    // Python's round() is half-even; the wasm reports a toFixed() value, which
+    // can differ on an exact .xx5 (and the TSV must match the CLI byte for byte).
+    const gc = contig.length ? Number(Format.fixed((100 * contig.gcCount) / contig.length, 2)) : 0;
+    return {
+      id: contig.name, index: contig.index, length: contig.length, gc,
+      status: 'no_hit',
+      sketch_kmers: sketchKmers(contig.sketch),
+      contig_kmers: contig.contigKmers == null ? null : contig.contigKmers,
+      hits: [], assignment: null, closest: null, consensus: null,
+    };
+  }
+
+  const cancelledError = () => Object.assign(new Error('cancelled'), { name: 'AbortError' });
+
+  // Shows what ended a run, in the results area.
+  function showRunError(error) {
+    const results = $('results');
+    if (error && error.name === 'AbortError') {
+      results.replaceChildren(S.notice('warn', 'Cancelled', 'Sketching or the request was cancelled. Nothing was kept.'));
+    } else if (error && error.name === 'HttpError') {
+      showHttpError(error);
+    } else if (error && error.network) {
+      results.replaceChildren(S.notice('error', 'Could not reach the server',
+        el('p', null, 'The request to ', el('code', { text: S.api }), ' failed before getting a response. The server status is shown at the top of the page.')));
+      S.loadInfo();
+    } else {
+      results.replaceChildren(S.notice('error', 'Could not sketch or classify the contigs', (error && error.message) || String(error)));
+    }
+  }
+
   async function run({ phase, signal }) {
     const info = S.info();
     const options = validate();
     const input = S.assemblyInput();
     const results = $('results');
+    const fail = (title, message) => results.replaceChildren(S.notice('error', title, message));
     results.replaceChildren();
-    st.busy = true;
     st.open.clear();
     st.filter = null;
 
     if (!info || !info.database || !S.isNum(info.database.c) || !S.isNum(info.database.k)) {
-      results.replaceChildren(S.notice('error', 'The server did not report its sketch parameters',
-        'Per-contig mode needs GET /info with database.c and database.k.'));
-      st.busy = false;
-      return;
+      return fail('The server did not report its sketch parameters', 'Per-contig mode needs GET /info with database.c and database.k.');
     }
-    if (!options.ok) {
-      results.replaceChildren(S.notice('error', 'Invalid options', 'Check the minimum contig length, top hits, minimum ANI and consensus options.'));
-      st.busy = false;
-      return;
-    }
+    if (!options.ok) return fail('Invalid options', 'Check the minimum contig length, top hits, minimum ANI and consensus options.');
     if (input.sylsp) {
-      results.replaceChildren(S.notice('error', 'Per-contig mode needs FASTA or FASTQ',
-        'A .sylsp file is one ready-made sketch and cannot be split into contigs. Upload the assembly or reads, or use the single-assembly search.'));
-      st.busy = false;
-      return;
+      return fail('Per-contig mode needs FASTA or FASTQ',
+        'A .sylsp file is one ready-made sketch and cannot be split into contigs. Upload the assembly or reads, or use the single-assembly search.');
     }
+    if (input.size === 0) return fail('No input', 'Paste FASTA/FASTQ or choose a file first.');
     const file = input.file || new File([$('fasta').value], 'pasted.fasta', { type: 'text/plain' });
-    if (!file || input.size === 0) {
-      results.replaceChildren(S.notice('error', 'No input', 'Paste FASTA/FASTQ or choose a file first.'));
-      st.busy = false;
-      return;
-    }
 
     const db = info.database;
     const fields = info.metadata && Array.isArray(info.metadata.columns) ? info.metadata.columns.slice() : [];
-    const serverOptions = {
+    // POST /contigs takes only its own keys; QUERY_PARAMS is the server's, not the client's.
+    const paramsBase = {
       top: options.top, min_ani: options.min_ani,
       consensus_ratio: options.consensus_ratio, consensus_z: options.consensus_z,
+      fields, tax_sources: null,
     };
-    // POST /contigs takes only its own keys; QUERY_PARAMS is the server's, not the client's.
-    const paramsBase = { ...serverOptions, fields, tax_sources: null };
-    const chunkSize = Format.chunkSizeFor(info);
-    const budget = Format.paramsBudget(info);
-    const uploadLimit = Number((info.limits && info.limits.max_upload_mb) || 0) * 1024 * 1024;
+    const limits = {
+      base: paramsBase,
+      chunkSize: Format.chunkSizeFor(info),
+      budget: Format.paramsBudget(info),
+      uploadLimit: Number((info.limits && info.limits.max_upload_mb) || 0) * 1024 * 1024,
+    };
     const minKmers = Format.QUERY_PARAMS.min_number_kmers;
-    const encoder = new TextEncoder();
-    const jsonBytes = (value) => encoder.encode(JSON.stringify(value)).length;
 
     // Records below the hard k-mer floor are never kept as objects: a fragmented
     // assembly can have millions of them. Only counters survive. Sketchable
@@ -1212,151 +1235,23 @@
     const small = { contigs: 0, bp: 0 };
     const large = { contigs: 0, bp: 0 };
     const skippedFewKmers = { contigs: 0, bp: 0 };
-    const heapAll = []; // min-heap by length: the longest sketchable contigs
-    const heapLarge = []; // min-heap by length: the longest contigs >= threshold
+    const keepAll = longestKept(Format.MAX_CLASSIFIED);
+    const keepLarge = longestKept(Format.MAX_CLASSIFIED);
     const summaries = [];
-    let sent = 0;
+    let toSendTotal = 0;
     let classified = 0;
     let serverMs = 0;
     const t0 = performance.now();
-    const sketchStart = performance.now();
 
-    const siftUp = (heap, i) => {
-      while (i > 0) {
-        const parent = (i - 1) >> 1;
-        if (heap[parent].record.length <= heap[i].record.length) break;
-        [heap[parent], heap[i]] = [heap[i], heap[parent]];
-        i = parent;
-      }
-    };
-    const siftDown = (heap, i) => {
-      for (;;) {
-        const left = 2 * i + 1;
-        const right = left + 1;
-        let smallest = i;
-        if (left < heap.length && heap[left].record.length < heap[smallest].record.length) smallest = left;
-        if (right < heap.length && heap[right].record.length < heap[smallest].record.length) smallest = right;
-        if (smallest === i) break;
-        [heap[smallest], heap[i]] = [heap[i], heap[smallest]];
-        i = smallest;
-      }
-    };
-    const addToHeap = (heap, item) => {
-      if (heap.length < Format.MAX_CLASSIFIED) {
-        heap.push(item);
-        siftUp(heap, heap.length - 1);
-        return;
-      }
-      // keep the longest: ties keep the earlier record
-      if (item.record.length > heap[0].record.length) {
-        heap[0] = item;
-        siftDown(heap, 0);
-      }
-    };
-
-    function progressSketch() {
+    const progressSketch = () => {
       phase.text = `Per contig: ${S.fmtInt(totals.contigs)} records (${S.fmtBp(totals.bp)}), `
         + `${S.fmtInt(sendable.contigs)} sketchable (${S.fmtInt(small.contigs)} below ${S.fmtInt(options.minLength)} bp) · `
         + `${S.fmtInt(skippedFewKmers.contigs)} with too few k-mers`;
-    }
-    function progressSend() {
-      phase.text = `Per contig: ${S.fmtInt(sent)} of ${S.fmtInt(toSendTotal)} contigs sent · ${S.fmtInt(classified)} classified ·`;
-    }
-
-    function newRecord(contig) {
-      // Python's round() is half-even; the wasm reports a toFixed() value, which
-      // can differ on an exact .xx5 (and the TSV must match the CLI byte for byte).
-      const gc = contig.length ? Number(Format.fixed((100 * contig.gcCount) / contig.length, 2)) : 0;
-      return {
-        id: contig.name, index: contig.index, length: contig.length, gc,
-        status: 'no_hit',
-        sketch_kmers: sketchKmers(contig.sketch),
-        contig_kmers: contig.contigKmers == null ? null : contig.contigKmers,
-        hits: [], assignment: null, closest: null, consensus: null,
-      };
-    }
-
-    function apply(response, items) {
-      const list = response && response.contigs;
-      if (!Array.isArray(list) || list.length !== items.length) {
-        throw new Error('Unexpected response from /contigs: contig count mismatch.');
-      }
-      for (let i = 0; i < items.length; i++) {
-        const record = items[i].record;
-        const result = list[i];
-        if (!result || String(result.name) !== record.id) {
-          throw new Error('Unexpected response from /contigs: contigs are out of order.');
-        }
-        record.hits = Array.isArray(result.hits) ? result.hits : [];
-        record.assignment = result.assignment == null ? null : result.assignment;
-        record.closest = result.closest == null ? null : result.closest;
-        record.consensus = result.consensus == null ? null : result.consensus;
-        if (result.contig_kmers != null) record.contig_kmers = result.contig_kmers;
-        if (result.status === 'ok') record.status = 'ok';
-        else if (result.status === 'too_few_kmers') {
-          record.status = 'no_hit';
-          record.reason = String(result.reason || 'too few k-mers to score the contig');
-        } else record.status = 'no_hit';
-      }
-      if (response.summary && typeof response.summary === 'object') summaries.push(response.summary);
-      if (S.isNum(response.elapsed_ms)) serverMs += Number(response.elapsed_ms);
-      classified += items.length;
-      progressSend();
-    }
-
-    async function send(items) {
-      const params = { ...paramsBase, contigs: items.map((item) => item.spec) };
-      const body = new FormData();
-      body.append('params', JSON.stringify(params));
-      for (const item of items) {
-        body.append('sketch', new Blob([item.payload], { type: 'application/octet-stream' }), `${item.record.id}.sylsp`);
-      }
-      sent += items.length;
-      progressSend();
-      let res;
-      try {
-        res = await fetch(`${S.api}/contigs`, { method: 'POST', body, signal });
-      } catch (e) {
-        if (e.name === 'AbortError') throw e;
-        const err = new Error('network');
-        err.network = true;
-        throw err;
-      }
-      const raw = await res.text();
-      let data = null;
-      try { data = JSON.parse(raw); } catch { /* not JSON */ }
-      if (!res.ok) {
-        const retry = parseInt(res.headers.get('Retry-After'), 10);
-        throw httpError(res.status, data && data.error, Number.isFinite(retry) ? retry : null, raw);
-      }
-      apply(data, items);
-    }
-
-    // Split the kept contigs into requests that fit the server's limits, one
-    // request after the other (the CLI's batching, now over the kept longest).
-    async function sendAll(candidates) {
-      let index = 0;
-      while (index < candidates.length) {
-        const items = [];
-        let paramsBytes = jsonBytes({ ...paramsBase, contigs: [] });
-        let payloadBytes = 0;
-        while (index < candidates.length && items.length < chunkSize) {
-          const item = candidates[index];
-          const entryBytes = jsonBytes(item.spec) + (items.length ? 1 : 0);
-          const projected = paramsBytes + entryBytes + payloadBytes + item.payload.byteLength
-            + (items.length + 1) * (512 + encoder.encode(String(item.spec.name)).length) + 512;
-          if (items.length && (paramsBytes + entryBytes > budget || (uploadLimit && projected > uploadLimit))) break;
-          if (!items.length && uploadLimit && projected > uploadLimit) {
-            throw new Error(`the sketch of contig '${item.record.id}' needs a request larger than the server's ${Math.floor(uploadLimit / 1048576)} MB upload limit`);
-          }
-          items.push(item);
-          paramsBytes += entryBytes;
-          payloadBytes += item.payload.byteLength;
-          index += 1;
-        }
-        await send(items);
-      }
-    }
+    };
+    const progressSend = () => {
+      phase.text = `Per contig: ${S.fmtInt(classified)} of ${S.fmtInt(toSendTotal)} contigs classified`;
+    };
+    const count = (bucket, contig) => { bucket.contigs += 1; bucket.bp += contig.length; };
 
     const sketchRun = window.SylphdSketch.sketchContigs(
       file,
@@ -1365,32 +1260,21 @@
       // applied here, after the sketch's k-mer count is known.
       { c: db.c, k: db.k, minLength: 0, onProgress: progressSketch },
       (contig) => {
-        totals.contigs += 1;
-        totals.bp += contig.length;
+        count(totals, contig);
         const nk = contig.sketch ? sketchKmers(contig.sketch) : 0;
         if (!contig.sketch || nk < minKmers || !contig.contigKmers) {
           // The hard floor: not enough sample or genome-style k-mers to score it.
-          skippedFewKmers.contigs += 1;
-          skippedFewKmers.bp += contig.length;
-          progressSketch();
-          return;
-        }
-        const record = newRecord(contig);
-        const item = {
-          record,
-          spec: { name: contig.name, contig_kmers: contig.contigKmers, length: contig.length, gc: record.gc },
-          payload: contig.sketch,
-        };
-        addToHeap(heapAll, item);
-        sendable.contigs += 1;
-        sendable.bp += contig.length;
-        if (contig.length >= options.minLength) {
-          addToHeap(heapLarge, item);
-          large.contigs += 1;
-          large.bp += contig.length;
+          count(skippedFewKmers, contig);
         } else {
-          small.contigs += 1;
-          small.bp += contig.length;
+          const record = newRecord(contig);
+          const item = {
+            record,
+            spec: { name: contig.name, contig_kmers: contig.contigKmers, length: contig.length, gc: record.gc },
+            payload: contig.sketch,
+          };
+          keepAll.add(item);
+          count(sendable, contig);
+          if (contig.length >= options.minLength) { keepLarge.add(item); count(large, contig); } else count(small, contig);
         }
         progressSketch();
       },
@@ -1401,75 +1285,53 @@
     let candidates = [];
     const skippedShort = { contigs: 0, bp: 0 };
     const notClassified = { contigs: 0, bp: 0, limit: Format.MAX_CLASSIFIED };
-    let toSendTotal = 0;
     let limitedAll = false;
     try {
       stats = await sketchRun.done;
       let uploadSmall = false;
       if (large.contigs > Format.MAX_CLASSIFIED) {
         // Small contigs cannot reach the top 100 here, so only this modal appears.
-        const choice = await askManyContigs({
-          contigs: large.contigs, threshold: options.minLength, signal,
-        });
-        if (choice === 'whole') {
-          st.busy = false;
-          return { whole: true };
-        }
-        if (choice === 'cancel') {
-          const error = new Error('cancelled');
-          error.name = 'AbortError';
-          throw error;
-        }
+        const choice = await askManyContigs({ contigs: large.contigs, threshold: options.minLength, signal });
+        if (choice === 'whole') return { whole: true };
+        if (choice === 'cancel') throw cancelledError();
       } else if (small.contigs) {
         uploadSmall = (await askSmallContigs({
           contigs: small.contigs, bp: small.bp, threshold: options.minLength, signal,
         })) === 'yes';
       }
       limitedAll = uploadSmall;
-      const pool = uploadSmall ? heapAll : heapLarge;
       const poolTotals = uploadSmall ? sendable : large;
-      candidates = pool.slice().sort((a, b) => a.record.index - b.record.index);
+      candidates = (uploadSmall ? keepAll : keepLarge).items().sort((a, b) => a.record.index - b.record.index);
       // Request names must be unique, but only the kept contigs are ever sent:
       // suffix repeated header ids now (counts/used cover <= 100 records, not
       // the whole file) instead of doing it per streamed record.
       const counts = new Map();
       const used = new Set();
       for (const item of candidates) {
-        const name = window.SylphdSketch.uniqueContigName(
-          item.record.id, counts, used, item.record.index,
-        );
+        const name = window.SylphdSketch.uniqueContigName(item.record.id, counts, used, item.record.index);
         item.record.id = name;
         item.spec.name = name;
       }
       toSendTotal = candidates.length;
-      if (!uploadSmall) {
-        skippedShort.contigs = small.contigs;
-        skippedShort.bp = small.bp;
-      }
+      if (!uploadSmall) Object.assign(skippedShort, small);
       const keptBp = candidates.reduce((sum, item) => sum + item.record.length, 0);
       notClassified.contigs = Math.max(0, poolTotals.contigs - candidates.length);
       notClassified.bp = Math.max(0, poolTotals.bp - keptBp);
       progressSend();
-      await sendAll(candidates);
-    } catch (error) {
-      st.sketchRun = null;
-      st.busy = false;
-      if (error && error.name === 'AbortError') {
-        results.replaceChildren(S.notice('warn', 'Cancelled', 'Sketching or the request was cancelled. Nothing was kept.'));
-      } else if (error && error.name === 'HttpError') {
-        showHttpError(error);
-      } else if (error && error.network) {
-        results.replaceChildren(S.notice('error', 'Could not reach the server',
-          el('p', null, 'The request to ', el('code', { text: S.api }), ' failed before getting a response. The server status is shown at the top of the page.')));
-        S.loadInfo();
-      } else {
-        results.replaceChildren(S.notice('error', 'Could not sketch or classify the contigs', (error && error.message) || String(error)));
+      for (const items of batches(candidates, limits)) {
+        const response = await postContigs({ ...paramsBase, contigs: items.map((item) => item.spec) }, items, signal);
+        applyResults(response, items);
+        if (response.summary && typeof response.summary === 'object') summaries.push(response.summary);
+        if (S.isNum(response.elapsed_ms)) serverMs += Number(response.elapsed_ms);
+        classified += items.length;
+        progressSend();
       }
+    } catch (error) {
+      showRunError(error);
       return;
     } finally {
       st.sketchRun = null;
     }
-    st.busy = false;
 
     const records = candidates.map((item) => item.record);
     const merged = Format.mergeSummaries(summaries);
@@ -1488,11 +1350,10 @@
       caveats: Format.caveats(records),
       label: input.file ? input.file.name : 'pasted FASTA',
       file: input.file ? input.file.name : 'pasted.fasta',
-      sketchMs: (stats && stats.lifetimeMs) || (performance.now() - sketchStart),
+      sketchMs: (stats && stats.lifetimeMs) || (performance.now() - t0),
       searchMs: serverMs,
       totalMs: performance.now() - t0,
     };
-    st.filter = null;
     render(view);
   }
 

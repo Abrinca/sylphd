@@ -698,7 +698,6 @@ details.adv .options { margin-top: 10px; }
 }
 .sp-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .sp-name { font-weight: 700; font-size: 1.02rem; overflow-wrap: anywhere; }
-.sp-name-fallback { font-family: var(--mono); font-weight: 600; font-size: .95rem; }
 .sp-addr {
   font-family: var(--mono); font-size: .86rem; color: var(--muted); overflow-wrap: anywhere;
   user-select: all; padding: 1px 6px; border-radius: 6px; background: var(--card); border: 1px solid var(--border);
@@ -745,7 +744,6 @@ details.adv .options { margin-top: 10px; }
 #per-contig-note { margin: 8px 0 0; color: var(--muted); max-width: 62em; }
 .pc-options { margin-top: 4px; }
 .pc-options .options { margin-top: 10px; }
-.pc-local { margin: 0 0 14px; }
 .pc-bar-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 0 0 8px; }
 .pc-bar-head .abund-head { margin: 0; font-size: 1rem; }
 .pc-hint { margin: 0 0 10px; font-size: .9rem; }

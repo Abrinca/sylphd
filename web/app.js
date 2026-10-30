@@ -11,7 +11,7 @@
     || location.protocol === 'file:';
   const configured = pageIsLocal ? (cfg.devApiBase || cfg.apiBase) : cfg.apiBase;
   const API = (apiOverride || configured || '').trim().replace(/\/+$/, '');
-  const LOCAL_INPUT_CAP = 2 * 1024 ** 3; // sanity cap on the input of the in-browser sketcher
+  const LOCAL_INPUT_CAP = 2e9; // sanity cap on the input of the in-browser sketcher
   const EXAMPLE_URL = 'example/mycoplasma_genitalium_G37.fna.gz';
   const EXAMPLE_NAME = 'mycoplasma_genitalium_G37.fna.gz';
 
@@ -58,19 +58,47 @@
   const nf0 = new Intl.NumberFormat('en-US');
   const fmtInt = (n) => (Number.isFinite(n) ? nf0.format(n) : '–');
   const fmtNum = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : '–');
+  // Decimal units (1 kB = 1000 B), like file managers.
   function fmtBytes(n) {
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
-    return `${(n / 1048576).toFixed(n < 10485760 ? 2 : 1)} MB`;
+    if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
+    if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e8 ? 0 : 1)} MB`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e5 ? 0 : 1)} kB`;
+    return `${Math.round(n)} B`;
   }
   function fmtBp(n) {
     if (!Number.isFinite(n)) return '–';
+    if (n >= 1e9) return `${(n / 1e9).toFixed(2)} Gb`;
     return n >= 1e6 ? `${(n / 1e6).toFixed(2)} Mb` : n >= 1e3 ? `${(n / 1e3).toFixed(1)} kb` : `${n} bp`;
   }
+  // A percentage with fixed decimals (ANI, GC, fractions already scaled to 0-100).
+  const fmtPct = (v, d = 2) => (Number.isFinite(v) ? `${v.toFixed(d)} %` : '–');
   const fmtSecs = (ms) => `${(ms / 1000).toFixed(1)} s`;
-const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
+  const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? fmtSecs(ms) : `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s`);
   const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
   const has = (v) => v != null && v !== '' && v !== 'none' && v !== 'na';
+
+  // Remembered choices: a value from `allowed`, or null (also without localStorage).
+  function readChoice(key, allowed) {
+    try {
+      const value = localStorage.getItem(key);
+      return allowed.includes(value) ? value : null;
+    } catch { return null; }
+  }
+  function writeChoice(key, value) {
+    try {
+      if (value) localStorage.setItem(key, value);
+      else localStorage.removeItem(key);
+    } catch { /* private mode: the choice simply is not remembered */ }
+  }
+
+  /* -------------------------------------------------------------- files */
+  const SEQ_SUFFIX = /\.(fastq|fq|fasta|fna|fa|fas|fsa|sylsp)$/i;
+  // The file name without compression and sequence-file extensions.
+  const stem = (name) => String(name || '').replace(/\.(gz|bgz|bgzf)$/i, '').replace(SEQ_SUFFIX, '');
+  // `stem` made safe for a download name.
+  const fileStem = (name, fallback) => stem(name).replace(/[^\w.-]+/g, '_').slice(0, 60) || fallback;
+  // sylphd_<stem>_<mode>.<ext>, e.g. sylphd_genome_contigs.tsv
+  const exportName = (name, mode, ext) => `sylphd_${fileStem(name, 'sample')}_${mode}.${ext}`;
 
   /* ------------------------------------------------------------- modes */
   // One page, three views selected by the hash: '' (landing), '#assembly', '#reads'.
@@ -685,7 +713,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     ui.cancel.hidden = !on;
     if (on) {
       runStart = performance.now();
-      const tick = () => { ui.progressText.textContent = `${text()} ${fmtSecs(performance.now() - runStart)}`; };
+      const tick = () => { ui.progressText.textContent = `${text()} · ${fmtSecs(performance.now() - runStart)}`; };
       tick();
       runTimer = setInterval(tick, 100);
     } else {
@@ -708,7 +736,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
         const read = p.streams.reduce((n, x) => n + (x.read || 0), 0);
         const sk = p.sketch || {};
         sketchPhase.text = `Sketching in your browser: ${fmtBytes(Math.min(read, total))} of ${fmtBytes(total)}` +
-          (sk.reads ? ` · ${fmtInt(sk.reads)} sequences` : '') + ' ·';
+          (sk.reads ? ` · ${fmtInt(sk.reads)} sequences` : '');
       },
     });
     try {
@@ -872,8 +900,98 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     loadInfo();
   }
 
+  /* ------------------------------------------------- shared result widgets */
+  // Download TSV / JSON buttons of a results card.
+  const exportButtons = (onTsv, onJson) => el('div', { class: 'export' },
+    el('button', { type: 'button', class: 'btn', text: 'Download TSV', onclick: onTsv }),
+    el('button', { type: 'button', class: 'btn', text: 'Download JSON', onclick: onJson }));
+
+  // Radio buttons as a segmented control; opts are [value, text, title?].
+  function seg(label, name, opts, value, onChange) {
+    const wrap = el('div', { class: 'seg', role: 'radiogroup', 'aria-label': label });
+    for (const [v, text, title] of opts) {
+      const input = el('input', { type: 'radio', name, value: v });
+      input.checked = v === value;
+      input.addEventListener('change', () => onChange(v));
+      wrap.append(el('label', { title: title || null }, input, el('span', { text })));
+    }
+    return wrap;
+  }
+
+  // One row of a legend list with a bar: a colour swatch, a name, a bar of value/max and a text.
+  // With `onclick` the row is a toggle button (`active`), else plain; `extra` adds a class.
+  function barRow({ swatch, name, value, max, text, tip, extra, onclick, active, italic }) {
+    const kids = [
+      el('i', { class: `sw ${swatch}`, 'aria-hidden': 'true' }),
+      el('span', { class: 'aname', title: typeof name === 'string' ? name : null }, italic ? el('i', { text: name }) : name),
+      el('span', { class: 'abar', 'aria-hidden': 'true' }, el('span', { class: swatch, style: `width:${Math.max(0.5, (100 * value) / max).toFixed(2)}%` })),
+      el('b', { class: 'apct', text })];
+    const cls = `arow${extra ? ` ${extra}` : ''}`;
+    return el('li', null, onclick
+      ? el('button', { type: 'button', class: `${cls}${active ? ' active' : ''}`, 'aria-pressed': active ? 'true' : 'false', title: tip, onclick }, kids)
+      : el('div', { class: cls, title: tip }, kids));
+  }
+
+  // A sortable table with the mobile sort control (the thead is hidden on small screens).
+  //   cols    [{ key, label (or () => label), hint, get(item), dir }]; dir is the first click's direction
+  //   state   { sortKey, sortDir, open? } kept by the caller across re-renders; `open` remembers expanded lineages
+  //   items() the rows' data; tiebreak(a, b) orders equal and missing values (missing ones always sort last)
+  //   row(item) a <tr> or an array of them; view(sorted) can cut the list
+  // Returns { nodes: [mobile sort, table wrap], update(), sorted() }.
+  function sortableTable({ cols, state, items, tiebreak, row, view = (list) => list, cls, id, noun }) {
+    const labelOf = (c) => (typeof c.label === 'function' ? c.label() : c.label);
+    const colOf = (key) => cols.find((c) => c.key === key) || cols[0];
+    const flip = () => { state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc'; };
+    const choose = (c) => {
+      if (state.sortKey === c.key) flip(); else { state.sortKey = c.key; state.sortDir = c.dir; }
+      update();
+    };
+    const table = el('table', { class: cls },
+      el('thead', null, el('tr', null, cols.map((c) => el('th', { scope: 'col' },
+        el('button', { type: 'button', text: labelOf(c), title: `Sort by ${c.hint || labelOf(c)}`, onclick: () => choose(c) }))))),
+      el('tbody'));
+    const sel = el('select', { id, 'aria-label': `Sort ${noun} by` }, cols.map((c) => el('option', { value: c.key, text: labelOf(c) })));
+    sel.addEventListener('change', () => { const c = colOf(sel.value); state.sortKey = c.key; state.sortDir = c.dir; update(); });
+    const dirBtn = el('button', { type: 'button', class: 'btn', 'aria-label': 'Toggle sort direction', onclick: () => { flip(); update(); } });
+
+    function sorted() {
+      const col = colOf(state.sortKey);
+      const sign = state.sortDir === 'asc' ? 1 : -1;
+      return items().slice().sort((x, y) => {
+        const a = col.get(x), b = col.get(y);
+        const an = a == null || a === '', bn = b == null || b === '';
+        if (an || bn) return an === bn ? tiebreak(x, y) : an ? 1 : -1;
+        const c = typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
+        return c * sign || tiebreak(x, y);
+      });
+    }
+    function update() {
+      sel.value = state.sortKey;
+      dirBtn.textContent = state.sortDir === 'asc' ? '▲' : '▼';
+      cols.forEach((c, i) => {
+        const th = table.tHead.rows[0].cells[i];
+        if (c.key === state.sortKey) th.setAttribute('aria-sort', state.sortDir === 'asc' ? 'ascending' : 'descending');
+        else th.removeAttribute('aria-sort');
+      });
+      // remember which lineages are expanded across re-sorts
+      if (state.open) {
+        for (const d of table.tBodies[0].querySelectorAll('details.lineage')) {
+          if (d.open) state.open.add(d.dataset.key); else state.open.delete(d.dataset.key);
+        }
+      }
+      table.tBodies[0].replaceChildren(...view(sorted()).flatMap(row));
+    }
+    update();
+    return {
+      nodes: [el('div', { class: 'mobile-sort' }, el('label', { for: id, text: 'Sort by' }), sel, dirBtn), el('div', { class: 'table-wrap' }, table)],
+      update, sorted,
+    };
+  }
+
   /* ----------------------------------------------------------- results */
-  const RANKS = { d: 'Domain', p: 'Phylum', c: 'Class', o: 'Order', f: 'Family', g: 'Genus', s: 'Species' };
+  // GTDB rank prefixes (shallowest first) and their names.
+  const RANK_NAMES = { d: 'domain', p: 'phylum', c: 'class', o: 'order', f: 'family', g: 'genus', s: 'species' };
+  const rankTitle = (r) => (RANK_NAMES[r] ? RANK_NAMES[r][0].toUpperCase() + RANK_NAMES[r].slice(1) : r);
 
   // 'd__A;p__B;...' -> [{ rank: 'd', name: 'A' }, ...] for display (aggregation happens on the server)
   function parseLineage(str) {
@@ -887,9 +1005,9 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
 
   let current = null; // { data, hits, sortKey, sortDir, thr, elapsed }
 
-  // Depth of the shared GTDB rank: drives badge colours and sorting.
-  const DEPTH = { species: 0, genus: 1, family: 2, order: 3, class: 4, phylum: 5, domain: 6 };
-  const NONE_DEPTH = 7;
+  // Depth of the shared GTDB rank (species 0 … domain 6): drives badge colours and sorting.
+  const DEPTH = Object.fromEntries(Object.values(RANK_NAMES).reverse().map((name, i) => [name, i]));
+  const NONE_DEPTH = Object.keys(DEPTH).length;
 
   // CSS class suffix for a hit: relation colour by shared rank, 'closest' for the best hit
   // when nothing reaches the species threshold, 'plain' when there is no lineage to go by.
@@ -932,8 +1050,11 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
   // it has `taxonomy_source`/`taxonomy`, but no gtdb_taxonomy.
   const nonGtdb = (h) => !has(h.gtdb_taxonomy) && (has(h.taxonomy_source) || genericRanks(h).length > 0);
   // The taxonomy source to name for a hit/link badge; GTDB when it has a GTDB lineage.
-  const hitSource = (h) => (nonGtdb(h) && has(h.taxonomy_source) ? String(h.taxonomy_source) : 'GTDB');
-  const colLabel = (c) => (typeof c.label === 'function' ? c.label() : c.label);
+  // /assembly and /contigs hits call the field `taxonomy_source`, /profile rows `tax_source`.
+  function hitSource(h) {
+    const source = h.taxonomy_source ?? h.tax_source;
+    return !has(h.gtdb_taxonomy) && has(source) ? String(source) : 'GTDB';
+  }
   // The hit table's taxon column says "GTDB species" only while every hit is GTDB's.
   const speciesColumnLabel = () => (current && current.hits.some(nonGtdb) ? 'Taxon' : 'GTDB species');
 
@@ -965,7 +1086,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       el('dl', { class: 'summary' },
         item('Records', fmtInt(q.records)),
         item('Length', fmtBp(q.length), isNum(q.length) ? `${fmtInt(q.length)} bp` : ''),
-        item('GC', isNum(q.gc) ? `${q.gc.toFixed(1)} %` : '–'),
+        item('GC', fmtPct(q.gc, 1)),
         item('Sketch k-mers', fmtInt(q.sketch_kmers), local.uploaded ? `${fmtBytes(local.sketchBytes)} sketch, uploaded as it is` : `${fmtBytes(local.sketchBytes)} sketch, made in ${fmtDur(local.sketchMs)}`),
         item('Search time', isNum(data.elapsed_ms) ? `${Math.round(data.elapsed_ms)} ms` : '–', local.uploaded ? `${fmtDur(clientMs)} incl. upload` : `${fmtDur(clientMs)} incl. sketching`),
         item('Database', fmtInt(db.genomes), 'genomes searched')));
@@ -1077,7 +1198,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     if (!parts.length) return null;
     return el('p', { class: 'trail', title: 'GTDB lineage' }, parts.flatMap((e, i) => [
       i ? el('span', { class: 'sep', 'aria-hidden': 'true', text: '›' }) : '',
-      el('span', { title: RANKS[e.rank] }, e.rank === 'g' ? el('i', { text: e.name }) : e.name)]));
+      el('span', { title: rankTitle(e.rank) }, e.rank === 'g' ? el('i', { text: e.name }) : e.name)]));
   }
 
   // The same breadcrumb for a hit from another taxonomy source (UHGV vOTU, fungal species, ...):
@@ -1233,74 +1354,16 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     { key: 'quality', label: 'Quality', hint: 'CheckM2 completeness / contamination (%)', get: (h) => h.checkm2_completeness, dir: 'desc' },
   ];
 
-  function sortedHits() {
-    const col = COLS.find((c) => c.key === current.sortKey);
-    const sgn = current.sortDir === 'asc' ? 1 : -1;
-    return current.hits.slice().sort((x, y) => {
-      const a = col.get(x), b = col.get(y);
-      const an = a == null || a === '', bn = b == null || b === '';
-      if (an || bn) return an === bn ? x.rank - y.rank : an ? 1 : -1; // missing always last
-      const c = typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
-      return c * sgn || x.rank - y.rank;
-    });
-  }
-
   function tableCard() {
-    const table = el('table', { class: 'hits' });
-    const headRow = el('tr');
-    for (const c of COLS) {
-      const label = colLabel(c);
-      const th = el('th', { scope: 'col' }, el('button', { type: 'button', text: label, title: `Sort by ${c.hint || label}`, onclick: () => {
-        if (current.sortKey === c.key) current.sortDir = current.sortDir === 'asc' ? 'desc' : 'asc';
-        else { current.sortKey = c.key; current.sortDir = c.dir; }
-        fillTable(table);
-      } }));
-      headRow.append(th);
-    }
-    table.append(el('thead', null, headRow), el('tbody'));
-    fillTable(table);
-    const n = current.hits.length;
+    current.table = sortableTable({
+      cols: COLS, state: current, items: () => current.hits, tiebreak: (x, y) => x.rank - y.rank,
+      row: hitRow, cls: 'hits', id: 'sort-select', noun: 'hits',
+    });
     return el('section', { class: 'card', 'aria-label': 'Hits' },
       el('div', { class: 'card-head' },
-        el('h2', { text: `Closest genomes (${n})` }),
-        el('div', { class: 'export' },
-          el('button', { type: 'button', class: 'btn', text: 'Download TSV', onclick: downloadTsv }),
-          el('button', { type: 'button', class: 'btn', text: 'Download JSON', onclick: downloadJson }))),
-      mobileSort(table),
-      el('div', { class: 'table-wrap' }, table));
-  }
-
-  function mobileSort(table) {
-    const sel = el('select', { id: 'sort-select', 'aria-label': 'Sort hits by' },
-      COLS.map((c) => el('option', { value: c.key, text: c.key === 'quality' ? 'Quality' : colLabel(c) })));
-    const dirBtn = el('button', { type: 'button', class: 'btn', 'aria-label': 'Toggle sort direction' });
-    const sync = () => {
-      sel.value = current.sortKey;
-      dirBtn.textContent = current.sortDir === 'asc' ? '▲' : '▼';
-    };
-    sel.addEventListener('change', () => {
-      const c = COLS.find((x) => x.key === sel.value);
-      current.sortKey = c.key; current.sortDir = c.dir; fillTable(table);
-    });
-    dirBtn.addEventListener('click', () => { current.sortDir = current.sortDir === 'asc' ? 'desc' : 'asc'; fillTable(table); });
-    table._syncSort = sync;
-    sync();
-    return el('div', { class: 'mobile-sort' }, el('label', { for: 'sort-select', text: 'Sort by' }), sel, dirBtn);
-  }
-
-  function fillTable(table) {
-    if (table._syncSort) table._syncSort();
-
-    COLS.forEach((c, i) => {
-      const th = table.tHead.rows[0].cells[i];
-      if (c.key === current.sortKey) th.setAttribute('aria-sort', current.sortDir === 'asc' ? 'ascending' : 'descending');
-      else th.removeAttribute('aria-sort');
-    });
-    // Remember which lineages are expanded across re-sorts, keyed by accession.
-    for (const d of table.tBodies[0].querySelectorAll('details.lineage')) {
-      if (d.open) current.open.add(d.dataset.key); else current.open.delete(d.dataset.key);
-    }
-    table.tBodies[0].replaceChildren(...sortedHits().map((h) => hitRow(h)));
+        el('h2', { text: `Closest genomes (${current.hits.length})` }),
+        exportButtons(downloadAssemblyTsv, () => downloadJson(exportAssembly('json'), current.data))),
+      ...current.table.nodes);
   }
 
   const dash = () => el('span', { class: 'dash', text: '–' });
@@ -1318,7 +1381,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     if (h._lin.length) {
       const label = h._species || '(no species)';
       const list = el('ol', null, h._lin.map((e) => el('li', null,
-        el('b', { text: RANKS[e.rank] || e.rank || '' }), el('span', { text: e.name || '–' }))));
+        el('b', { text: rankTitle(e.rank) }), el('span', { text: e.name || '–' }))));
       const key = hitKey(h);
       return el('details', { class: 'lineage', 'data-key': key, open: current.open.has(key) ? '' : null }, el('summary', { title: 'Show the full GTDB lineage' }, el('i', { text: label })), list);
     }
@@ -1328,7 +1391,7 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     if (!ranks.length) return dash();
     const source = has(h.taxonomy_source) ? String(h.taxonomy_source) : 'the taxonomy source';
     const list = el('ol', null, ranks.map(([rank, name], i) => el('li', null,
-      el('b', { text: RANKS[rank] || rank || `level ${i + 1}` }), el('span', { text: name || '–' }))));
+      el('b', { text: rankTitle(rank) || `level ${i + 1}` }), el('span', { text: name || '–' }))));
     const key = hitKey(h);
     return el('details', { class: 'lineage', 'data-key': key, open: current.open.has(key) ? '' : null },
       el('summary', { title: `Show the full lineage from ${source}` }, el('span', { text: h._species || '(no taxon)' })), list);
@@ -1409,16 +1472,10 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
-  function baseName() {
-    const q = current.data.query && current.data.query.name;
-    const safe = String(q || 'assembly').replace(/\.(gz|fasta|fna|fa|fas)/gi, '').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'assembly';
-    return `sylphd_${safe}`;
-  }
-  function downloadJson() {
-    download(`${baseName()}.json`, JSON.stringify(current.data, null, 2) + '\n', 'application/json');
-  }
-  function downloadTsv() {
-    const hits = sortedHits();
+  const downloadJson = (name, data) => download(name, `${JSON.stringify(data, null, 2)}\n`, 'application/json');
+  const exportAssembly = (ext) => exportName(current.local.label, 'assembly', ext);
+  function downloadAssemblyTsv() {
+    const hits = current.table.sorted();
     const lead = ['rank', 'ani', 'containment_hits', 'containment_total', 'containment_fraction', 'relation', 'shared_rank', 'ani_species_level'];
     const skip = new Set(['rank', 'ani', 'containment', 'containment_fraction', 'relation', 'shared_rank', 'ani_species_level']);
     const keys = [];
@@ -1430,12 +1487,15 @@ const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : fmtSecs(ms));
       rows.push([h.rank, h.ani, c[0], c[1], h.containment_fraction, h.relation, h.shared_rank, h.ani_species_level]
         .concat(keys.map((k) => h[k])).map(cell).join('\t'));
     }
-    download(`${baseName()}.tsv`, rows.join('\n') + '\n', 'text/tab-separated-values');
+    download(exportAssembly('tsv'), `${rows.join('\n')}\n`, 'text/tab-separated-values');
   }
 
   /* ----------------------------------------------- shared with the other scripts */
   window.Sylphd = {
-    parseLineage, el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtSecs, fmtDur, isNum, has, notice, download,
+    el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtPct, fmtSecs, fmtDur, isNum, has, notice,
+    readChoice, writeChoice, stem, fileStem, exportName, download, downloadJson,
+    RANK_NAMES, DEPTH, rankTitle, parseLineage, lineageName, genericRanks, genericTaxon, hitSource, relClass,
+    exportButtons, seg, barRow, sortableTable,
     accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal, updateSubmit,
     assemblyInput: () => input,
     api: API, apiOverride,

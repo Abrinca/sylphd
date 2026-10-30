@@ -196,8 +196,8 @@ def test_reads_tab_renders_server_clades(page_server, sketch_file: Path) -> None
     assert "sequence abundance" in result["sequenceHead"]
     assert result["text"].startswith("#SampleID\tclodf13\tTaxonomies_used:['gtdb']\n")
     assert "d__Bacteria" in result["text"]
-    assert result["filename"] == "clodf13.gtdb.sylphmpa"
+    assert result["filename"] == "sylphd_clodf13_reads.gtdb.sylphmpa"
     # "All sources": the same clades under the sylph-tax rule, still charted
     assert "All sources" in result["taxHead"]
     assert result["taxText"].startswith("#SampleID\tclodf13\tTaxonomies_used:['GTDB_r232']\n")
-    assert result["taxFilename"] == "clodf13.tax.sylphmpa"
+    assert result["taxFilename"] == "sylphd_clodf13_reads.tax.sylphmpa"

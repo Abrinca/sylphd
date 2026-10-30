@@ -9,19 +9,18 @@
   const S = window.Sylphd;
   const root = document.getElementById('mode-reads');
   if (!S || !root) return;
-  const { el, fmtInt, isNum, has, notice, download } = S;
+  const { el, fmtInt, fmtBytes, fmtBp, fmtDur, isNum, has, notice, download, rankTitle } = S;
 
-  const GIB = 1024 ** 3;
-  const MEM_WARN = 1.5 * GIB; // wasm memory is capped at 4 GiB per instance
+  const MEM_WARN = 1.5 * 1024 ** 3; // wasm memory is capped at 4 GiB per instance
   const DEFAULT_MIN_ANI = 95;
   const DEFAULT_MIN_KMERS = 10;
   const MAX_ROWS_SHOWN = 100;
   const NAME_MAX = 100;
 
-  // Rank prefixes of GTDB/NCBI lineages and their display names. The server
-  // aggregates the clades; the page only groups them by rank for the chart.
-  const RANKS = ['d', 'p', 'c', 'o', 'f', 'g', 's'];
-  const RANK_NAMES = { d: 'domain', p: 'phylum', c: 'class', o: 'order', f: 'family', g: 'genus', s: 'species' };
+  // Rank prefixes of GTDB/NCBI lineages. The server aggregates the clades; the page only
+  // groups them by rank for the chart.
+  const { RANK_NAMES } = S;
+  const RANKS = Object.keys(RANK_NAMES);
   const TAXONOMY_LABELS = { gtdb: 'GTDB', ncbi: 'NCBI', tax: 'All sources' };
   const TAXONOMY_TITLES = {
     gtdb: 'GTDB lineage of the matched genome',
@@ -30,45 +29,24 @@
   };
 
   /* ---------------------------------------------------------- formatting */
-  const fmtPct = (v) => {
+  // an abundance (a percentage that can be tiny), unlike S.fmtPct's fixed decimals
+  const fmtShare = (v) => {
     if (!isNum(v)) return '–';
     if (v >= 10) return `${v.toFixed(1)} %`;
     if (v >= 0.01) return `${v.toFixed(2)} %`;
     return v > 0 ? '< 0.01 %' : '0 %';
   };
-  // decimal units, like file managers (the assembly mode's 'MB' are MiB)
-  const fmtBytes = (n) => {
-    if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
-    if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e8 ? 0 : 1)} MB`;
-    if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e5 ? 0 : 1)} kB`;
-    return `${Math.round(n)} B`;
-  };
-  const fmtBases = (n) => {
-    if (!isNum(n)) return '–';
-    if (n >= 1e9) return `${(n / 1e9).toFixed(2)} Gb`;
-    if (n >= 1e6) return `${(n / 1e6).toFixed(1)} Mb`;
-    if (n >= 1e3) return `${(n / 1e3).toFixed(1)} kb`;
-    return `${n} b`;
-  };
-  const fmtTime = (ms) => {
-    const s = ms / 1000;
-    if (s < 60) return `${s.toFixed(1)} s`;
-    return `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`;
-  };
-  const fmtMem = (n) => (n >= GIB ? `${(n / GIB).toFixed(1)} GB` : `${Math.round(n / 1048576)} MB`);
-  const safeName = (s) => String(s || 'sample').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'sample';
+  const exportAs = (run, ext) => S.exportName(run.name, 'reads', ext);
+  const sketchName = (run) => `${S.fileStem(run.name, 'sample')}.sylsp`;
 
   /* ----------------------------------------------------- support checks */
   const { unsupported, loadModule, isSylsp, readSylspHeader, sketchProblem } = window.SylphdSketch;
 
   /* --------------------------------------------------------- file names */
-  const COMPRESSION = /\.(gz|bgz|bgzf)$/i;
-  const READ_SUFFIX = /\.(fastq|fq|fasta|fa|fna|fas|fsa|sylsp)$/i;
   const MATE_RE = /[_.]R?([12])(?:_001)?$/i; // sample_R1, sample.R2, sample_1, sample_R1_001
-  const stem = (name) => name.replace(COMPRESSION, '').replace(READ_SUFFIX, '');
-  const mateOf = (name) => { const m = MATE_RE.exec(stem(name)); return m ? Number(m[1]) : 0; };
+  const mateOf = (name) => { const m = MATE_RE.exec(S.stem(name)); return m ? Number(m[1]) : 0; };
   const sampleFromName = (name, paired) => {
-    let s = stem(name);
+    let s = S.stem(name);
     if (paired) s = s.replace(MATE_RE, '');
     return (s || 'sample').slice(0, NAME_MAX);
   };
@@ -554,7 +532,7 @@
     const taxprof = requestedTaxonomies();
     if (taxprof.length) params.taxprof = taxprof;
     const form = new FormData();
-    form.append('sketch', run.sketch, `${safeName(run.name)}.sylsp`);
+    form.append('sketch', run.sketch, sketchName(run));
     form.append('params', JSON.stringify(params));
     try {
       const res = await postForm(run, `${S.api}/profile`, form);
@@ -734,7 +712,7 @@
 
     if (run.phase === 'sketch') {
       let eta = '';
-      if (rate > 0 && sketchElapsed > 1500 && read < run.total) eta = ` · about ${fmtTime(((run.total - read) / rate) * 1000)} left`;
+      if (rate > 0 && sketchElapsed > 1500 && read < run.total) eta = ` · about ${fmtDur(((run.total - read) / rate) * 1000)} left`;
       ui.barText.textContent = `${fmtBytes(read)} of ${fmtBytes(run.total)} read (${(frac * 100).toFixed(0)} %)${eta}`;
     } else if (run.phase === 'upload') {
       ui.barText.textContent = `${fmtBytes(p.uploaded)} of ${fmtBytes(run.sketch.size)} sketch uploaded`;
@@ -745,23 +723,23 @@
       ui.stats.replaceChildren(
         stat('Sketch k-mers', fmtInt(run.stats.kmers), `c=${run.c}, k=${run.k}`),
         stat('Sketch size', fmtBytes(run.sketch.size)),
-        stat('Elapsed', fmtTime(elapsed)));
+        stat('Elapsed', fmtDur(elapsed)));
       ui.warn.replaceChildren();
       ui.cancel.textContent = 'Cancel upload';
       return;
     }
     ui.stats.replaceChildren(
       stat(run.layout === 'single' ? 'Reads' : 'Read pairs', fmtInt(sk.reads || 0)),
-      stat('Bases', fmtBases(sk.bases || 0)),
+      stat('Bases', fmtBp(sk.bases || 0)),
       stat('Sketch k-mers', fmtInt(sk.kmers || 0)),
-      stat('Elapsed', fmtTime(elapsed)),
+      stat('Elapsed', fmtDur(elapsed)),
       stat('Speed', rate ? `${fmtBytes(rate)}/s` : '–', decompressed ? `${fmtBytes(decompressed)} decompressed` : ''));
 
     // memory / size warnings
     const warns = [];
     const mem = sk.wasmMemory || 0;
     if (mem > MEM_WARN && run.phase === 'sketch') {
-      warns.push(notice('warn', 'Large sample', `The sketcher already uses ${fmtMem(mem)} of the 4 GB a browser tab can give it. If it runs out of memory, sketching stops and you need the sylphd command line for this sample.`));
+      warns.push(notice('warn', 'Large sample', `The sketcher already uses ${fmtBytes(mem)} of the 4 GB a browser tab can give it. If it runs out of memory, sketching stops and you need the sylphd command line for this sample.`));
     }
     const info = S.info();
     const maxMb = info && info.limits && info.limits.max_upload_mb;
@@ -777,7 +755,7 @@
   function sketchDownloadButton(run, primary) {
     return el('button', { type: 'button', class: primary ? 'btn' : 'btn', title: 'The sketch in sylph .sylsp format (k-mer hashes and counts, no sequences)', text: `Download sketch (.sylsp, ${fmtBytes(run.sketch.size)})`, onclick: () => {
       const url = URL.createObjectURL(run.sketch);
-      const a = el('a', { href: url, download: `${safeName(run.name)}.sylsp` });
+      const a = el('a', { href: url, download: sketchName(run) });
       document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
     } });
@@ -793,14 +771,14 @@
     run.result = { data, sample, rows, params, taxprof: sample.taxprof || {} };
     // Pick a taxonomy with real clades: a GTDB profile of a UHGV-only sample
     // is one "unclassified" tree, so fall through to NCBI and then "tax".
-    const data_taxonomies = taxonomiesWithData(sample);
-    if (data_taxonomies.length && !data_taxonomies.includes(view.taxonomy)) view.taxonomy = data_taxonomies[0];
-    view.rank = defaultRank(sample, view.taxonomy);
+    const withData = taxonomiesWithData(sample);
+    if (withData.length && !withData.includes(view.taxonomy)) view.taxonomy = withData[0];
+    view.rank = startRank(sample, view.taxonomy);
     view.showAll = false;
     const out = [summaryCard(run, run.result)];
     if (!rows.length) out.push(emptyCard(run));
     else {
-      if (!data_taxonomies.length) {
+      if (!withData.length) {
         const canTaxprof = taxprofSupported(S.info());
         const body = !canTaxprof
           ? 'This server is older than this page and cannot compute taxonomic profiles; the table and downloads still work. The server did not run the taxprof step, so the genome table below lists the hits with their own taxonomy only.'
@@ -831,10 +809,10 @@
       ];
       if (result) {
         items.push(item('Genomes detected', fmtInt(result.rows.length)));
-        items.push(item('Profiling', fmtTime(run.profileMs), 'upload and server'));
+        items.push(item('Profiling', fmtDur(run.profileMs), 'upload and server'));
         // with estimated read counts the sum of Sequence_abundance is reads, not a share
         if (result.params.estimate_unknown && !result.params.estimate_read_counts) {
-          items.push(item('Unknown', fmtPct(unknownFraction(result.rows)), 'not covered by the database'));
+          items.push(item('Unknown', fmtShare(unknownFraction(result.rows)), 'not covered by the database'));
         }
       }
       return el('section', { class: 'card', 'aria-label': 'Sample summary' },
@@ -844,16 +822,16 @@
     }
     const items = [
       item('Sample', run.name, run.layout === 'paired' ? 'paired-end' : run.layout === 'interleaved' ? 'interleaved pairs' : 'single-end'),
-      item(run.layout === 'single' ? 'Reads' : 'Read pairs', fmtInt(s.reads), fmtBases(s.bases)),
+      item(run.layout === 'single' ? 'Reads' : 'Read pairs', fmtInt(s.reads), fmtBp(s.bases)),
       item('Sketch', `${fmtInt(s.kmers)} k-mers`, `${fmtBytes(run.sketch.size)} · c=${run.c}, k=${run.k}`),
     ];
     const speed = run.sketchMs ? `${fmtBytes(run.total / (run.sketchMs / 1000))}/s` : '';
-    items.push(item('Sketching', fmtTime(run.sketchMs || 0), speed));
+    items.push(item('Sketching', fmtDur(run.sketchMs || 0), speed));
     if (result) {
       items.splice(3, 0, item('Genomes detected', fmtInt(result.rows.length)));
-      items.push(item('Profiling', fmtTime(run.profileMs), 'upload and server'));
+      items.push(item('Profiling', fmtDur(run.profileMs), 'upload and server'));
       if (result.params.estimate_unknown && !result.params.estimate_read_counts) {
-        items.push(item('Unknown', fmtPct(unknownFraction(result.rows)), 'not covered by the database'));
+        items.push(item('Unknown', fmtShare(unknownFraction(result.rows)), 'not covered by the database'));
       }
     }
     return el('section', { class: 'card', 'aria-label': 'Sample summary' },
@@ -879,7 +857,15 @@
   // ANI/coverage of strain rows) and the rendered .sylphmpa text. This section
   // only groups those clades by rank/level for the chart.
   const TOP_GROUPS = 10;
-  const view = { taxonomy: 'gtdb', rank: 's', metric: 'relative', showAll: false };
+  // The chart's taxonomy, rank and measure are remembered in this browser.
+  const PREF = { taxonomy: 'sylphd.reads.taxonomy', rank: 'sylphd.reads.rank', metric: 'sylphd.reads.metric' };
+  const view = {
+    taxonomy: S.readChoice(PREF.taxonomy, Object.keys(TAXONOMY_LABELS)) || 'gtdb',
+    rank: 's',
+    metric: S.readChoice(PREF.metric, ['relative', 'sequence']) || 'relative',
+    showAll: false,
+  };
+  const choose = (key, value) => { view[key] = value; S.writeChoice(PREF[key], value); };
 
   const payloadFor = (sample, taxonomy) => (sample.taxprof || {})[taxonomy] || null;
   const cladeDepth = (clade) => String(clade).split('|').length;
@@ -916,7 +902,12 @@
       const max = Math.max(1, ...depths);
       return Array.from({ length: max }, (_, i) => [String(i + 1), `Level ${i + 1}`]);
     }
-    return RANKS.slice().reverse().map((r) => [r, RANK_NAMES[r][0].toUpperCase() + RANK_NAMES[r].slice(1)]);
+    return RANKS.slice().reverse().map((r) => [r, rankTitle(r)]);
+  }
+
+  // The remembered rank when this taxonomy has it, else the default one.
+  function startRank(sample, taxonomy) {
+    return S.readChoice(PREF.rank, rankOptions(sample, taxonomy).map(([value]) => value)) || defaultRank(sample, taxonomy);
   }
 
   function rankDepth(taxonomy, rank) {
@@ -959,17 +950,6 @@
     return { groups, none: Math.max(0, total - classified), total };
   }
 
-  function seg(label, name, opts, value, onChange) {
-    const wrap = el('div', { class: 'seg', role: 'radiogroup', 'aria-label': label });
-    for (const [v, text, title] of opts) {
-      const input = el('input', { type: 'radio', name, value: v });
-      input.checked = v === value;
-      input.addEventListener('change', () => onChange(v));
-      wrap.append(el('label', { title: title || null }, input, el('span', { text })));
-    }
-    return wrap;
-  }
-
   const italicRank = (rank, name) => (rank === 'g' || rank === 's') && !/^unclassified/i.test(name);
 
   function abundanceCard(run) {
@@ -987,26 +967,26 @@
     const taxonomyOptions = (taxonomies.length ? taxonomies : [view.taxonomy]).map((t) => [t, TAXONOMY_LABELS[t] || t, TAXONOMY_TITLES[t] || '']);
     const controls = el('div', { class: 'abund-controls' },
       el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Taxonomy' }),
-        seg('Taxonomy', 'r-tax', taxonomyOptions, view.taxonomy, (v) => {
-          view.taxonomy = v;
-          view.rank = defaultRank(sample, v);
+        S.seg('Taxonomy', 'r-tax', taxonomyOptions, view.taxonomy, (v) => {
+          choose('taxonomy', v);
+          view.rank = startRank(sample, v);
           view.showAll = false;
           draw();
         })),
       el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: view.taxonomy === 'tax' ? 'Level' : 'Rank' }),
-        seg(view.taxonomy === 'tax' ? 'Level' : 'Rank', 'r-rank', rankOptions(sample, view.taxonomy), view.rank, (v) => { view.rank = v; view.showAll = false; draw(); })),
+        S.seg(view.taxonomy === 'tax' ? 'Level' : 'Rank', 'r-rank', rankOptions(sample, view.taxonomy), view.rank, (v) => { choose('rank', v); view.showAll = false; draw(); })),
       el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Abundance' }),
-        seg('Abundance measure', 'r-metric', [
+        S.seg('Abundance measure', 'r-metric', [
           ['relative', 'Taxonomic', 'Share of the organisms, corrected for genome size'],
           ['sequence', readCounts ? 'Reads (estimated)' : 'Sequence', readCounts
             ? 'Estimated number of reads of each genome (sylph --estimate-read-counts)'
             : 'Share of the reads (k-mers) assigned to the genome'],
-        ], view.metric, (v) => { view.metric = v; draw(); })));
+        ], view.metric, (v) => { choose('metric', v); draw(); })));
     card.append(el('div', { class: 'card-head' }, el('h2', { text: 'Abundance' }), el('div', { class: 'export' }, dlBtn)), controls, body);
     draw();
     // the unknown fraction is a share of the sample, which estimated read counts do not give
     if (params.estimate_unknown && !readCounts) {
-      card.append(el('p', { class: 'detail abund-note', text: `Estimated unknown fraction: ${fmtPct(unknownFraction(rows))} of the sample is not covered by the database (shown in the sequence abundance view; taxonomic abundance is relative to the genomes found).` }));
+      card.append(el('p', { class: 'detail abund-note', text: `Estimated unknown fraction: ${fmtShare(unknownFraction(rows))} of the sample is not covered by the database (shown in the sequence abundance view; taxonomic abundance is relative to the genomes found).` }));
     }
     return card;
   }
@@ -1017,7 +997,7 @@
     // they are shown as integers and the unknown fraction (a share of the sample) is off.
     const readCounts = !!params.estimate_read_counts;
     const reads = readCounts && view.metric === 'sequence';
-    const fmtVal = reads ? (v) => fmtInt(v) : fmtPct;
+    const fmtVal = reads ? (v) => fmtInt(v) : fmtShare;
     const { groups, none } = cladeGroups(sample, view.taxonomy, view.rank, view.metric);
     const level = rankLabel(view.taxonomy, view.rank);
     const unknown = params.estimate_unknown && !readCounts && view.metric === 'sequence' ? unknownFraction(rows) : 0;
@@ -1036,11 +1016,12 @@
 
     const maxV = Math.max(...segs.map((s) => s.value), 1e-9);
     const rowsEl = [];
+    const listRow = (name, value, cls, italic) => S.barRow({ swatch: `seg-${cls}`, name, value, max: maxV, text: fmtVal(value), italic });
     const listed = [...shown.map((g, i) => ({ g, cls: `cat-${(i % 10) + 1}` })), ...rest.map((g) => ({ g, cls: 'cat-other' }))];
     const limit = view.showAll ? listed.length : 15;
-    for (const { g, cls } of listed.slice(0, limit)) rowsEl.push(listRow(g.name, g.value, maxV, cls, italicRank(view.rank, g.name), '', fmtVal));
-    if (none > 0.0005) rowsEl.push(listRow(`Not classified at ${level} level`, none, maxV, 'cat-none', false, '', fmtVal));
-    if (unknown > 0.0005) rowsEl.push(listRow('Unknown (not in the database)', unknown, maxV, 'cat-unknown', false, '', fmtVal));
+    for (const { g, cls } of listed.slice(0, limit)) rowsEl.push(listRow(g.name, g.value, cls, italicRank(view.rank, g.name)));
+    if (none > 0.0005) rowsEl.push(listRow(`Not classified at ${level} level`, none, 'cat-none'));
+    if (unknown > 0.0005) rowsEl.push(listRow('Unknown (not in the database)', unknown, 'cat-unknown'));
     const more = listed.length > 15
       ? el('button', { type: 'button', class: 'link-btn', text: view.showAll ? 'show fewer' : `show all ${listed.length}`, onclick: () => {
         view.showAll = !view.showAll;
@@ -1053,22 +1034,13 @@
     return [head, bar, el('ul', { class: 'alist' }, rowsEl), more ? el('p', null, more) : null];
   }
 
-  function listRow(name, value, maxV, cls, italic, sub, fmt = fmtPct) {
-    return el('li', { class: 'arow' },
-      el('i', { class: `sw seg-${cls}`, 'aria-hidden': 'true' }),
-      el('span', { class: 'aname', title: name }, italic ? el('i', { text: name }) : name, sub ? el('small', { text: sub }) : null),
-      el('span', { class: 'abar', 'aria-hidden': 'true' }, el('span', { class: `seg-${cls}`, style: `width:${Math.max(0.5, (value / maxV) * 100).toFixed(2)}%` })),
-      el('b', { class: 'apct', text: fmt(value) }));
-  }
-
   function downloadSylphmpa(run) {
     const payload = payloadFor(run.result.sample, view.taxonomy);
     if (!payload || typeof payload.sylphmpa !== 'string') return;
-    download(`${safeName(run.name)}.${view.taxonomy}.sylphmpa`, payload.sylphmpa, 'text/tab-separated-values');
+    download(exportAs(run, `${view.taxonomy}.sylphmpa`), payload.sylphmpa, 'text/tab-separated-values');
   }
 
   /* ------------------------------------------------------- genome table */
-  const RANK_LABEL = { d: 'Domain', p: 'Phylum', c: 'Class', o: 'Order', f: 'Family', g: 'Genus', s: 'Species' };
   const covOf = (r) => (isNum(r.Eff_cov) ? r.Eff_cov : isNum(r.True_cov) ? r.True_cov : null);
 
   // A row without GTDB taxonomy may carry tax_lineage/tax_source from a sylph-tax source
@@ -1105,48 +1077,6 @@
       { key: 'acc', label: 'Accession', get: (h) => h.r.accession, dir: 'asc' },
     ];
     const tv = { sortKey: 'rank', sortDir: 'asc', open: new Set(), all: false };
-    const table = el('table', { class: 'hits reads-hits' });
-    const headRow = el('tr');
-    for (const c of COLS) {
-      headRow.append(el('th', { scope: 'col' }, el('button', { type: 'button', text: c.label, title: `Sort by ${c.hint || c.label}`, onclick: () => {
-        if (tv.sortKey === c.key) tv.sortDir = tv.sortDir === 'asc' ? 'desc' : 'asc'; else { tv.sortKey = c.key; tv.sortDir = c.dir; }
-        fill();
-      } })));
-    }
-    table.append(el('thead', null, headRow), el('tbody'));
-    const more = el('p', { class: 'more-rows' });
-
-    const sorted = () => {
-      const col = COLS.find((c) => c.key === tv.sortKey);
-      const sgn = tv.sortDir === 'asc' ? 1 : -1;
-      return hits.slice().sort((x, y) => {
-        const a = col.get(x), b = col.get(y);
-        const an = a == null || a === '', bn = b == null || b === '';
-        if (an || bn) return an === bn ? x.i - y.i : an ? 1 : -1;
-        const c = typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
-        return c * sgn || x.i - y.i;
-      });
-    };
-    const sel = el('select', { id: 'r-sort-select', 'aria-label': 'Sort genomes by' }, COLS.map((c) => el('option', { value: c.key, text: c.label })));
-    const dirBtn = el('button', { type: 'button', class: 'btn', 'aria-label': 'Toggle sort direction' });
-    sel.addEventListener('change', () => { const c = COLS.find((x) => x.key === sel.value); tv.sortKey = c.key; tv.sortDir = c.dir; fill(); });
-    dirBtn.addEventListener('click', () => { tv.sortDir = tv.sortDir === 'asc' ? 'desc' : 'asc'; fill(); });
-
-    function fill() {
-      sel.value = tv.sortKey;
-      dirBtn.textContent = tv.sortDir === 'asc' ? '▲' : '▼';
-      COLS.forEach((c, i) => {
-        const th = table.tHead.rows[0].cells[i];
-        if (c.key === tv.sortKey) th.setAttribute('aria-sort', tv.sortDir === 'asc' ? 'ascending' : 'descending'); else th.removeAttribute('aria-sort');
-      });
-      for (const d of table.tBodies[0].querySelectorAll('details.lineage')) { if (d.open) tv.open.add(d.dataset.key); else tv.open.delete(d.dataset.key); }
-      const list = sorted();
-      const shown = tv.all ? list : list.slice(0, MAX_ROWS_SHOWN);
-      table.tBodies[0].replaceChildren(...shown.map((h) => row(h)));
-      more.replaceChildren(...(list.length > MAX_ROWS_SHOWN
-        ? [el('button', { type: 'button', class: 'btn btn-small', text: tv.all ? `Show only the first ${MAX_ROWS_SHOWN}` : `Show all ${list.length} genomes`, onclick: () => { tv.all = !tv.all; fill(); } })] : []));
-    }
-
     const td = (label, cls, ...content) => el('td', { class: cls, 'data-label': label }, el('div', { class: 'cv' }, content));
     const dash = () => el('span', { class: 'dash', text: '–' });
     function row({ r, i, lin, tax, species }) {
@@ -1154,14 +1084,14 @@
       const ci = Array.isArray(r['ANI_5-95_percentile']) ? r['ANI_5-95_percentile'] : null;
       const cont = Array.isArray(r.Containment_ind) ? r.Containment_ind : null;
       const lineage = lin.length ? lin : tax;
-      const source = lin.length ? 'GTDB' : (has(r.tax_source) ? r.tax_source : 'the taxonomy source');
+      const source = S.hitSource(r);
       return el('tr', { class: i === 1 ? 'top-row' : null },
         td('#', 'num rank', String(i)),
         td(taxonLabel, null, lineage.length ? el('details', { class: 'lineage', 'data-key': key, open: tv.open.has(key) ? '' : null },
           el('summary', { title: `Show the full lineage from ${source}` },
             lin.length ? el('i', { text: species || '(no species)' }) : el('span', { text: species || '(no taxon)' })),
           el('ol', null, lineage.map((e, j) => el('li', null,
-            el('b', { text: RANK_LABEL[e.rank] || e.rank || `level ${j + 1}` }), el('span', { text: e.name || '–' }))))) : dash()),
+            el('b', { text: rankTitle(e.rank) || `level ${j + 1}` }), el('span', { text: e.name || '–' }))))) : dash()),
         td('Taxonomic %', 'num', el('div', { class: 'anibar' }, el('b', { text: isNum(r.Taxonomic_abundance) ? r.Taxonomic_abundance.toFixed(2) : '–' }),
           el('div', { class: 'bar rel-closest', 'aria-hidden': 'true' }, el('span', { style: `width:${(((r.Taxonomic_abundance || 0) / maxTax) * 100).toFixed(1)}%` })))),
         td(seqLabel, 'num', isNum(r.Sequence_abundance)
@@ -1177,19 +1107,24 @@
           ? el('div', null, has(r.ncbi_organism_name) ? r.ncbi_organism_name : dash(),
             has(r.ncbi_strain_identifiers) ? el('div', { class: 'sub', text: `strain ${r.ncbi_strain_identifiers}` }) : null,
             has(r.ncbi_taxid) ? el('div', { class: 'sub' }, 'taxid ', S.taxidLink(r.ncbi_taxid)) : null) : dash()),
-        td('Accession', null, S.accessionLinks(r.accession, lin.length ? 'GTDB' : (has(r.tax_source) ? r.tax_source : 'GTDB'))));
+        td('Accession', null, S.accessionLinks(r.accession, S.hitSource(r))));
     }
 
-    const card = el('section', { class: 'card', 'aria-label': 'Detected genomes' },
+    const table = S.sortableTable({
+      cols: COLS, state: tv, items: () => hits, tiebreak: (x, y) => x.i - y.i, row,
+      view: (list) => (tv.all ? list : list.slice(0, MAX_ROWS_SHOWN)),
+      cls: 'hits reads-hits', id: 'r-sort-select', noun: 'genomes',
+    });
+    const more = el('p', { class: 'more-rows' });
+    const renderMore = () => more.replaceChildren(...(hits.length > MAX_ROWS_SHOWN
+      ? [el('button', { type: 'button', class: 'btn btn-small', text: tv.all ? `Show only the first ${MAX_ROWS_SHOWN}` : `Show all ${hits.length} genomes`, onclick: () => { tv.all = !tv.all; table.update(); renderMore(); } })] : []));
+    renderMore();
+
+    return el('section', { class: 'card', 'aria-label': 'Detected genomes' },
       el('div', { class: 'card-head' },
         el('h2', { text: `Detected genomes (${hits.length})` }),
-        el('div', { class: 'export' },
-          el('button', { type: 'button', class: 'btn', text: 'Download TSV', onclick: () => downloadTsv(run) }),
-          el('button', { type: 'button', class: 'btn', text: 'Download JSON', onclick: () => download(`${safeName(run.name)}.json`, `${JSON.stringify(run.result.data, null, 2)}\n`, 'application/json') }))),
-      el('div', { class: 'mobile-sort' }, el('label', { for: 'r-sort-select', text: 'Sort by' }), sel, dirBtn),
-      el('div', { class: 'table-wrap' }, table), more);
-    fill();
-    return card;
+        S.exportButtons(() => downloadTsv(run), () => S.downloadJson(exportAs(run, 'json'), run.result.data))),
+      ...table.nodes, more);
   }
 
   /* TSV like `sylphd profile`: sylph columns, then accession and the metadata columns. */
@@ -1225,7 +1160,7 @@
     for (const r of rows) {
       lines.push(header.map((c) => tsvValue(c, c === 'True_cov' && r.True_cov == null ? r.Eff_cov : r[c])).join('\t'));
     }
-    download(`${safeName(run.name)}.tsv`, `${lines.join('\n')}\n`, 'text/tab-separated-values');
+    download(exportAs(run, 'tsv'), `${lines.join('\n')}\n`, 'text/tab-separated-values');
   }
 
   /* ---------------------------------------------------------------- init */

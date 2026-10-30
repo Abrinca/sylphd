@@ -25,7 +25,7 @@
       return 'This browser lacks Web Workers or streaming file access.';
     }
     if (!WebAssembly.validate(SIMD_PROBE)) {
-      return 'This browser does not support WebAssembly SIMD (needs Chrome 91, Firefox 89, Safari 16.4 or newer).';
+      return 'This browser does not support WebAssembly SIMD (the page needs Chrome 91, Firefox 114, Safari 16.4 or newer).';
     }
     return null;
   }

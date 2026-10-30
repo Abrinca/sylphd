@@ -6,7 +6,7 @@ format 3 metadata file. It is the command-line twin of the [web app](https://abr
 database's `c` and `k` and send only the sketch to
 [`POST /assembly`](../reference/http-api.md#post-assembly), where the server runs sylph and
 classifies the hits. The sequence never leaves your machine (the command line sketches with
-pysylph, the web app in the browser with WebAssembly), and the command line has no size limit on the assembly (the web app takes up to 2 GiB).
+pysylph, the web app in the browser with WebAssembly), and the command line has no size limit on the assembly (the web app takes up to 2 GB).
 A sketch of a bacterial genome is 100–500 kB.
 
 That works on every server, and the sequence is never sent, which is what you want when the assembly
