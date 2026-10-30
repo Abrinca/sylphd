@@ -48,6 +48,8 @@ The scripts are the mechanism; these are the knobs you choose:
   `/etc/sylphd/about.md`). `SYLPH_SERVE_ARGS` is split on whitespace, so the
   display name has its own variable, `SYLPH_NAME` in `site.env` (may contain
   spaces, e.g. `SYLPH_NAME="GTDB r232"`; it becomes `--name`).
+  `--usage-db /srv/sylphd/usage/usage.sqlite` turns on opt-in
+  [usage statistics](#usage-statistics); it is **not** part of the shipped set.
   Narrow `--cors-origin` to your page's origin if you run one. Terms of use,
   if you have any, go into the `--about` text. See
   [Running a public server](../docs/guides/public-server.md) and the
@@ -162,8 +164,36 @@ an install, `systemctl show -p ExecStart sylphd` shows the expanded command.
 
 Requests reach sylphd through the Unix socket, so the server trusts
 `X-Forwarded-For` only from that socket (`--trusted-proxy unix`) and Caddy
-replaces the header with the real peer address. The access log in
-`journalctl -u caddy` shows `client_ip`.
+replaces the header with the real peer address, which sylphd uses in memory for
+the rate limit. **Neither access log contains a client address**: sylphd's lines
+have none, and the Caddyfile's `format filter` deletes `remote_ip`,
+`remote_port`, `client_ip` and the `X-Forwarded-For`, `X-Real-Ip` and
+`Forwarded` headers from Caddy's. (Caddy's runtime log can still name a peer
+when a TLS handshake fails.) Check the Caddyfile on a host with
+`SYLPHD_DOMAIN=example.org caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`.
+
+### Usage statistics
+
+Off by default. To turn them on (see [Running a public
+server](../docs/guides/public-server.md#usage-statistics) for what they are):
+
+1. Re-run `setup-server.sh` once after updating the checkout: it creates
+   `/srv/sylphd/usage` (`sylphd:sylphd`, mode `0750`), installs the unit whose
+   `ReadWritePaths` includes it (`ProtectSystem=strict` makes everything else
+   read-only; SQLite needs the directory itself writable for its journal), and
+   installs the Caddyfile that drops client addresses from its log.
+2. Add the flag to the site policy in `site.env` and re-run the script (or put
+   it in a drop-in), then restart:
+
+   ```bash
+   SYLPH_SERVE_ARGS="--allow-sequences --max-jobs 2 ... --usage-db /srv/sylphd/usage/usage.sqlite"
+   sudo ./setup-server.sh && sudo systemctl restart sylphd
+   curl -s https://DOMAIN/info | jq .usage       # {"enabled": true, "policy": 1, ...}
+   curl -s https://DOMAIN/usage | jq .totals
+   ```
+
+The file is written by the `sylphd` user only (umask `0027`); back it up if you
+want to keep the history, and delete it to start over.
 
 Caddy rejects bodies over `SYLPH_HTTP_MAX` (64 MB by default); sylphd enforces
 the per-endpoint limits itself (20 MB for `/assembly` before decompression,

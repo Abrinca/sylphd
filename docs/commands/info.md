@@ -25,7 +25,12 @@ Prints what the server reports about itself:
 - versions of sylphd, pysylph and Python;
 - limits: jobs, contigs per `/contigs` request, upload size, sketch count, and a `web:` line with
   the raw-sequence assembly
-  (`--allow-sequences`), rate-limit and queue settings.
+  (`--allow-sequences`), rate-limit and queue settings;
+- `usage statistics: off`, or `on` with the policy and window length: the server keeps
+  [usage statistics](serve.md#usage-statistics), public at `/usage`. The commands that send work
+  (`profile`, `query`, `assembly`) print one line to stderr, `sylphd: note: this server keeps usage
+  statistics, see <url>/usage`, once per run when it is on. `assembly --quiet` and `--json` keep
+  it off stderr; nothing is asked.
 
 `--json` prints the raw `/info` payload instead. See [`GET /info`](../reference/http-api.md#get-info).
 The [server address](address.md) options select the server, and `--retries N` retries a `429` or

@@ -8,7 +8,32 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **Opt-in usage statistics.** `sylphd serve --usage-db FILE` counts successful requests to
+  `/assembly`, `/contigs`, `/profile` and `/query` per ten-minute window, endpoint and kind of
+  client (`web`, `cli` with its version, `other`): requests, contigs, samples, bases, sketch
+  bytes, histograms of job time and queue wait, peak queue depth. Counters are kept in memory and
+  written to SQLite about once a minute and on shutdown; windows older than 92 days merge into
+  monthly rows. Never IP addresses, names, results or anything per user. Off by default: then
+  nothing is recorded, `/usage` is a `404` and `/info` has `"usage": {"enabled": false}`. On, the
+  aggregated totals are public at `GET /usage` and `/info` reports `usage.policy`.
+- **Web: a "usage statistics on" chip, a `#usage` view and an agreement.** The status line links to
+  a view with totals, a 90-day activity chart, the breakdown by endpoint and client, median and
+  95th-percentile job time and queue wait. Before the first upload to a server that keeps
+  statistics the page asks the visitor to agree (once per server and policy; Cancel sends nothing;
+  "Reset remembered choices" forgets it); `choiceModal` is now a shared helper. `terms.html`
+  describes the statistics.
+- **CLI:** `profile`, `query` and `assembly` print one note to stderr per run when the server keeps
+  usage statistics (`assembly --quiet` and `--json` suppress it); `sylphd info` shows the state.
 - The web page shows the connected server's sylphd version in its status line.
+
+### Changed
+
+- **No client address in any log.** The access log line of `sylphd serve` no longer has
+  `client=...`, and the example `deploy/Caddyfile` deletes `remote_ip`, `remote_port`, `client_ip`
+  and the forwarding headers from Caddy's access log. The address is still used in memory for
+  `--rate-limit`. `GET /usage` is covered by the rate limit.
+- `deploy/sylphd.service` gets `ReadWritePaths=-/srv/sylphd/usage` and `setup-server.sh` creates
+  that directory, for `--usage-db` (not enabled by default).
 
 ## [0.3.1] - 2026-10-30
 

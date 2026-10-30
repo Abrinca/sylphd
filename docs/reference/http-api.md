@@ -13,9 +13,10 @@ authentication; see the [security notes](security.md).
 | `/profile` | POST | taxonomic profile of uploaded sketches |
 | `/assembly` | POST | closest genomes of one assembly, sent as a sketch (always) or as raw sequence (only with `--allow-sequences`) |
 | `/contigs` | POST | one classified result per contig of a fragmented assembly (contig-relative ANI, hits, consensus) |
+| `/usage` | GET | aggregated usage statistics, only on a server started with `--usage-db` (otherwise `404`) |
 
 `/health` and `/info` are always served. The abuse limits (`--rate-limit`, `--max-queue`) apply to
-the four POST endpoints only. With `curl` over a Unix socket:
+the four POST endpoints and to `GET /usage`. With `curl` over a Unix socket:
 
 ```bash
 curl --unix-socket "$XDG_RUNTIME_DIR/sylphd.sock" http://localhost/info
@@ -90,12 +91,77 @@ Reports:
   form field, i.e. how large the JSON `params` of one request may grow), `allow_sequences`,
   `max_sequence_mb` (`null` unless sequences are allowed), `rate_limit` (`{"count",
   "window_seconds"}` or `null`) and `max_queue` (`null` means unlimited);
-- `endpoints`: the endpoint paths this server serves;
+- `usage`: `{"enabled": false}`, or with `--usage-db`
+  `{"enabled": true, "policy": 1, "window_minutes": 10}`. `policy` is an integer that is raised
+  whenever what the statistics track changes; the web page asks its visitor to agree again when it
+  rises. See [`GET /usage`](#get-usage);
+- `endpoints`: the endpoint paths this server serves (`/usage` only when it is on);
 - `params`: the keys each POST endpoint accepts, so a client does not have to probe with 400s:
   `{"/profile": [...], "/query": [...], "/contigs": [...], "/assembly": [...]}`. The lists are
   derived from the validators: `/query` and `/profile` list the `ProfileParams` fields plus
   `names`, `fields`, `mode` and `tax_sources`, and `/profile` adds `taxprof`; `/contigs` lists its
   `params` keys (including `contigs`); `/assembly` lists its query-string parameters.
+
+## `GET /usage` { #get-usage }
+
+Aggregated usage statistics; **`404` unless the server runs with
+[`--usage-db`](../commands/serve.md#usage-statistics)**, in which case `/info` says so
+(`usage.enabled`). Public, like `/info`, covered by `--rate-limit`, served with CORS like the
+other endpoints, cached in memory for about a minute and not counted itself. The numbers come from
+the database the server flushes about once a minute, so they trail reality by that much.
+
+What is counted: each **successful** (`2xx`) request to `/assembly`, `/contigs`, `/profile` or
+`/query`. Failed or rejected requests, `/health`, `/info` and `/usage` are not. A row is keyed by
+the start of its ten-minute window (UTC), the endpoint, the **client kind** and the client
+version:
+
+| client | when | version |
+|---|---|---|
+| `web` | the request has an `Origin` header (a browser) | empty |
+| `cli` | the `User-Agent` is `sylphd/<version>` (what `sylphd` sends) | the version if it is a plain `x.y.z`, else empty |
+| `other` | anything else | empty |
+
+Each row adds up `requests`, `contigs` (contigs classified), `samples` (sketches profiled; an
+`/assembly` upload is one), `bases` (as reported by the client: the `length` of a sketch upload,
+the sum of the contig lengths of `/contigs`, the parsed length of a raw upload; `0` for
+`/profile` and `/query`, which carry no length) and `sketch_bytes` (the sketches received), and
+keeps the maximum `peak_queue_depth` (jobs beyond `--max-jobs` when a job asked for its slot).
+Each job's time in its slot and its wait for the slot also go into a fixed-bucket histogram per
+row (`bucket_bounds_seconds`, plus one bucket above the last bound). A `/profile` or `/query` request has one job per
+sample, `/assembly` and `/contigs` one per request. Windows with no activity have no row. Windows
+older than 92 days are merged into monthly rows once a day; sums, maxima and histograms merge
+exactly. **Never stored or served:** IP addresses or hashes of them, unique-visitor counts, sample,
+file or contig names, results, taxa, no-hit shares, parameters, anything per user.
+
+```json
+{
+  "policy": 1, "window_minutes": 10,
+  "generated_at": "2026-10-30T18:04:18Z", "since": "2026-07-01T00:00Z",
+  "bucket_bounds_seconds": [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 300.0, 3600.0],
+  "totals": {"requests": 1788, "contigs": 13519, "samples": 1788, "bases": 6123000000,
+             "sketch_bytes": 963412488, "peak_queue_depth": 3,
+             "job_seconds": {"count": 1788, "median": 1.0, "p95": 30.0},
+             "queue_wait_seconds": {"count": 1788, "median": 0.025, "p95": 5.0}},
+  "by_endpoint": {"/assembly": {"requests": 726, "...": "..."}},
+  "by_client": {"cli": {"requests": 900, "...": "..."}},
+  "windows": {"columns": ["start", "endpoint", "client", "version", "requests", "contigs",
+                          "samples", "bases", "sketch_bytes", "peak_queue_depth"],
+              "rows": [["2026-10-30T17:50Z", "/assembly", "cli", "0.3.1", 2, 0, 2, 1160152, 68200, 0]]},
+  "months": [{"month": "2026-07", "endpoint": "/query", "client": "cli", "version": "0.3.0",
+              "requests": 31, "contigs": 0, "samples": 31, "bases": 0, "sketch_bytes": 912004,
+              "peak_queue_depth": 1, "job_histogram": [0, 0, 3, 18, "..."],
+              "queue_wait_histogram": [30, 1, "..."]}]
+}
+```
+
+- `totals`, and each member of `by_endpoint` and `by_client`, have the same shape; `job_seconds`
+  and `queue_wait_seconds` give the number of jobs and the **median** and **95th percentile**,
+  read from the histograms as the **upper bound of the bucket** that holds them (so they are
+  upper bounds, and `null` without jobs).
+- `windows` holds the retained ten-minute rows in a compact columnar form (histograms are only in
+  the totals and in `months`, to keep the response small); `months` the monthly rows, kept for
+  good, with their histograms.
+- `since` is the start of the oldest row, `null` when nothing was recorded yet.
 
 ## `POST /query` and `POST /profile` { #post-query-and-post-profile }
 
@@ -488,10 +554,10 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 | Status | When |
 |---|---|
 | `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request (or more than the server's `max_contigs` for `/contigs`); for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, malformed or non-`ACGTN` raw sequence, or a `Content-Length` that is not an integer; for `/contigs` a `contigs` list that does not match the sketch parts, a duplicate or unusable contig name, a `contig_kmers` that is not a positive integer or that no sequence of that `length` can have, or an out-of-range option |
-| `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted) |
+| `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted); `GET /usage` without `--usage-db` |
 | `413` | the body exceeds `--max-upload-mb`, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
 | `415` | `/query`, `/profile` and `/contigs` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |
-| `429` | rate limited (`--rate-limit`); with `Retry-After` in seconds |
+| `429` | rate limited (`--rate-limit`, also for `GET /usage`); with `Retry-After` in seconds |
 | `503` | the job queue is full (`--max-queue`), or the request has more samples than fit in it; nothing was run; with `Retry-After: 1` |
 | `500` | profiling failed inside the server |
 

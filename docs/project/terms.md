@@ -14,6 +14,11 @@ authoritative version; this is a summary.
   server sketches raw sequences in memory and neither stores nor logs them, but unlike a sketch
   they do reach the server. The web page sketches in your browser, so your sequences stay on your
   computer.
+- The service may keep [usage statistics](../guides/public-server.md#usage-statistics) (it says so
+  in the status line of the page): counts of successful requests per ten-minute window, endpoint and
+  kind of client, with sizes and timings. They never contain IP addresses, names, results or
+  anything per person; the web page asks you to agree before your first upload, and the request log
+  of the service holds no IP address either.
 - The service is provided as-is, without warranty, and may be rate-limited, changed or discontinued.
 - Contact: <https://abrinca.com/contact>.
 

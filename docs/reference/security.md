@@ -78,10 +78,26 @@ Sketches uploaded to `/assembly` go through the same structural header check as 
 instance runs with it). Raw sequences uploaded to `/assembly` are processed in memory and checked (FASTA or FASTQ, only `ACGTN`) and error messages say
 where a problem is, never what the sequence or its headers contain. Uploads are never logged.
 
-Each request is logged as one line — method, path, status, elapsed ms, client identity and request
-id — to the `uvicorn.error` logger at INFO. The identity follows `--trusted-proxy`, so the line
-names the real client only where you have declared the proxy; `--log-level warning` silences the
-access log. See [`sylphd serve`](../commands/serve.md#logging).
+Each request is logged as one line — method, path, status, elapsed ms and request id — to the
+`uvicorn.error` logger at INFO. **No client address is logged**: the address (or the
+`X-Forwarded-For` one behind a `--trusted-proxy`) only keys the rate limit in memory, and the
+example `Caddyfile` deletes `remote_ip`, `remote_port`, `client_ip` and the forwarding headers from
+its access log too. (Caddy's own runtime log can still name a peer when a TLS handshake fails.)
+`--log-level warning` silences the access log. See [`sylphd serve`](../commands/serve.md#logging).
+
+## Usage statistics
+
+With `--usage-db` the server counts successful requests per ten-minute window, endpoint and kind
+of client in a SQLite file and publishes the totals at `GET /usage`. By construction the file
+holds only counters and histograms: no IP address or hash of one, no unique-visitor count, no
+sample, file or contig name, no result, taxon or parameter, nothing per user, and
+[`GET /usage`](http-api.md#get-usage) is public. Two things to know: the client version of the
+command line is stored only when it is a plain `x.y.z` (at most four digits per part), so a client
+cannot put free text there, but it can still create rows by sending many different valid versions
+with successful requests, which `--rate-limit` bounds; and the counters of a window with one visitor
+describe that visitor's request, so on a very quiet server do not treat the ten-minute rows as
+anonymous to someone who knows when they made a request. The feature is off unless the operator
+sets the flag, and `/info`, the web page and the command line tell users when it is on.
 
 ## What `/info` says about the host
 

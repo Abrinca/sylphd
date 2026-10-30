@@ -58,7 +58,7 @@ The public instance runs **with** it, and so does the example policy in `deploy/
 server it is optional. It costs the server CPU for sketching and RAM per job: an upload may be up
 to `--max-sequence-mb` (20 MB by default) and a gzip body may decompress to 5× that, so keep
 `--max-jobs`, `--max-queue` and `--rate-limit` set on a server that is open to others. Uploads are
-never logged: only sizes, timings and request outcomes appear in the server log.
+never logged: only sizes, timings and request outcomes appear in the server log, without client addresses.
 
 ## Limits { #limits }
 
@@ -115,7 +115,8 @@ little above `--max-upload-mb`, so oversized uploads get sylphd's own error mess
 
 ## Client identity and `--trusted-proxy`
 
-The rate limit needs to know who the client is. The identity is the **socket peer**. Behind a
+The rate limit needs to know who the client is. The identity is the **socket peer**, kept in
+memory for the rate limit only: no log line of sylphd or of the example `Caddyfile` contains it. Behind a
 reverse proxy that would be the proxy itself, so every user shares one bucket. With
 `--trusted-proxy IP` (repeatable) the `X-Forwarded-For` header of that peer is believed, and the
 rightmost address that is not itself a trusted proxy is used.
@@ -123,6 +124,31 @@ rightmost address that is not itself a trusted proxy is used.
 - When the proxy talks to the server over the default Unix socket, use `--trusted-proxy unix`.
 - Without `--trusted-proxy`, the header is **ignored entirely** (a client could otherwise pick its
   own bucket). Unix-socket peers without a trusted proxy share one bucket called `unix`.
+
+## Usage statistics { #usage-statistics }
+
+`--usage-db FILE` turns on opt-in usage statistics; without it nothing is recorded. It answers
+"is this server used, by what, and is it keeping up?" without learning about any user: successful
+requests per ten-minute window, endpoint and kind of client (web page, `sylphd` command line and
+its version, other), with contigs, samples, bases and sketch bytes, a coarse histogram of job time
+and queue wait, and the peak queue depth. Never IP addresses or hashes of them, unique visitors,
+names, results or parameters. The totals are public at `GET /usage`, summarised by the web page
+at `#usage`; the exact fields are in the [HTTP API](../reference/http-api.md#get-usage) and the
+flag in [`sylphd serve`](../commands/serve.md#usage-statistics).
+
+Because it is a statement to your users, it is announced:
+
+- `/info` reports `usage.enabled` and `usage.policy`; the web page shows a "usage statistics on"
+  chip in its status line and asks each visitor to agree **once per server and policy** before
+  anything is uploaded (Cancel sends nothing; "Only sketch" in Reads sends nothing and needs no
+  agreement). **Raise `POLICY` in `sylphd/usage.py` whenever what is tracked changes** so everyone
+  is asked again;
+- the command line prints one note to stderr per run that sends work.
+
+Both rely on what the server says about itself; they do not verify it. Say in your `--about` text
+or terms what you do with the numbers. Keep the file on a writable, backed-up directory; it is a
+small SQLite file (rows only exist for windows with traffic). Combine it with the access log
+settings above: neither stores a client address.
 
 ## CORS
 

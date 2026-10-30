@@ -10,7 +10,7 @@ sylphd serve --db [NAME=]PATH [--db [NAME=]PATH ...] [--meta PATH]
              [--max-jobs N] [--max-contigs N] [--max-upload-mb N] [--hash]
              [--allow-sequences] [--max-sequence-mb N] [--rate-limit N/min]
              [--max-queue N] [--trusted-proxy IP] [--cors-origin ORIGIN]
-             [--name TEXT] [--about FILE] [--log-level LEVEL]
+             [--name TEXT] [--about FILE] [--usage-db FILE] [--log-level LEVEL]
 ```
 
 ## Database and metadata
@@ -98,6 +98,28 @@ All off by default.
 The details of the limits, client identity and CORS are in
 [Running a public server](../guides/public-server.md).
 
+## Usage statistics
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--usage-db FILE` | off | SQLite file for opt-in usage statistics, created if missing (its directory must exist and be writable). Without it **nothing is recorded**, `GET /usage` is a `404` and `/info` reports `"usage": {"enabled": false}` |
+
+With it, each successful request to `/assembly`, `/contigs`, `/profile` or `/query` adds to
+counters per ten-minute window, endpoint, kind of client (`web`, `cli` with its version, `other`):
+requests, contigs, samples, bases, sketch bytes, a histogram of job time and of queue wait, and the
+peak queue depth. **No IP address (or hash of one), unique-visitor count, name, result, taxon or
+parameter is ever stored**, and nothing per user. The counters live in memory and a background
+thread writes them about once a minute and on shutdown, so a request never waits on the file and a
+crash loses at most that interval. Once a day, windows older than 92 days merge into monthly rows
+that are kept for good. The totals are public at [`GET /usage`](../reference/http-api.md#get-usage);
+`/info` advertises `{"enabled": true, "policy": 1, "window_minutes": 10}`, and the web page and
+the command line tell their users (see [`info`](info.md), [Running a public
+server](../guides/public-server.md#usage-statistics)).
+
+`serve` runs one process, so the one SQLite file has one writer. The file and its journal are
+created next to it: under the example systemd unit that directory has to be in `ReadWritePaths`
+(`/srv/sylphd/usage`, see [`deploy/README.md`](https://github.com/Abrinca/sylphd/blob/main/deploy/README.md)).
+
 ## Logging
 
 `--log-level` takes `critical`, `error`, `warning`, `info` (default) or `debug` and is passed to
@@ -105,22 +127,25 @@ uvicorn. sylphd writes the access log itself: **one line per request**, to the `
 logger at INFO.
 
 ```text
-POST /query -> 200 in 3.4 ms client=203.0.113.9 request_id=9f2c1a4b7e01
+POST /query -> 200 in 3.4 ms request_id=9f2c1a4b7e01
 ```
 
-That is the method, the path, the status, the elapsed milliseconds, the client identity and the
-request id. The identity is the one the rate limit uses: the socket peer, or the `X-Forwarded-For`
-address when the peer is a `--trusted-proxy`. The request id is the string the client received in
-its `X-Request-Id` header, so a report can be matched to a line. uvicorn's own access log is off,
+That is the method, the path, the status, the elapsed milliseconds and the request id. **The line
+carries no client address**: the address is only used in memory, as the key of the `--rate-limit`
+bucket (the socket peer, or the `X-Forwarded-For` address when the peer is a `--trusted-proxy`).
+The request id is the string the client received in its `X-Request-Id` header, so a report can be
+matched to a line. uvicorn's own access log is off,
 so there is exactly one line per request, failed ones included, and `--log-level warning` (or higher)
 silences it. Uploads are never logged, only their outcomes and timings.
 
 Behind a reverse proxy there is a second line per request, from the proxy: the example `Caddyfile`
-in `deploy/` logs to the journal (`journalctl -u caddy`) and runs `encode zstd gzip`, which
-compresses the bodies sylphd does not gzip itself (JSON of 1 KB or more is already compressed).
+in `deploy/` logs to the journal (`journalctl -u caddy`) **without client addresses** (its
+`format filter` deletes `remote_ip`, `remote_port`, `client_ip` and the forwarding headers) and
+runs `encode zstd gzip`, which compresses the bodies sylphd does not gzip itself (JSON of 1 KB or
+more is already compressed).
 
 ## Endpoints
 
-`GET /`, `GET /health`, `GET /info`, `POST /query`, `POST /profile`, `POST /assembly` (sketches
+`GET /`, `GET /health`, `GET /info`, `GET /usage` (only with `--usage-db`), `POST /query`, `POST /profile`, `POST /assembly` (sketches
 always, raw sequences only with `--allow-sequences`) and `POST /contigs` (one classified result per
 contig of a fragmented assembly). See the [HTTP API](../reference/http-api.md).
