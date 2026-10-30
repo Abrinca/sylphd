@@ -73,6 +73,9 @@
       return pyStr(value);
     }
 
+    // A record that took part in the search: status ok or no_hit, without a lost-evidence reason.
+    const isQueried = (record) => (record.status === 'ok' || record.status === 'no_hit') && !isLostEvidence(record);
+
     function isLostEvidence(record) {
       if (record.status === 'too_few_kmers') return true;
       return record.status === 'no_hit' && Object.prototype.hasOwnProperty.call(record, 'reason');
@@ -100,7 +103,7 @@
     function summarize(records) {
       const totalBp = records.reduce((sum, r) => sum + Number(r.length || 0), 0);
       const lost = records.filter(isLostEvidence);
-      const queried = records.filter((r) => (r.status === 'ok' || r.status === 'no_hit') && !isLostEvidence(r));
+      const queried = records.filter(isQueried);
       const queriedBp = queried.reduce((sum, r) => sum + Number(r.length || 0), 0);
       const bases = new Map();
       for (const record of queried) {
@@ -318,7 +321,7 @@
     return {
       COLUMNS, QUERY_PARAMS, DEFAULT_MIN_LENGTH, DEFAULT_TOP, DEFAULT_MIN_ANI,
       DEFAULT_CONSENSUS_RATIO, DEFAULT_CONSENSUS_Z, DEFAULT_PARAMS_BUDGET, MAX_CLASSIFIED,
-      fixed, pyStr, summarize, mergeSummaries, finalizeSummary, mergeRun, summaryFrom, caveats,
+      fixed, pyStr, isQueried, summarize, mergeSummaries, finalizeSummary, mergeRun, summaryFrom, caveats,
       tsv, document, chunkSizeFor, paramsBudget,
     };
   })();
@@ -346,7 +349,7 @@
 
   const st = {
     enabled: false, active: false, busy: false, sketchRun: null,
-    view: null, sortKey: 'contig', sortDir: 'asc', open: new Set(), filter: null,
+    view: null, sortKey: 'contig', sortDir: 'asc', open: new Set(), filter: null, scale: 'sqrt',
   };
 
   const num = (node) => { const v = node.value.trim(); return v === '' ? NaN : Number(v); };
@@ -446,6 +449,9 @@
     return '–';
   }
 
+  // A hit with a GTDB lineage links to GTDB whatever its source is called (GTDB_r232, ...).
+  const hitLinks = (hit) => S.accessionLinks(hit.accession, S.has(hit.gtdb_taxonomy) ? 'GTDB' : hit.tax_source);
+
   const consensusText = (c) => (c && S.has(c.taxon) ? String(c.taxon) : null);
 
   function consensusSub(record) {
@@ -490,49 +496,85 @@
     return node;
   }
 
-  const statusLabel = (record) => (record.status === 'too_short' ? 'too short'
-    : record.status === 'too_few_kmers' ? 'too few k-mers'
-      : record.status === 'no_hit' ? 'no hit' : record.status);
   // Cells of a queried contig without hits say so, instead of an empty gap.
   const noHitLabel = (record) => (record.status === 'no_hit' ? 'no hit' : 'not classified');
   const noHitCell = (record) => el('span', { class: 'pc-nohit-text', text: noHitLabel(record) });
 
-  function statusBadge(record) {
-    const label = statusLabel(record);
-    const node = el('span', { class: `badge badge-plain pc-status pc-status-${record.status}`, text: label });
-    if (record.status === 'no_hit') {
-      const id = helpId();
-      node.classList.add('pc-nohit-badge');
-      withHelp(node, noHitHelp(st.view && st.view.info), id);
-    } else {
-      const title = record.reason ? String(record.reason)
-        : record.status === 'too_short' ? `Shorter than the minimum contig length (${S.fmtInt(st.view && st.view.options.minLength)} bp)` : null;
-      if (title) node.setAttribute('title', title);
-    }
-    return node;
+  // The only status a queried contig can lack is "ok": its badge is the no-hit one.
+  function noHitBadge() {
+    const id = helpId();
+    const node = el('span', { class: 'badge badge-plain pc-status-no_hit pc-nohit-badge', text: 'no hit' });
+    return withHelp(node, noHitHelp(st.view && st.view.info), id);
   }
 
   const COLS = [
     { key: 'contig', label: 'Contig', get: (r) => r.id, dir: 'asc' },
     { key: 'length', label: 'Length', get: (r) => r.length, dir: 'desc' },
     { key: 'gc', label: 'GC %', get: (r) => r.gc, dir: 'desc' },
-    { key: 'status', label: 'Status', get: (r) => r.status, dir: 'asc' },
-    { key: 'consensus', label: 'Consensus taxon', get: (r) => consensusText(r.consensus) || (r.consensus && r.consensus.mixed_sources ? '~' : ''), dir: 'asc' },
-    { key: 'rank', label: 'Rank', get: (r) => (r.consensus && r.consensus.rank) || '', dir: 'asc' },
-    { key: 'n_close', label: 'n_close', get: (r) => (r.consensus ? r.consensus.n_close : null), dir: 'desc' },
-    { key: 'best', label: 'Best ANI %', get: (r) => (r.hits && r.hits[0] ? r.hits[0].ani : null), dir: 'desc' },
+    { key: 'consensus', label: 'Consensus', get: (r) => consensusText(r.consensus) || (r.consensus && r.consensus.mixed_sources ? '~' : ''), dir: 'asc' },
+    { key: 'n_close', label: 'Close hits', title: 'Number of hits in the close set used for the consensus', get: (r) => (r.consensus ? r.consensus.n_close : null), dir: 'desc' },
+    { key: 'best', label: 'Best ANI', get: (r) => (r.hits && r.hits[0] ? r.hits[0].ani : null), dir: 'desc' },
   ];
 
   function el(tag, props, ...kids) { return S.el(tag, props, ...kids); }
 
+  /* ---------------------------------------------------------------- groups */
+  // Every queried contig belongs to one group: its consensus taxon, "no consensus"
+  // (hits without a common taxon) or "no hit". Groups drive the colours, the legend
+  // and the table filter.
+  const NO_HIT = 'nohit';
+  const NO_CONSENSUS = 'none';
+  const SQRT_TIP = 'Compressed: a segment is as wide as the square root of its contig length, so short contigs stay visible. Linear: as wide as the contig length.';
+
+  function groupKey(record) {
+    const c = record.consensus || {};
+    if (consensusText(c)) return `${c.rank || ''}\u0000${c.taxon}`;
+    return (record.hits || []).length ? NO_CONSENSUS : NO_HIT;
+  }
+
+  const italicRank = (rank) => rank === 'species' || rank === 'genus';
+  const RANK_CLASS = { species: 1, genus: 1, family: 1, order: 1, class: 1, phylum: 1, domain: 1 };
+  const relOf = (rank) => (rank in RANK_CLASS ? rank : 'plain');
+  const isTaxon = (group) => group.key !== NO_HIT && group.key !== NO_CONSENSUS;
+
+  // The ANI bar colour of a hit, as in the single-assembly table.
+  function hitRel(hit) {
+    if (hit.relation === 'closest relative') return 'closest';
+    if (hit.relation === 'related' || hit.relation === 'unknown lineage') return 'plain';
+    return hit.shared_rank in RANK_CLASS ? hit.shared_rank : 'none';
+  }
+
+  // Groups by total bp (taxa first, then no consensus, then no hit), longest contig first
+  // inside a group. The first ten taxa get their own colour, the rest share the grey one.
+  function buildGroups(queried) {
+    const map = new Map();
+    for (const record of queried) {
+      const key = groupKey(record);
+      if (!map.has(key)) {
+        const c = record.consensus || {};
+        const taxon = key === NO_HIT ? 'no hit' : key === NO_CONSENSUS ? 'no consensus' : String(c.taxon);
+        map.set(key, { key, taxon, rank: c.rank && consensusText(c) ? c.rank : null, records: [], bp: 0 });
+      }
+      const group = map.get(key);
+      group.records.push(record);
+      group.bp += Number(record.length) || 0;
+    }
+    const tail = (g) => (g.key === NO_HIT ? 2 : g.key === NO_CONSENSUS ? 1 : 0);
+    const groups = [...map.values()].sort((a, b) => tail(a) - tail(b) || b.bp - a.bp);
+    let n = 0;
+    for (const g of groups) {
+      g.records.sort((a, b) => b.length - a.length || a.index - b.index);
+      g.cls = g.key === NO_HIT ? 'cat-none' : g.key === NO_CONSENSUS || n >= 10 ? 'cat-other' : `cat-${++n}`;
+    }
+    return groups;
+  }
+
+  const groupOf = (view, record) => view.groups.find((g) => g.key === groupKey(record));
+  const groupLabel = (g) => `${g.taxon}${g.rank ? ` (${g.rank})` : ''}`;
+
   function visibleRecords() {
-    const records = st.view.records;
-    if (!st.filter) return records;
-    return records.filter((r) => {
-      const c = r.consensus || {};
-      return (S.has(c.taxon) ? String(c.taxon) : null) === st.filter.taxon
-        && ((c.rank || null) === st.filter.rank);
-    });
+    const records = st.view.queried;
+    return st.filter ? records.filter((r) => groupKey(r) === st.filter.key) : records;
   }
 
   function sortedRecords() {
@@ -549,96 +591,202 @@
     });
   }
 
+  /* ---------------------------------------------------------------- summary */
+  const nContigs = (n) => `${S.fmtInt(n)} contig${n === 1 ? '' : 's'}`;
+
   function summaryItem(label, value, small, title) {
     return el('div', { title: title || null }, el('dt', { text: label }),
-      el('dd', null, value, small ? el('small', { text: small }) : null));
-  }
-
-  // The "No hit" box carries the same explanation as the badge, as a title and
-  // as hidden text referenced from its <dd>.
-  function noHitSummaryItem(count, info) {
-    const text = noHitHelp(info);
-    const id = helpId();
-    return el('div', null,
-      el('dt', { text: 'No hit' }),
-      el('dd', { class: 'pc-nohit-summary', title: text, 'aria-describedby': id },
-        `${S.fmtInt(count)} contigs`,
-        el('span', { class: 'sr-only', id, text: ` ${text}` })));
-  }
-
-  function taxonLabel(item) {
-    return `${item.taxon}${item.rank ? ` (${item.rank})` : ''}`;
+      el('dd', null, value, small ? el('small', null, small) : null));
   }
 
   function summaryCard(view) {
     const s = view.summary;
-    const full = view.fullBreakdown || [];
+    const db = (view.info && view.info.database) || {};
+    const chip = el('span', { class: 'badge badge-rel rel-species', title: 'Your sequences never left your computer: the browser sketched every contig and only the sketches (k-mer hashes and counts) and a few numbers per record were sent.' }, '✓ sketched locally');
+    const items = [
+      summaryItem('File', el('span', { class: 'summary-name', text: view.label || '–', title: view.label || null }), chip),
+      summaryItem('Records', S.fmtInt(s.contigs), S.fmtBp(s.bp)),
+      summaryItem('Queried', nContigs(s.queried_contigs), `${S.fmtInt(s.queried_bp)} bp`),
+      summaryItem('Sketching', S.fmtDur(view.sketchMs || 0)),
+      summaryItem('Search', S.isNum(view.searchMs) ? `${Math.round(view.searchMs)} ms` : '–', `${S.fmtDur(view.totalMs || 0)} end to end`),
+    ];
+    if (S.isNum(db.genomes)) items.push(summaryItem('Database', S.fmtInt(db.genomes), 'genomes searched'));
+    return el('section', { class: 'card', 'aria-label': 'Per-contig summary' },
+      el('div', { class: 'card-head' }, el('h2', { text: 'Summary' })),
+      el('dl', { class: 'summary rsummary' }, items));
+  }
+
+  /* ------------------------------------------------------------ composition */
+  function seg(label, name, opts, value, onChange) {
+    const wrap = el('div', { class: 'seg', role: 'radiogroup', 'aria-label': label });
+    for (const [v, text, title] of opts) {
+      const input = el('input', { type: 'radio', name, value: v });
+      input.checked = v === value;
+      input.addEventListener('change', () => onChange(v));
+      wrap.append(el('label', { title: title || null }, input, el('span', { text })));
+    }
+    return wrap;
+  }
+
+  function setFilter(group) {
+    st.filter = st.filter && st.filter.key === group.key ? null : { key: group.key, label: groupLabel(group) };
+    rerender();
+  }
+
+  // Opens the row of a contig (dropping a filter that hides it) and scrolls to it.
+  function showContig(record) {
+    st.open.add(record.id);
+    if (st.filter && st.filter.key !== groupKey(record)) st.filter = null;
+    rerender();
+    const row = document.getElementById(`pc-row-${record.index}`);
+    if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  function contigTip(view, record) {
+    const g = groupOf(view, record);
+    const hit = record.hits && record.hits[0];
+    const gc = S.isNum(record.gc) ? ` · GC ${Number(record.gc).toFixed(1)} %` : '';
+    const tax = g.key === NO_HIT ? 'no hit' : g.key === NO_CONSENSUS ? 'no consensus' : `consensus ${groupLabel(g)}`;
+    return `${record.id} · ${S.fmtInt(record.length)} bp${gc} · ${tax}${hit ? ` · best ANI ${fmtPct(hit.ani)}` : ''}`;
+  }
+
+  // One entry per bar segment: every contig of the ten longest, and those that would
+  // be at least 0.1 % of the bar; the smaller ones of a group are merged into one.
+  function barSegments(view, weight) {
+    const longest = new Set(view.queried.slice().sort((a, b) => b.length - a.length).slice(0, 10));
+    const skipped = view.skipped.filter((k) => k.bp > 0);
+    const total = view.queried.reduce((n, r) => n + weight(r.length), 0) + skipped.reduce((n, k) => n + weight(k.bp), 0);
+    const segs = [];
+    for (const group of view.groups) {
+      const small = group.records.filter((r) => !longest.has(r) && weight(r.length) < 0.001 * total);
+      for (const record of group.records) {
+        if (small.length > 1 && small.includes(record)) continue;
+        segs.push({ group, record, w: weight(record.length), tip: contigTip(view, record) });
+      }
+      if (small.length > 1) {
+        const bp = small.reduce((n, r) => n + r.length, 0);
+        segs.push({ group, merged: small.length, w: small.reduce((n, r) => n + weight(r.length), 0),
+          tip: `${S.fmtInt(small.length)} smaller contigs · ${S.fmtInt(bp)} bp · ${groupLabel(group)}` });
+      }
+    }
+    for (const k of skipped) segs.push({ skip: k, w: weight(k.bp), tip: `${nContigs(k.contigs)} ${k.what} · ${S.fmtInt(k.bp)} bp · not classified` });
+    return segs;
+  }
+
+  function compositionCard(view) {
+    const scale = st.scale === 'linear' ? (x) => x : Math.sqrt;
+    const { groups, queried, summary: s } = view;
     const queriedBp = Number(s.queried_bp) || 0;
-    const bars = full.map((item) => {
-      const pct = queriedBp ? (100 * item.bp) / queriedBp : 0;
-      const active = st.filter && st.filter.taxon === item.taxon && st.filter.rank === (item.rank || null);
-      return el('button', {
-        type: 'button', class: `pc-bar${active ? ' active' : ''}`,
-        'aria-pressed': active ? 'true' : 'false',
-        title: `Show only contigs whose consensus is ${taxonLabel(item)}`,
-        onclick: () => setFilter(item),
-      },
-      el('span', { class: 'pc-bar-label' }, el('b', { text: item.taxon || 'unassigned' }),
-        item.rank ? el('span', { class: 'pc-rank', text: item.rank }) : null),
-      el('span', { class: 'pc-bar-track', 'aria-hidden': 'true' },
-        el('span', { style: `width:${Math.max(0.5, pct).toFixed(1)}%` })),
-      el('span', { class: 'pc-bar-meta', text: `${S.fmtInt(item.bp)} bp · ${pct.toFixed(1)} %` }));
-    });
-    const caveatNodes = view.caveats.length
-      ? [el('div', { class: 'pc-caveats' }, view.caveats.map((text) => el('p', { class: 'detail' }, '⚠ ', text)))]
-      : [];
-    const short = s.skipped_short || { contigs: 0, bp: 0 };
-    const few = s.skipped_few_kmers || { contigs: 0, bp: 0 };
+    const segs = barSegments(view, scale);
+    const taxa = groups.filter(isTaxon);
+
+    const stack = el('div', { class: 'stack pc-stack', role: 'group', 'aria-label': 'Queried contigs, coloured by consensus taxon' },
+      segs.map((seg_) => {
+        const style = `flex-grow:${seg_.w}`;
+        if (seg_.skip) return el('span', { class: `pc-skip ${seg_.skip.cls}`, style, title: seg_.tip });
+        const cls = `seg-${seg_.group.cls}`;
+        const click = seg_.merged ? () => setFilter(seg_.group) : () => showContig(seg_.record);
+        return el('button', { type: 'button', class: cls, style, title: seg_.tip, 'aria-label': seg_.tip, onclick: click });
+      }));
+
+    const headline = !taxa.length ? `${nContigs(queried.length)} queried, no consensus`
+      : groups.length === 1 ? [`All ${S.fmtInt(queried.length)} queried contigs: `, el('strong', null, italicRank(taxa[0].rank) ? el('i', { text: taxa[0].taxon }) : taxa[0].taxon), taxa[0].rank ? ` (${taxa[0].rank})` : '']
+        : `${nContigs(queried.length)} queried, consensus in ${S.fmtInt(taxa.length)} taxa`;
+
+    // alert pill: what is left out of the bar and the table
     const limit = s.not_classified;
+    const parts = view.skipped.filter((k) => k.contigs).map((k) => `${nContigs(k.contigs)} ${k.what} (${S.fmtInt(k.bp)} bp)`);
+    if (limit && limit.contigs) parts.push(`${nContigs(limit.contigs)} not classified (limit: ${S.fmtInt(limit.limit)} longest)`);
+    const hidden = view.skipped.reduce((n, k) => n + k.contigs, 0) + ((limit && limit.contigs) || 0);
+    const pill = hidden ? withHelp(el('span', { class: 'pc-alert', text: `⚠ ${nContigs(hidden)} not shown` }), parts.join('\n'), helpId()) : null;
+
+    const maxBp = Math.max(1, ...groups.map((g) => g.bp), ...view.skipped.map((k) => k.bp));
+    const row = (swatch, name, bp, meta, active, onclick, tip) => {
+      const kids = [
+        el('i', { class: `sw ${swatch}`, 'aria-hidden': 'true' }),
+        el('span', { class: 'aname' }, name),
+        el('span', { class: 'abar', 'aria-hidden': 'true' }, el('span', { class: swatch, style: `width:${Math.max(0.5, (100 * bp) / maxBp).toFixed(2)}%` })),
+        el('b', { class: 'apct', text: meta })];
+      const node = onclick
+        ? el('button', { type: 'button', class: `arow pc-arow${active ? ' active' : ''}`, 'aria-pressed': active ? 'true' : 'false', title: tip, onclick }, kids)
+        : el('div', { class: 'arow pc-arow', title: tip }, kids);
+      return el('li', null, node);
+    };
+    const rows = groups.map((g) => {
+      const label = isTaxon(g) ? [italicRank(g.rank) ? el('i', { text: g.taxon }) : g.taxon, g.rank ? el('small', { text: g.rank }) : null] : g.taxon;
+      const pct = queriedBp ? (100 * g.bp) / queriedBp : 0;
+      return row(`seg-${g.cls}`, label, g.bp, `${nContigs(g.records.length)} · ${S.fmtBp(g.bp)} · ${pct.toFixed(1)} %`,
+        st.filter && st.filter.key === g.key, () => setFilter(g),
+        g.key === NO_HIT ? noHitHelp(view.info) : `Show only contigs whose consensus is ${groupLabel(g)}`);
+    });
+    for (const k of view.skipped.filter((x) => x.contigs)) {
+      rows.push(row(k.cls, k.label, k.bp, `${nContigs(k.contigs)} · ${S.fmtBp(k.bp)} · not queried`, false, null, k.tip));
+    }
+
     const limitNode = limit && limit.contigs
       ? S.notice('warn', 'Classification limit reached',
         view.limitedAll
           ? `${S.fmtInt(limit.contigs)} more contigs were not classified (limit: ${S.fmtInt(limit.limit)} longest overall); use the sylphd command line for all contigs.`
           : `${S.fmtInt(limit.contigs)} more contigs ≥ ${S.fmtInt(s.min_contig_length)} bp were not classified (limit: ${S.fmtInt(limit.limit)} longest); use the sylphd command line for all contigs.`)
       : null;
-    return el('section', { class: 'card', 'aria-label': 'Per-contig summary' },
-      el('div', { class: 'card-head' },
-        el('h2', { text: 'Per-contig summary' }),
-        el('div', { class: 'export' },
-          el('button', { type: 'button', class: 'btn', text: 'Download TSV', onclick: downloadTsv }),
-          el('button', { type: 'button', class: 'btn', text: 'Download JSON', onclick: downloadJson }))),
-      el('p', { class: 'muted pc-local' },
-        el('span', { class: 'badge badge-rel rel-species', title: 'Your sequences never left your computer: the browser sketched every contig and only the sketches (k-mer hashes and counts) and a few numbers per record were sent.' }, '✓ sketched locally'),
-        view.label ? ` “${view.label}” ` : '',
-        `in ${S.fmtDur(view.sketchMs || 0)}, ${S.fmtInt(s.contigs)} records, ${S.fmtBp(s.bp)}`),
-      el('dl', { class: 'summary' },
-        summaryItem('Queried', `${S.fmtInt(s.queried_contigs)} contigs`, `${S.fmtInt(s.queried_bp)} bp classified`),
-        summaryItem(`Below ${S.fmtInt(s.min_contig_length)} bp`, `${S.fmtInt(short.contigs)} contigs`,
-          `${S.fmtBp(short.bp)} · not classified`),
-        summaryItem('Too few k-mers', `${S.fmtInt(few.contigs)} contigs`, `${S.fmtBp(few.bp)} · not classified`),
-        noHitSummaryItem(s.no_hit_contigs, view.info),
-        summaryItem('Search time', S.isNum(view.searchMs) ? `${Math.round(view.searchMs)} ms` : '–',
-          `${S.fmtDur(view.totalMs || 0)} end to end`)),
-      limitNode,
-      el('h3', { class: 'pc-h3', text: 'Bases by consensus taxon' }),
-      bars.length ? el('div', { class: 'pc-bars' }, bars) : el('p', { class: 'muted', text: 'No queried bases with a consensus.' }),
-      caveatNodes);
+    const caveats = view.caveats.length
+      ? el('div', { class: 'pc-caveats' }, view.caveats.map((text) => el('p', { class: 'detail' }, '⚠ ', text)))
+      : null;
+
+    return el('section', { class: 'card', 'aria-label': 'Composition' },
+      el('div', { class: 'card-head' }, el('h2', { text: 'Composition' })),
+      el('div', { class: 'abund-controls' },
+        el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Scale' }),
+          seg('Segment width scale', 'pc-scale', [['sqrt', 'Compressed', SQRT_TIP], ['linear', 'Linear', SQRT_TIP]], st.scale, (v) => { st.scale = v; rerender(); }))),
+      el('div', { class: 'pc-bar-head' }, el('p', { class: 'abund-head' }, headline), pill),
+      stack,
+      el('ul', { class: 'alist' }, rows),
+      limitNode, caveats);
   }
 
-  function setFilter(item) {
-    const same = st.filter && st.filter.taxon === item.taxon && st.filter.rank === (item.rank || null);
-    st.filter = same ? null : { taxon: item.taxon, rank: item.rank || null };
-    rerender();
+  /* ------------------------------------------------------------------ table */
+  // A length bar relative to the longest queried contig.
+  function lengthCell(record) {
+    const pct = (100 * record.length) / Math.max(1, st.view.longest);
+    return el('div', { class: 'anibar pc-len' }, el('span', { text: S.fmtInt(record.length) }),
+      el('div', { class: 'bar pc-lenbar', 'aria-hidden': 'true' }, el('span', { style: `width:${pct.toFixed(1)}%` })));
+  }
+
+  function gcCell(record) {
+    if (!S.isNum(record.gc)) return '–';
+    const diff = Number(record.gc) - st.view.meanGc;
+    const off = Math.abs(diff) >= 3;
+    return el('div', { class: 'cv' }, `${Number(record.gc).toFixed(1)} %`,
+      el('div', { class: `sub${off ? ' pc-gc-off' : ''}`, title: `Length-weighted mean GC of the queried contigs: ${st.view.meanGc.toFixed(1)} %`,
+        text: `${diff >= 0 ? '+' : '−'}${Math.abs(diff).toFixed(1)} pts` }));
+  }
+
+  function consensusCell(record) {
+    const g = groupOf(st.view, record);
+    const c = record.consensus || {};
+    const swatch = el('i', { class: `sw seg-${g.cls}`, 'aria-hidden': 'true' });
+    if (g.key === NO_HIT) return el('div', { class: 'pc-consensus' }, swatch, noHitBadge());
+    if (g.key === NO_CONSENSUS) {
+      return el('div', { class: 'pc-consensus' }, swatch, c.mixed_sources
+        ? el('span', { class: 'badge badge-plain', title: 'The close set spans two taxonomy sources, so their ranks are not comparable', text: 'mixed sources' })
+        : el('span', { class: 'pc-nohit-text', text: 'no consensus' }));
+    }
+    return el('div', { class: 'pc-consensus' }, swatch,
+      el('span', { class: 'pc-taxon' }, italicRank(g.rank) ? el('i', { text: g.taxon }) : g.taxon),
+      g.rank ? el('span', { class: `badge badge-rel rel-${relOf(g.rank)}`, text: g.rank }) : null);
   }
 
   function bestCell(record) {
     const hit = record.hits && record.hits[0];
     if (!hit) return noHitCell(record);
     const frac = S.isNum(hit.explained_fraction) ? `${(100 * hit.explained_fraction).toFixed(1)} %` : '–';
+    const taxon = hitTaxon(hit);
+    const pct = Math.max(0, Math.min(100, ((hit.ani - 70) / 30) * 100));
     return el('div', { class: 'pc-best' },
-      el('b', { text: fmtPct(hit.ani) }),
-      el('span', { class: 'pc-best-taxon', text: hitTaxon(hit) || '–' }),
-      el('span', { class: 'sub mono', title: 'genome_id', text: hitGenome(hit) }),
+      el('div', { class: 'anibar' }, el('b', { text: S.isNum(hit.ani) ? Number(hit.ani).toFixed(2) : '–' }),
+        el('div', { class: `bar rel-${hitRel(hit)}`, 'aria-hidden': 'true' }, el('span', { style: `width:${pct.toFixed(1)}%` }))),
+      S.has(hit.accession) ? hitLinks(hit) : el('span', { class: 'sub mono', title: 'genome_id', text: hitGenome(hit) }),
+      taxon && taxon !== consensusText(record.consensus) ? el('span', { class: 'pc-best-taxon', text: taxon }) : null,
       el('span', { class: 'sub', text: `explained ${frac} · reference ANI ${fmtPct(hit.reference_ani)}` }));
   }
 
@@ -665,7 +813,8 @@
           el('td', { class: 'num', text: `${S.fmtInt(hit.shared_kmers)} / ${S.fmtInt(hit.contig_kmers)}` }),
           el('td', { class: 'num', text: S.isNum(hit.explained_fraction) ? `${(100 * hit.explained_fraction).toFixed(1)} %` : '–' }),
           el('td', { class: 'num', text: fmtPct(hit.reference_ani) }),
-          el('td', { class: 'mono', title: hit.genome_file || hitGenome(hit), text: hitGenome(hit) }),
+          el('td', S.has(hit.accession) ? null : { class: 'mono', title: hit.genome_file || hitGenome(hit) },
+            S.has(hit.accession) ? hitLinks(hit) : hitGenome(hit)),
           el('td', null, taxon || '–', lin.length ? el('div', { class: 'sub', text: `${RANKING[lin[0].rank] || lin[0].rank}: ${lin[0].name}` }) : null),
           el('td', { text: S.has(hit.gtdb_species) ? hit.gtdb_species : '–' }));
       })));
@@ -686,25 +835,18 @@
         rerender();
       },
     }, el('span', { class: 'pc-caret', 'aria-hidden': 'true', text: open ? '▾' : '▸' }), el('span', { class: 'mono', text: record.id }));
+    const close = record.consensus && S.isNum(record.consensus.n_close) ? String(record.consensus.n_close) : '–';
     const cells = [
       el('td', { class: 'pc-contig', 'data-label': 'Contig' },
         el('div', { class: 'pc-contig-cell' }, toggleBtn,
           hits.length > 1 ? el('span', { class: 'sub', text: `${hits.length} hits` }) : null)),
-      el('td', { class: 'num', 'data-label': 'Length', text: S.fmtInt(record.length) }),
-      el('td', { class: 'num', 'data-label': 'GC %', text: S.isNum(record.gc) ? `${Number(record.gc).toFixed(2)} %` : '–' }),
-      el('td', { 'data-label': 'Status' }, el('div', { class: 'cv' }, statusBadge(record),
-        record.reason ? el('div', { class: 'sub', text: String(record.reason) }) : null)),
-      el('td', { 'data-label': 'Consensus taxon' }, el('div', { class: 'cv pc-consensus' },
-        empty ? noHitCell(record) : consensusText(record.consensus) || (record.consensus && record.consensus.mixed_sources
-          ? el('span', { class: 'badge badge-plain', title: 'The close set spans two taxonomy sources, so their ranks are not comparable', text: 'mixed sources' })
-          : '–'),
-        !empty && consensusSub(record) ? el('div', { class: 'sub', text: consensusSub(record) }) : null)),
-      el('td', { 'data-label': 'Rank' }, empty ? noHitCell(record) : el('span', { text: (record.consensus && record.consensus.rank) || '–' })),
-      el('td', { class: 'num', 'data-label': 'n_close' }, empty ? noHitCell(record)
-        : el('span', { text: record.consensus && S.isNum(record.consensus.n_close) ? String(record.consensus.n_close) : '–' })),
-      el('td', { 'data-label': 'Best ANI %' }, bestCell(record)),
+      el('td', { 'data-label': 'Length' }, lengthCell(record)),
+      el('td', { 'data-label': 'GC %' }, gcCell(record)),
+      el('td', { 'data-label': 'Consensus' }, consensusCell(record)),
+      el('td', { class: 'num', 'data-label': 'Close hits', title: COLS[4].title }, empty ? noHitCell(record) : el('span', { text: close })),
+      el('td', { 'data-label': 'Best ANI' }, bestCell(record)),
     ];
-    const main = el('tr', { class: open ? 'top-row' : null }, cells);
+    const main = el('tr', { id: `pc-row-${record.index}`, class: open ? 'top-row' : null }, cells);
     const detail = el('tr', { class: 'pc-detail', hidden: open ? null : true },
       el('td', { colspan: String(cells.length) }, empty ? noHitDetail(record) : hitsTable(record)));
     return [main, detail];
@@ -713,9 +855,8 @@
   function filterChip() {
     if (!st.filter) return null;
     const count = visibleRecords().length;
-    const label = `${st.filter.taxon}${st.filter.rank ? ` (${st.filter.rank})` : ''}`;
     return el('div', { class: 'pc-filter' },
-      el('span', null, 'Consensus: ', el('strong', { text: label }), ` · showing ${S.fmtInt(count)} of ${S.fmtInt(st.view.records.length)} contigs`),
+      el('span', null, 'Consensus: ', el('strong', { text: st.filter.label }), ` · showing ${S.fmtInt(count)} of ${nContigs(st.view.queried.length)}`),
       el('button', { type: 'button', class: 'btn btn-small btn-ghost', text: 'Show all', onclick: () => { st.filter = null; rerender(); } }));
   }
 
@@ -724,7 +865,7 @@
     const head = el('tr');
     for (const col of COLS) {
       const th = el('th', { scope: 'col' }, el('button', {
-        type: 'button', text: col.label, title: `Sort by ${col.label}`,
+        type: 'button', text: col.label, title: `Sort by ${col.label}${col.title ? `: ${col.title}` : ''}`,
         onclick: () => {
           if (st.sortKey === col.key) st.sortDir = st.sortDir === 'asc' ? 'desc' : 'asc';
           else { st.sortKey = col.key; st.sortDir = col.dir; }
@@ -735,12 +876,15 @@
     }
     table.append(el('thead', null, head), el('tbody'));
     fillTable(table);
-    const total = st.view.records.length;
+    const total = st.view.queried.length;
     const shown = visibleRecords().length;
     return el('section', { class: 'card', 'aria-label': 'Contigs' },
       el('div', { class: 'card-head' },
         el('h2', { text: st.filter ? `Contigs (${S.fmtInt(shown)} of ${S.fmtInt(total)})` : `Contigs (${S.fmtInt(total)})` }),
-        el('span', { class: 'muted', text: 'Click a contig to see its hits; click a consensus bar to filter' })),
+        el('div', { class: 'export' },
+          el('button', { type: 'button', class: 'btn', text: 'Download TSV', onclick: downloadTsv }),
+          el('button', { type: 'button', class: 'btn', text: 'Download JSON', onclick: downloadJson }))),
+      el('p', { class: 'muted pc-hint', text: 'Click a contig to see its hits; click a segment or a taxon above to filter' }),
       filterChip(),
       el('div', { class: 'table-wrap' }, table));
   }
@@ -760,10 +904,32 @@
       el('p', { text: 'No record was long enough and had enough k-mers to query. Lower the minimum contig length, or check that the file is FASTA/FASTQ.' }));
   }
 
+  // What the cards derive from the records: the queried ones, their groups and GC mean.
+  function prepare(view) {
+    const queried = view.records.filter((r) => Format.isQueried(r));
+    const s = view.summary;
+    const short = s.skipped_short || { contigs: 0, bp: 0 };
+    const few = s.skipped_few_kmers || { contigs: 0, bp: 0 };
+    const min = S.fmtInt(s.min_contig_length);
+    const withGc = queried.filter((r) => S.isNum(r.gc));
+    const gcBp = withGc.reduce((n, r) => n + r.length, 0) || 1;
+    return Object.assign(view, {
+      queried,
+      groups: buildGroups(queried),
+      longest: Math.max(1, ...queried.map((r) => r.length)),
+      meanGc: withGc.reduce((n, r) => n + r.gc * r.length, 0) / gcBp,
+      skipped: [
+        { ...short, cls: 'pc-skip-short', label: `Below ${min} bp`, what: `below ${min} bp`, tip: `Shorter than the minimum contig length (${min} bp): not queried` },
+        { ...few, cls: 'pc-skip-few', label: 'Too few k-mers', what: 'with too few k-mers', tip: 'Too few k-mers to be searched: not queried' },
+      ],
+    });
+  }
+
   function render(view) {
-    st.view = view;
-    const out = [summaryCard(view)];
-    out.push(view.records.length ? tableCard() : emptyCard());
+    st.view = view.queried ? view : prepare(view);
+    const out = [summaryCard(st.view)];
+    if (st.view.queried.length) out.push(compositionCard(st.view), tableCard());
+    else out.push(emptyCard());
     $('results').replaceChildren(...out);
   }
 
@@ -930,7 +1096,7 @@
   function askManyContigs({ contigs, threshold, signal }) {
     if (storedManyChoice()) return Promise.resolve('classify');
     const intro = el('p', null,
-      `This assembly has ${S.fmtInt(contigs)} contigs of ${S.fmtInt(threshold)} bp or more. The browser classifies the ${S.fmtInt(Format.MAX_CLASSIFIED)} longest; the `,
+      `This assembly has ${nContigs(contigs)} of ${S.fmtInt(threshold)} bp or more. The browser classifies the ${S.fmtInt(Format.MAX_CLASSIFIED)} longest; the `,
       el('code', { text: 'sylphd' }), ' command line classifies all of them. Is this one genome or a MAG? For a whole-genome answer use whole-assembly mode.');
     return choiceModal({
       title: 'Many contigs',
@@ -959,7 +1125,7 @@
     return choiceModal({
       title: 'Short contigs',
       paragraphs: [
-        el('p', null, `${S.fmtInt(contigs)} contigs (${S.fmtBp(bp)}) are shorter than ${S.fmtInt(threshold)} bp. Upload them too?`),
+        el('p', null, `${nContigs(contigs)} (${S.fmtBp(bp)}) are shorter than ${S.fmtInt(threshold)} bp. Upload them too?`),
         'Short contigs give a less precise ANI (about ±1 % at 10 kb), and the database’s first-stage screen is more likely to miss them entirely. The consensus widens accordingly, so treat their calls as hints rather than species-level identifications.',
       ],
       buttons: [

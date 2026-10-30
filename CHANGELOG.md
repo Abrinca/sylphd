@@ -4,6 +4,17 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Web per-contig results follow the Reads and single-assembly look.** A Summary stat grid; a
+  Composition card with one stacked-bar segment per queried contig coloured by consensus taxon
+  (√length "Compressed" or linear scale), striped aggregate segments and a "contigs not shown"
+  pill for skipped contigs, and legend rows that filter the table; a contig table with length and
+  ANI bars, GC difference from the assembly mean, a rank chip, and accession links (GTDB-lineage
+  hits link to GTDB whatever their source is named).
+
 ## [0.3.0] - 2026-10-30
 
 ### Added
