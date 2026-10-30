@@ -4,7 +4,7 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.1] - 2026-10-30
 
 ### Added
 
@@ -30,7 +30,8 @@ All notable changes to `sylphd` are documented here. The format follows
 - `server.py` refuses requests through one `RequestError` path and maps job failures in one place;
   response bodies and status codes are unchanged. A non-integer `Content-Length` on `/assembly`
   is a 400.
-
+- Clients and the web page no longer fall back for servers older than 0.3.0: profiles need the
+  server's `taxprof`, and `/contigs` is assumed to exist.
 - **Web per-contig results follow the Reads and single-assembly look.** A Summary stat grid; a
   Composition card with one stacked-bar segment per queried contig coloured by consensus taxon
   (√length "Compressed" or linear scale), striped aggregate segments and a "contigs not shown"
@@ -602,6 +603,7 @@ server with a sketching client: the database is loaded once and shared, clients 
   for Linux x86_64 and aarch64, CPython 3.14, so a production server can install without a Rust
   toolchain.
 
+[0.3.1]: https://github.com/Abrinca/sylphd/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Abrinca/sylphd/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Abrinca/sylphd/releases/tag/v0.2.0
 [0.1.3]: https://github.com/Abrinca/sylphd/releases/tag/v0.1.3

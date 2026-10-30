@@ -36,7 +36,7 @@ with no `Content-Encoding`. A response is compressed once: a reverse proxy in fr
 ## `GET /health`
 
 ```json
-{"status": "ok", "service": "sylphd", "version": "0.3.0", "uptime_seconds": 12.345,
+{"status": "ok", "service": "sylphd", "version": "0.3.1", "uptime_seconds": 12.345,
  "jobs_running": 1, "jobs_queued": 0}
 ```
 
