@@ -4,7 +4,8 @@ A small server and client around [sylph](https://github.com/bluenote-1577/sylph)
 long-running server keeps a sylph database in memory, while clients sketch samples locally and
 send only the sketches. This avoids paying the database deserialisation cost (about 2 s and 2 GB
 of RAM for GTDB r232 c200) in every process. Results come back as TSV or JSON, joined with GTDB
-metadata, and the client can build `sylph-tax`-style taxonomic profiles.
+metadata or another taxonomy source (sylph-tax), and the client can build `sylph-tax`-style
+taxonomic profiles.
 
 - **Web app:** <https://abrinca.github.io/sylphd/>: paste an assembly, get its closest GTDB genomes.
 - **Documentation:** <https://abrinca.github.io/sylphd/docs/>

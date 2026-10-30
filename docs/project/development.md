@@ -27,7 +27,18 @@ only needed for manual runs.
 | `test_cli.py` | the command line, including the Unix-socket round trip |
 | `test_sketching.py` | inputs, sample names, `.sylsp` |
 | `test_metadata.py`, `test_download.py` | `setup` and `download` |
-| `test_taxonomy.py` | `--taxprof` and `--taxmatrix` |
+| `test_metadata_taxonomy.py` | format 3 taxonomy tables: build, update, and the v2/v3 reader |
+| `test_multi_db.py` | a pooled server equals `pysylph.Profiler(*databases)`, single-database goldens, the shared `Profiler` cache |
+| `test_taxonomy.py` | `taxonomy.py`: profile aggregation, `.sylphmpa` and clade rendering |
+| `test_taxonomy_resolve.py` | hit → lineage resolution: probe rules, precedence, `tax_*` rows |
+| `test_taxprof_payload.py` | the server-side `taxprof` payload: text and round-trippable clades |
+| `test_sylphtax_parity.py`, `test_taxmatrix_parity.py` | byte-for-byte parity with the real `sylph-tax` (`tax` profile, `merge`) |
+| `test_assembly_per_contig.py` | `POST /contigs` and `sylphd assembly --per-contig` end to end |
+| `test_about.py`, `test_deploy.py` | `--name`/`--about` in `/info`, and the `SYLPH_DB` rendering of the systemd unit |
+| `test_web_about_browser.py`, `test_web_reads_taxprof.py` | the page in headless Chromium: the operator text from `/info`, and the Reads chart from the server's `taxprof` |
+| `test_web_contigs_js.py`, `test_web_contigs_download.py` | browser per-contig sketching against pysylph, and its TSV/JSON against `sylphd assembly --per-contig` |
+| `test_web_sylsp_js.py` | `readSylspHeader` against `sylphd.sketchcheck` |
+| `web_golden.py` | helper (not a test): the single-database `/info` and `/assembly` goldens |
 
 ## Test data credit
 
@@ -48,8 +59,10 @@ with two equal modes selected by the address: the landing page (no hash), `#asse
   (`application/vnd.sylph.sketch`; input up to 2 GiB, no `--allow-sequences` needed). A browser that
   cannot run the sketcher gets a notice and a disabled submit button; the page has no raw-upload
   path. It shows the species assignment, or the closest
-  relative, with an ANI gauge, and lists the closest GTDB genomes in a sortable table that can be
-  downloaded as TSV or JSON.
+  relative, with an ANI gauge, and lists the closest genomes in a sortable table that can be
+  downloaded as TSV or JSON (its species column says *Taxon* for a non-GTDB hit). With **Per
+  contig** checked, `contigs.js` sketches every record and sends it to `POST /contigs` in batches
+  of `limits.max_contigs`, then shows the per-contig table, composition card and consensus summary.
 - **Reads** sketches reads in the browser (`reads.js`, the two workers `decompress-worker.js` and
   `sketch-worker.js`, and the WebAssembly module from `sketch-wasm/`) and sends only the sketch to
   `POST /profile`. The taxonomic clades are aggregated **on the server** (`sylphd/taxonomy.py`) and

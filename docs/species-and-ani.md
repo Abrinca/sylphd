@@ -3,7 +3,9 @@
 sylphd tells you which GTDB genomes are closest to your assembly and, when the
 best hit is close enough, which species your assembly belongs to. This page
 explains what that call is based on, where it is solid, and where it needs
-care. It is background for interpreting results, not a taxonomic ruling.
+care. It is background for interpreting results, not a taxonomic ruling. A
+server may also hold viral, fungal or MAG databases, where the same rule means
+something else; see [Outside prokaryotes](#outside-prokaryotes).
 
 ## How sylphd calls a species
 

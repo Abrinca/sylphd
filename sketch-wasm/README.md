@@ -239,7 +239,7 @@ single path.
 ## Browser measurements
 
 Chromium 155 (Playwright), Linux, 16 cores, test page served locally, server =
-`https://sylphd.abrinca.com` (sylphd 0.1.1, GTDB r232). Input
+`https://sylphd.abrinca.com` (sylphd 0.1.1 at the time of the measurements, GTDB r232). Input
 `FAM20866/reads.fastq.gz`: 1,550,645,339 bytes gzip, 4,295,587,662 bytes of FASTQ, 254,233
 reads, 2.14 Gbp, mean read length 8.4 kb. Wasm built with `simd128`.
 
@@ -328,8 +328,7 @@ chunk into wasm memory (1.5 GB, ~0.1-0.2 s); below the 0.5 s threshold.
   port would only matter if sketching became the bottleneck (it is not for gzip input, where
   decompression takes ~8.8 s; for plain FASTQ it is: ~5.5 s of sketching vs 0.7 s of reading, so
   plain FASTQ should finish in roughly 6 s instead of 9.7 s; not measured end to end).
-* Not done: Safari, `wasm-opt`, HTTP error UX, cancellation, retry/rate-limit handling, a memory
-  guard, re-measuring peak RSS for the pipeline.
+* Not done: Safari, `wasm-opt`, re-measuring peak RSS for the pipeline.
 
 ## Integration into `web/`
 
@@ -349,8 +348,9 @@ server's `taxprof` clades) next to the **Assembly** mode.
   FASTA or a file, with the G/C count (`WasmSketcher.gc()`) for the GC% of the summary,
   and sends `application/vnd.sylph.sketch` to `POST /assembly`. Verified identical to the server
   sketching the same FASTA (hits, assignment, closest, records, length, GC).
-* The per-contig pipeline (`SylphdSketch.sketchContigs`, `POST /contigs`) is available but not
-  wired into the page yet; `tests/test_web_contigs_js.py` covers it end to end (through the real
-  workers on node worker threads).
+* The per-contig pipeline (`SylphdSketch.sketchContigs`, `POST /contigs`) is the Assembly tab's
+  **Per contig** mode in `web/contigs.js`; `tests/test_web_contigs_js.py` covers the sketching end
+  to end (through the real workers on node worker threads) and
+  `tests/test_web_contigs_download.py` the TSV/JSON downloads.
 * Still open: Safari, `wasm-opt` in CI, keeping the equality tests (`cargo test`, needs the sylphd
-  venv) in CI, a time/size warning for files over a few GB, the per-contig UI.
+  venv) in CI, a time/size warning for files over a few GB.

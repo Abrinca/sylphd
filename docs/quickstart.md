@@ -86,8 +86,8 @@ sylphd assembly assembly.fasta --top 5
 The table goes to stdout (tab-separated), and one summary line to stderr:
 
 ```text
-rank  ani    relation      shared_rank  accession        gtdb_species      ncbi_organism_name     ncbi_taxid
-1     99.53  same species  species      GCA_000005845.2  Escherichia coli  Escherichia coli K-12  562
+rank  ani    relation      shared_rank  accession        genome_id        taxon             gtdb_species      taxonomy_source  ncbi_organism_name     ncbi_taxid
+1     99.53  same species  species      GCA_000005845.2  GCA_000005845.2  Escherichia coli  Escherichia coli  GTDB_r232        Escherichia coli K-12  562
 ...
 assigned to species Escherichia coli (99.53 % ANI)
 ```

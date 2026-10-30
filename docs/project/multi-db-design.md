@@ -6,17 +6,20 @@ fungal, MAG and GlobDB databases get a lineage. They were coupled by one questio
 *which database* and *which taxonomy* does it belong to. The first half is settled without code —
 the taxonomy itself says where a hit came from (Decisions).
 
-**Status 2026-10-29: phases 1 (A core), 2 (B schema and `setup`) and 3 (B resolution and the `tax`
+**Status 2026-10-30: phases 1 (A core), 2 (B schema and `setup`) and 3 (B resolution and the `tax`
 profile) are implemented**, and of phase 4 the first item — generic lineage classification in
-`classify_hits`/per-contig with the 95 % hints and warnings (B6) — is **done**; the other extras
-(`--taxprof-virus-hosts`, per-database association, `download --with-taxonomy`, the web label from
-`databases`) are not. The implementation measurements are in `scratch/multi-db/REPORT.md` (phase 1),
+`classify_hits`/per-contig with the 95 % hints and warnings (B6) — is **done**, as is the web label
+from `databases`: the panel lists the databases and the taxonomy sources, calls a server
+`GTDB r<release>` only when a GTDB database is served, and the Reads tab charts the non-GTDB taxa of
+the `tax` profile. The other extras (`--taxprof-virus-hosts`, per-database association, `download
+--with-taxonomy`) are not. The implementation measurements are in `scratch/multi-db/REPORT.md` (phase 1),
 `scratch/taxonomy/REPORT.md` (phase 2), `scratch/taxonomy/PHASE3.md` (phase 3, including the
 real-data parity run) and `scratch/taxonomy/PHASE4A.md` (B6, with the real phage/fungal/per-contig
 runs) and are folded into the sections marked *measured*.
 
-Primary use is the owner's own backend through the CLI. The public web app stays on one database;
-it must keep working but gets no multi-database features here.
+Primary use is the owner's own backend through the CLI. The public web app shows a multi-database
+server as one pooled database, without per-database controls; it lists the databases and taxonomy
+sources and charts non-GTDB taxa.
 
 Checked against: pysylph `multi-db` @ `f8f45a1` (the commit in `uv.lock`), sylph @ `4b5c2be`
 (`ref/`), sylph-tax @ `d14f286` (v1.9.2), and the Zenodo taxonomy files themselves. Claims I could
@@ -165,7 +168,7 @@ Updated in phase 1: the first four rows describe the code *before* it.
 | `server.py: ServerConfig.db_path`, `create_app` | exactly one database (**now** `ServerConfig.db_paths: tuple[DatabaseSpec, ...]`, `db_path` kept as the single-database spelling) |
 | `profiling.py: LoadedDatabase` | `c`, `k` from `db[0]` for a plain database; one `Profiler` per request (`run_sample`, `_assembly_hits`) (**now** `DatabaseSet` with one pooled `Profiler` per parameter set) |
 | `profiling.py: _decode_sketch` | sketch `c` compared with that one database (**now** `DatabaseSet.check_sketch`, naming the limiting database) |
-| `server.py: _info` | `database` is one object (**now** the pooled view plus `databases`); the web app reads `database.{name,genomes,c,k}` and `metadata.release` (`web/app.js`, `loadInfo`, `sketchLocally`) |
+| `server.py: _info` | `database` is one object (**now** the pooled view plus `databases`; the web app reads `database.{name,genomes,c,k}`, lists `databases` and `metadata.taxonomy_sources`, and shows `GTDB r<release>` only when `databases[].gtdb` says a GTDB database is served — `web/app.js`, `loadInfo`, `renderCatalog`, `sketchLocally`) |
 | `metadata.py: accession_from_genome_name` | only `GC[AF]_\d+(\.\d+)?`; **every hit from IMG/VR, UHGV, OceanDNA, SoilSMAG, Tara and GlobDB r226 gets no accession and no metadata** |
 | `taxonomy.py: parse_lineage`, `TAXONOMY_COLUMNS` | ranks `d,p,c,o,f,g,s` only; other tokens are dropped; empty ranks filled with `unclassified X`; `t__` forced last |
 | `assembly.py: classify_hits` | GTDB lineage only; no lineage on the best hit means ANI-only labels, on another hit `unknown lineage` |
@@ -692,9 +695,11 @@ before step 0:
    for 362 hits. One configuration finding: with both `UHGV_default` (ord 1) and `UHGV_ictv`
    (ord 2) imported, every UHGV key resolves through **ICTV**; `--tax-source UHGV_default`
    selects the other one.
-4. **Extras.** `--taxprof-virus-hosts`, per-database association (`?tax=`; needs A7 to come back),
-   `download --with-taxonomy`, web label from `databases`. **Generic lineage in `classify_hits` is
-   done 2026-10-29** (B6, with the 95 % notes and warnings); see `scratch/taxonomy/PHASE4A.md`.
+4. **Extras.** `--taxprof-virus-hosts`, per-database association (`?tax=`; needs A7 to come back)
+   and `download --with-taxonomy` are open. **Generic lineage in `classify_hits` is done
+   2026-10-29** (B6, with the 95 % notes and warnings; see `scratch/taxonomy/PHASE4A.md`), and the
+   **web label from `databases[].gtdb` is done** (`web/app.js`; the panel also lists the databases
+   and taxonomy sources and the Reads tab charts non-GTDB taxa).
 
 A and B are independent until step 3: a one-database server with `--taxonomy UHGV_default` is
 useful by itself, and step 1 is useful without any taxonomy work. A hit-origin step no longer

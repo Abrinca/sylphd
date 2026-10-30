@@ -175,7 +175,9 @@ eukaryotes (fungi, human, etc.).
 ## Using the web app against your server
 
 The web app is a static page in `web/` that calls `GET /info` and `POST /assembly` of a server
-(Assembly mode: it sketches in the browser and sends the sketch, so no `--allow-sequences` is needed), and `POST /profile` (Reads mode, see
+(Assembly mode: it sketches in the browser and sends the sketch, so no `--allow-sequences` is needed), `POST /contigs`
+(Assembly mode with *Per contig* checked, see
+[Identifying an assembly](assembly.md#per-contig)) and `POST /profile` (Reads mode, see
 [Profiling reads in the browser](profiling-in-browser.md); it works on any server, with a
 metadata database for the taxonomy). `web/config.js` holds two addresses: `apiBase`, the public
 server used by the published page (the public instance), and `devApiBase`

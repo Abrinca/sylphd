@@ -15,6 +15,11 @@ All notable changes to `sylphd` are documented here. The format follows
   ANI bars, GC difference from the assembly mean, a rank chip, and accession links (GTDB-lineage
   hits link to GTDB whatever their source is named).
 
+### Fixed
+
+- Docs and the `--min-contig-length` help: skipped contigs are counted, not listed; stale
+  statements updated.
+
 ## [0.3.0] - 2026-10-30
 
 ### Added
@@ -162,9 +167,11 @@ All notable changes to `sylphd` are documented here. The format follows
   `gtdb_species`; the JSON adds a `consensus` object (`rank`, `taxon`, `n_close`, `species`).
   Defaults `R = 1.5`, `Z = 2`, settable with `--consensus-ratio R` and `--consensus-z Z`
   (per-contig only, rejected elsewhere).
-- `--min-contig-length BP` (default `20000`) skips short contigs; they are still listed with
-  `status` `too_short`. A contig with fewer k-mers than sylph's `min_number_kmers` is reported as
-  `no_hit` instead of a spurious match. Duplicate record ids get a deterministic `_2`, `_3` suffix.
+- `--min-contig-length BP` (default `20000`) skips short contigs; they are not sketched or sent,
+  produce no row, and are counted in `summary.skipped_short`. A contig with fewer k-mers than
+  sylph's `min_number_kmers` (or with no genome-style k-mer) is counted in
+  `summary.skipped_few_kmers` instead of producing a spurious match; the server reports such a
+  sketch as `too_few_kmers`. Duplicate record ids get a deterministic `_2`, `_3` suffix.
 - `--quiet` suppresses the (new or existing) stderr summary of `sylphd assembly`.
 
 - **Hit → lineage resolution and the merged `tax` profile.** Every row of `/query`, `/profile`
@@ -336,9 +343,10 @@ All notable changes to `sylphd` are documented here. The format follows
   and measures its genome-style k-mer count locally, but the contig-relative ANI, the ranking, the
   classification and the consensus are computed on the server, and the per-request summaries are
   added up instead of re-sending every hit to the client. The table, the JSON document and the
-  stderr summary are unchanged except for the parsimony tie-break above, and a contig whose genome
-  sketch is empty (a tandem repeat, the ANI denominator would be zero) is now `no_hit` with a
-  `reason` and is not sent, because the endpoint requires a positive `contig_kmers`.
+  stderr summary are unchanged except for the parsimony tie-break above and the skipped-record
+  counting below, and a contig whose genome sketch is empty (a tandem repeat, the ANI denominator
+  would be zero) is counted in `summary.skipped_few_kmers` (the server answers `too_few_kmers` for
+  such a sketch) and is not sent, because the endpoint requires a positive `contig_kmers`.
 - `sylphd serve` logs each database it loads (name, kind, genomes, `c`, `k`, load time) and the
   total load time, plus the `Profiler` construction time, on the `sylphd` logger at the
   `--log-level`; a differing `c` between databases is a warning. `ServerConfig` gains a

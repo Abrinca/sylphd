@@ -69,8 +69,8 @@ contaminating contig shows its own species, not the species of the whole file. T
 never leaves your machine — only the sketches and a few numbers per record do.
 
 The endpoint is new; a server without it answers `404`, so `--per-contig` needs a server running
-this version of `sylphd` (or newer). `GET /info` lists `/contigs` in `endpoints` when it is
-available.
+this version of `sylphd` (or newer). `GET /info` always lists `/contigs` in `endpoints` here; if it
+is missing, the server is older.
 
 ```bash
 sylphd assembly mag.fasta --per-contig

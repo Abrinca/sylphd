@@ -3,7 +3,8 @@
 **One sylph database in memory, shared by every run.** `sylphd` is a small server and client around
 [sylph](https://github.com/bluenote-1577/sylph). The server loads a database once and keeps it
 resident. Clients sketch their samples locally and send only the sketches, then get ANI hits or
-taxonomic profiles back as TSV or JSON, joined with GTDB metadata.
+taxonomic profiles back as TSV or JSON, joined with GTDB metadata or another taxonomy source
+(sylph-tax).
 
 A [web app](https://abrinca.github.io/sylphd/) built on the same server needs no install and has two
 modes: it finds the closest GTDB genomes of an assembly, and it profiles sequencing reads. Both are
@@ -46,7 +47,7 @@ scripts; the public instance runs with it.
 - **[Identify an assembly](guides/assembly.md).** The closest GTDB genomes, a species assignment at
   95 % ANI and the lineage relation of every hit.
 - **[Taxonomic profiles](guides/taxonomic-profiles.md).** `.sylphmpa` files and clade × sample
-  matrices in the format of `sylph-tax`, built on the client.
+  matrices in the format of `sylph-tax`, aggregated on the server and written by the client.
 - **[Public server](guides/public-server.md).** TCP and `--url` clients, upload limits, rate limit,
   queue, trusted proxy and CORS, all off by default.
 

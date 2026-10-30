@@ -29,7 +29,9 @@ sketch leaves your computer.
 
 Under **Options** you can change the minimum ANI (default 95 %, as `sylph profile`) and the minimum
 number of k-mers per genome (10), turn on *Estimate unknown fraction* (`--estimate-unknown`) or
-choose *Only sketch* to keep the sketch without uploading it.
+*Estimate read counts* (`--estimate-read-counts`, experimental: reads per genome instead of a share
+of the sample; it implies *Estimate unknown fraction* and is hidden on a server that does not
+advertise it), or choose *Only sketch* to keep the sketch without uploading it.
 
 While it works the page shows the stages (reading and decompressing, sketching, uploading,
 profiling), the bytes read, the reads, bases and sketch k-mers counted, the elapsed time and the
@@ -49,7 +51,7 @@ speed. **Cancel** stops the workers immediately.
   *not classified at that level*.
 - **Detected genomes:** a sortable table with both abundances, the adjusted ANI (and its 5–95 %
   interval), the effective coverage, the GTDB species and lineage, the NCBI organism and taxid, and
-  links to NCBI and GTDB.
+  links to NCBI plus, for a GTDB hit, GTDB (otherwise a badge naming the hit's taxonomy source).
 - **Downloads:** the table as TSV (the same columns as `sylphd profile`), the response as JSON, the
   taxonomic profile as `.sylphmpa` (the same file as `sylphd profile --taxprof`, for the selected
   taxonomy) and the **sketch** itself as `<sample>.sylsp`.

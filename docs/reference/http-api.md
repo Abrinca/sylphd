@@ -24,7 +24,7 @@ curl --unix-socket "$XDG_RUNTIME_DIR/sylphd.sock" http://localhost/info
 ## `GET /health`
 
 ```json
-{"status": "ok", "service": "sylphd", "version": "0.1.0", "uptime_seconds": 12.345}
+{"status": "ok", "service": "sylphd", "version": "0.3.0", "uptime_seconds": 12.345}
 ```
 
 ## `GET /info` { #get-info }

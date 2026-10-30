@@ -53,9 +53,9 @@ threshold is a heuristic there.
 |---|---|---|
 | `--top N` | `10` | number of hits, 1-50 (`1` with `--per-contig`) |
 | `--min-ani ANI` | `80` | minimum ANI in percent, 70-100 |
-| `--name NAME` | file base name | query name |
+| `--name NAME` | file base name | query name (single-assembly mode only; `--per-contig` names each sample after its record id) |
 | `--per-contig` | off | sketch every record as its own sample (see below) |
-| `--min-contig-length BP` | `20000` | with `--per-contig`: shorter contigs are reported but not queried |
+| `--min-contig-length BP` | `20000` | with `--per-contig`: shorter contigs are not sketched or sent and have no row; they are counted in `summary.skipped_short` |
 | `--fields COLS` | `all` | with `--per-contig`: metadata columns per hit |
 | `--consensus-ratio R` | `1.5` | with `--per-contig`: how much more divergent than the best hit a species may be and still join the consensus |
 | `--consensus-z Z` | `2` | with `--per-contig`: allowance for ANI sampling noise, in standard deviations |
@@ -81,7 +81,8 @@ shows that species even when the rest of the assembly is one genome. The contigs
 locally and sent as a batch to
 [`POST /contigs`](../reference/http-api.md#post-contigs), which does the classification on the
 server; the sequence never leaves the machine. The endpoint is new, so `--per-contig` needs a
-server running this version of `sylphd` (`GET /info` lists `/contigs`).
+server running this version of `sylphd` (`GET /info` always lists `/contigs` here; if it is
+missing, the server is older).
 
 ```bash
 sylphd assembly mag.fasta --per-contig
@@ -100,7 +101,7 @@ contig on the way.
 The output has one row per sent contig and hit with `contig`, `contig_length`, `gc`, `status`
 (`ok` or `no_hit`), `rank`, `ani`, `shared_kmers`, `contig_kmers`,
 `explained_fraction`, `reference_ani`, `relation`, `shared_rank`, `ani_species_level`, `accession`,
-`gtdb_species`, `taxon`, `n_close`, `consensus_rank` and `consensus_taxon`, then the metadata
+`genome_id`, `gtdb_species`, `taxon`, `n_close`, `consensus_rank` and `consensus_taxon`, then the metadata
 columns (`--fields`). `taxon` is the hit's finest named rank from whatever source resolved it.
 `reference_ani` is sylph's genome-denominator value, kept for continuity;
 `explained_fraction` is the fraction of the contig's k-mers the hit explains. A summary on stderr
@@ -171,8 +172,8 @@ pysylph, or downloaded from the [Reads tab](profiling-in-browser.md#reupload)): 
 is, after the page has checked its `c` and `k` against the server. Records, length and GC are
 then unknown and shown as "–".
 
-A browser without WebAssembly SIMD and workers (Chrome 91, Firefox 89, Safari 16.4 or newer have
-them) cannot use the page and says so; use `sylphd assembly` there. See
+A browser without WebAssembly SIMD and module workers (Chrome/Edge 91, Firefox 114, Safari 16.4 or
+newer have them) cannot use the page and says so; use `sylphd assembly` there. See
 [Running a public server](public-server.md#sketches-only-or-raw-sequences-too-allow-sequences).
 
 Per-contig mode in the browser keeps at most the 100 longest contigs (largest first) and sends them
