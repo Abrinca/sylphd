@@ -780,7 +780,7 @@ Verified by running: sylph-tax `main` on a synthetic file (pass-1 override, leve
 column, `UNKNOWN`), sylph-tax merge (sorted rows), the Zenodo files (formats and row counts), an
 IMG/VR load into the proposed layout (228 MiB), pysylph `Profiler` construction on a toy pair
 (duplicate warning at construction). Database sizes and genome counts above are the catalogue
-entries in `download.py`, cross-checked against the local `db/` files.
+entries in `catalog.py`, cross-checked against the local `db/` files.
 
 Verified by running in phase 1 (2026-10-29, machine with 16 cores and 30 GiB RAM): the target trio
 loads (`k=31`, `c=200`, 199,923 + 168,536 + 661 genomes; the UHGV file has 168,536 genomes and its

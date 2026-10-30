@@ -244,6 +244,45 @@ def consensus(
     """
     if not hits:
         return None
+    candidates = _species_candidates(hits, k=k, contig_kmers=contig_kmers)
+    best = candidates[0]
+    close = [
+        candidate
+        for candidate in candidates
+        if is_close(
+            candidate["ani"],
+            candidate["sd"],
+            best_ani=best["ani"],
+            best_sd=best["sd"],
+            ratio=ratio,
+            z=z,
+        )
+    ]
+    rank, taxon, mixed_sources = _common_rank(best, close)
+    rank, taxon = _cap_at_species(best, rank, taxon)
+
+    summary: dict[str, Any] = {
+        "rank": rank,
+        "taxon": taxon,
+        "n_close": len(close),
+        "species": [
+            name
+            for name in (
+                candidate["species"] or candidate["accession"] or ""
+                for candidate in close
+            )
+            if name
+        ],
+    }
+    if mixed_sources:
+        summary["mixed_sources"] = True
+    return summary
+
+
+def _species_candidates(
+    hits: Sequence[dict[str, Any]], *, k: int, contig_kmers: int
+) -> list[dict[str, Any]]:
+    """The best hit of every species (a lineage-less hit is its own taxon), best first."""
     # Shared k-mers are the likelihood order, and accession / genome file make
     # exact ties canonical instead of following the backend's row order.
     ordered = sorted(
@@ -281,41 +320,36 @@ def consensus(
                 "accession": hit.get("accession"),
             }
         )
+    return candidates
 
-    best = candidates[0]
-    close = [
-        candidate
-        for candidate in candidates
-        if is_close(
-            candidate["ani"],
-            candidate["sd"],
-            best_ani=best["ani"],
-            best_sd=best["sd"],
-            ratio=ratio,
-            z=z,
-        )
-    ]
 
+def _common_rank(
+    best: dict[str, Any], close: Sequence[dict[str, Any]]
+) -> tuple[str | None, str | None, bool]:
+    """``(rank, taxon, mixed_sources)``: the lowest rank all close lineages share."""
     rank: str | None = None
     taxon: str | None = None
-    mixed_sources = False
-    if all(candidate["lineage"] for candidate in close):
-        if any(
-            not comparable(best["lineage"], candidate["lineage"]) for candidate in close
-        ):
-            # Two taxonomy sources are two yardsticks: their ranks cannot be
-            # intersected, so the contig gets no consensus (design note B6).
-            mixed_sources = True
+    if not all(candidate["lineage"] for candidate in close):
+        return rank, taxon, False
+    if any(not comparable(best["lineage"], candidate["lineage"]) for candidate in close):
+        # Two taxonomy sources are two yardsticks: their ranks cannot be
+        # intersected, so the contig gets no consensus (design note B6).
+        return rank, taxon, True
+    rank_key: str | None = None
+    for key, name in best["lineage"].ranks:
+        if all(candidate["names"].get(key) == name for candidate in close):
+            rank_key, taxon = key, name
         else:
-            rank_key: str | None = None
-            for key, name in best["lineage"].ranks:
-                if all(candidate["names"].get(key) == name for candidate in close):
-                    rank_key, taxon = key, name
-                else:
-                    break
-            if rank_key is not None:
-                rank = rank_display(rank_key)
+            break
+    if rank_key is not None:
+        rank = rank_display(rank_key)
+    return rank, taxon, False
 
+
+def _cap_at_species(
+    best: dict[str, Any], rank: str | None, taxon: str | None
+) -> tuple[str | None, str | None]:
+    """Stop at the rank above the species when the best hit is under the threshold."""
     species_key = best["lineage"].species_key
     if (
         rank is not None
@@ -332,23 +366,7 @@ def consensus(
         if index > 0:
             rank = rank_display(keys[index - 1])
             taxon = best["lineage"].ranks[index - 1][1]
-
-    summary: dict[str, Any] = {
-        "rank": rank,
-        "taxon": taxon,
-        "n_close": len(close),
-        "species": [
-            name
-            for name in (
-                candidate["species"] or candidate["accession"] or ""
-                for candidate in close
-            )
-            if name
-        ],
-    }
-    if mixed_sources:
-        summary["mixed_sources"] = True
-    return summary
+    return rank, taxon
 
 
 @dataclass(frozen=True)

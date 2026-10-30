@@ -40,6 +40,19 @@ only needed for manual runs.
 | `test_web_sylsp_js.py` | `readSylspHeader` against `sylphd.sketchcheck` |
 | `web_golden.py` | helper (not a test): the single-database `/info` and `/assembly` goldens |
 
+## Source layout
+
+Two families of modules are split by role; the older module re-exports what tests and docs import.
+
+| Module | Holds |
+|---|---|
+| `metadata.py` | the metadata file layout, accession and sylph-tax probe helpers, and the read side, `MetadataDB` (also re-exports the names below) |
+| `metadata_build.py` | the writers behind `sylphd setup`: `build_metadata_db`, `update_metadata_db`, and the temp-file/replace-on-success context manager they share |
+| `taxonomy_sources.py` | importing a sylph-tax file as a `taxonomy_source`: parsing, duplicate-key semantics, overlap counting and warnings |
+| `catalog.py` | the static catalogues of pre-built databases and sylph-tax taxonomy files (data only) |
+| `download.py` | catalogue lookups and tables, and the transfer engine |
+| `cli_parser.py` | one `add_<command>_parser` per subcommand |
+
 ## Test data credit
 
 The test data in `tests/data` comes from the test suite of

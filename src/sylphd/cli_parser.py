@@ -79,8 +79,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"{PROG} {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    add_serve_parser(subparsers)
+    add_info_parser(subparsers)
+    add_profile_parser(subparsers)
+    add_query_parser(subparsers)
+    add_assembly_parser(subparsers)
+    add_download_parser(subparsers)
+    add_setup_parser(subparsers)
+    return parser
 
-    # serve -------------------------------------------------------------
+
+def add_serve_parser(subparsers: argparse._SubParsersAction) -> None:
     serve_parser = subparsers.add_parser(
         "serve", help="run the server (one process, one worker)"
     )
@@ -209,20 +218,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="uvicorn log level [default: info]",
     )
 
-    # info --------------------------------------------------------------
+
+def add_info_parser(subparsers: argparse._SubParsersAction) -> None:
     info_parser = subparsers.add_parser("info", help="print server and database info")
     _add_client_options(info_parser)
     info_parser.add_argument("--json", action="store_true", help="print the raw JSON")
 
-    # profile / query ---------------------------------------------------
-    for mode, help_text in (
-        ("profile", "taxonomic profile of one or more samples"),
-        ("query", "ANI hits of one or more samples"),
-    ):
-        mode_parser = subparsers.add_parser(mode, help=help_text)
-        _add_contain_options(mode_parser, mode)
 
-    # assembly ----------------------------------------------------------
+def add_profile_parser(subparsers: argparse._SubParsersAction) -> None:
+    _add_contain_parser(subparsers, "profile", "taxonomic profile of one or more samples")
+
+
+def add_query_parser(subparsers: argparse._SubParsersAction) -> None:
+    _add_contain_parser(subparsers, "query", "ANI hits of one or more samples")
+
+
+def _add_contain_parser(
+    subparsers: argparse._SubParsersAction, mode: str, help_text: str
+) -> None:
+    _add_contain_options(subparsers.add_parser(mode, help=help_text), mode)
+
+
+def add_assembly_parser(subparsers: argparse._SubParsersAction) -> None:
     assembly_parser = subparsers.add_parser(
         "assembly", help="find the closest database genomes to one assembly"
     )
@@ -322,7 +339,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_client_options(assembly_parser)
 
-    # download ----------------------------------------------------------
+
+def add_download_parser(subparsers: argparse._SubParsersAction) -> None:
     download_parser = subparsers.add_parser(
         "download",
         help="download GTDB metadata, a sylph database or a taxonomy file",
@@ -405,7 +423,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="re-download files that already exist"
     )
 
-    # setup -------------------------------------------------------------
+
+def add_setup_parser(subparsers: argparse._SubParsersAction) -> None:
     setup_parser = subparsers.add_parser(
         "setup",
         help="build the SQLite metadata database from GTDB TSV and sylph-tax files",
@@ -462,8 +481,6 @@ def build_parser() -> argparse.ArgumentParser:
         "-q", "--quiet", action="store_true", help="no progress output"
     )
 
-    return parser
-
 
 def _add_client_options(parser: argparse.ArgumentParser) -> None:
     address = parser.add_mutually_exclusive_group()
@@ -502,7 +519,7 @@ def _add_client_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
+def _add_sample_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "files",
         nargs="*",
@@ -560,6 +577,9 @@ def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
         metavar="NAME",
         help="sample name to use instead of the file name (single sample only)",
     )
+
+
+def _add_output_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-o", "--output", metavar="FILE", help="write the table here [default: stdout]"
     )
@@ -575,6 +595,9 @@ def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
         metavar="COLUMNS",
         help="metadata columns to add, comma-separated, or 'all'/'none' [default: all]",
     )
+
+
+def _add_sylph_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-t",
         "--threads",
@@ -631,65 +654,75 @@ def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
             "for assemblies/genomes as samples"
         ),
     )
+
+
+def _add_profile_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--estimate-read-counts",
+        action="store_true",
+        help=(
+            "very roughly estimate the number of reads per genome in the "
+            "'Sequence_abundance' column instead of a relative abundance "
+            "(experimental in sylph); implies --estimate-unknown"
+        ),
+    )
+    parser.add_argument(
+        "--taxonomy",
+        default=None,
+        metavar="LIST",
+        help=(
+            "taxonomies to aggregate, comma-separated from "
+            f"{', '.join(TAXONOMIES)} [default: "
+            + ", ".join(TAXONOMIES[:2])
+            + f", plus {TAXONOMIES[-1]} when the server has taxonomy sources]"
+        ),
+    )
+    parser.add_argument(
+        "--tax-source",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "with --taxonomy tax: restrict the merged profile to these "
+            "taxonomy sources of the server's metadata file (repeatable; "
+            "default: all of them)"
+        ),
+    )
+    parser.add_argument(
+        "--taxprof",
+        metavar="PREFIX",
+        help=(
+            "write one sylph-tax-style .sylphmpa per sample and taxonomy as "
+            "'PREFIX<sample>.<taxonomy>.sylphmpa'"
+        ),
+    )
+    parser.add_argument(
+        "--taxmatrix",
+        metavar="PREFIX",
+        help=(
+            "write one clade x sample matrix per taxonomy as "
+            "'PREFIX<taxonomy>.tsv'"
+        ),
+    )
+    parser.add_argument(
+        "--taxmatrix-value",
+        choices=MATRIX_VALUES,
+        default="relative",
+        help=(
+            "value in --taxmatrix: 'relative' (Taxonomic_abundance), "
+            "'sequence' (Sequence_abundance), 'ani' or 'coverage' (strain "
+            "rows only, like 'sylph-tax merge --column ANI|Coverage') "
+            "[default: relative]"
+        ),
+    )
+
+
+def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
+    _add_sample_options(parser)
+    _add_output_options(parser)
+    _add_sylph_options(parser)
     if mode == "profile":
-        parser.add_argument(
-            "--estimate-read-counts",
-            action="store_true",
-            help=(
-                "very roughly estimate the number of reads per genome in the "
-                "'Sequence_abundance' column instead of a relative abundance "
-                "(experimental in sylph); implies --estimate-unknown"
-            ),
-        )
-        parser.add_argument(
-            "--taxonomy",
-            default=None,
-            metavar="LIST",
-            help=(
-                "taxonomies to aggregate, comma-separated from "
-                f"{', '.join(TAXONOMIES)} [default: "
-                + ", ".join(TAXONOMIES[:2])
-                + f", plus {TAXONOMIES[-1]} when the server has taxonomy sources]"
-            ),
-        )
-        parser.add_argument(
-            "--tax-source",
-            action="append",
-            default=[],
-            metavar="NAME",
-            help=(
-                "with --taxonomy tax: restrict the merged profile to these "
-                "taxonomy sources of the server's metadata file (repeatable; "
-                "default: all of them)"
-            ),
-        )
-        parser.add_argument(
-            "--taxprof",
-            metavar="PREFIX",
-            help=(
-                "write one sylph-tax-style .sylphmpa per sample and taxonomy as "
-                "'PREFIX<sample>.<taxonomy>.sylphmpa'"
-            ),
-        )
-        parser.add_argument(
-            "--taxmatrix",
-            metavar="PREFIX",
-            help=(
-                "write one clade x sample matrix per taxonomy as "
-                "'PREFIX<taxonomy>.tsv'"
-            ),
-        )
-        parser.add_argument(
-            "--taxmatrix-value",
-            choices=MATRIX_VALUES,
-            default="relative",
-            help=(
-                "value in --taxmatrix: 'relative' (Taxonomic_abundance), "
-                "'sequence' (Sequence_abundance), 'ani' or 'coverage' (strain "
-                "rows only, like 'sylph-tax merge --column ANI|Coverage') "
-                "[default: relative]"
-            ),
-        )
+        _add_profile_options(parser)
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="progress messages on stderr"
     )

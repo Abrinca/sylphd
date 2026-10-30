@@ -13,7 +13,7 @@ import time
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -264,7 +264,13 @@ def cmd_info(args: argparse.Namespace) -> int:
         json.dump(info, sys.stdout, indent=2, sort_keys=False)
         sys.stdout.write("\n")
         return 0
+    _print_database(info)
+    _print_metadata(info.get("metadata"))
+    _print_limits(info)
+    return 0
 
+
+def _print_database(info: dict[str, Any]) -> None:
     database = info.get("database", {})
     print(f"database: {database.get('name')}")
     print(f"  size: {format_size(int(database.get('size') or 0))}")
@@ -295,41 +301,44 @@ def cmd_info(args: argparse.Namespace) -> int:
                 )
             )
 
-    metadata = info.get("metadata")
+
+def _print_metadata(metadata: dict[str, Any] | None) -> None:
     if metadata is None:
         print("metadata: none")
-    else:
-        print(
-            f"metadata: {metadata.get('file')} "
-            f"(release {metadata.get('release') or '?'}, "
-            f"{metadata.get('rows')} rows, built {metadata.get('built') or '?'})"
-        )
-        print(f"  columns: {len(metadata.get('columns') or [])}")
-        sources = metadata.get("taxonomy_sources") or []
-        if sources:
-            print(f"  taxonomy sources: {len(sources)}")
-            for source in sources:
-                keys = source.get("keys")
-                details = [f"{keys:,} keys" if keys is not None else "key count unknown"]
-                if source.get("kind") == "metadata":
-                    details.append("virtual, from -m")
-                if source.get("has_host"):
-                    details.append("with hosts")
-                if source.get("md5"):
-                    details.append(f"md5 {source['md5']}")
-                print(f"    {source.get('name')}: " + ", ".join(details))
-        overlaps = metadata.get("taxonomy_overlaps") or []
-        if overlaps:
-            print(f"  taxonomy overlaps: {len(overlaps)}")
-            for pair in overlaps:
-                names = " and ".join(str(name) for name in pair.get("sources") or ())
-                examples = pair.get("examples") or []
-                details = [f"{int(pair.get('keys') or 0):,} shared keys"]
-                if examples:
-                    details.append("examples: " + ", ".join(str(key) for key in examples))
-                details.append("the source imported later wins")
-                print(f"    {names}: " + "; ".join(details))
+        return
+    print(
+        f"metadata: {metadata.get('file')} "
+        f"(release {metadata.get('release') or '?'}, "
+        f"{metadata.get('rows')} rows, built {metadata.get('built') or '?'})"
+    )
+    print(f"  columns: {len(metadata.get('columns') or [])}")
+    sources = metadata.get("taxonomy_sources") or []
+    if sources:
+        print(f"  taxonomy sources: {len(sources)}")
+        for source in sources:
+            keys = source.get("keys")
+            details = [f"{keys:,} keys" if keys is not None else "key count unknown"]
+            if source.get("kind") == "metadata":
+                details.append("virtual, from -m")
+            if source.get("has_host"):
+                details.append("with hosts")
+            if source.get("md5"):
+                details.append(f"md5 {source['md5']}")
+            print(f"    {source.get('name')}: " + ", ".join(details))
+    overlaps = metadata.get("taxonomy_overlaps") or []
+    if overlaps:
+        print(f"  taxonomy overlaps: {len(overlaps)}")
+        for pair in overlaps:
+            names = " and ".join(str(name) for name in pair.get("sources") or ())
+            examples = pair.get("examples") or []
+            details = [f"{int(pair.get('keys') or 0):,} shared keys"]
+            if examples:
+                details.append("examples: " + ", ".join(str(key) for key in examples))
+            details.append("the source imported later wins")
+            print(f"    {names}: " + "; ".join(details))
 
+
+def _print_limits(info: dict[str, Any]) -> None:
     limits = info.get("limits", {})
     print(
         f"versions: sylphd {info.get('version')}, pysylph {info.get('pysylph_version')}, "
@@ -357,7 +366,6 @@ def cmd_info(args: argparse.Namespace) -> int:
         f"rate-limit {rate}, "
         f"max-queue {limits.get('max_queue') if limits.get('max_queue') is not None else 'unlimited'}"
     )
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -365,30 +373,24 @@ def cmd_info(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _ContainRun:
+    """What the server answered for ``profile``/``query``, and how it was asked."""
+
+    result: list[dict[str, Any]]
+    fields: list[str] | None
+    metadata_columns: list[str]
+    taxonomies: tuple[str, ...]
+    tax_sources: tuple[str, ...]
+
+
 def cmd_contain(args: argparse.Namespace) -> int:
     mode = args.command  # "profile" or "query"
     try:
-        samples = build_sample_inputs(
-            files=args.files,
-            reads=args.reads,
-            first=args.first,
-            second=args.second,
-            interleaved=args.interleaved,
-            specs=args.sample,
-        )
+        samples = _load_samples(args)
     except InputError as error:
         _print_error(str(error))
         return 2
-
-    if args.sample_name is not None:
-        if len(samples) != 1:
-            _print_error("--sample-name requires exactly one input sample")
-            return 2
-        try:
-            samples = [replace(samples[0], name=args.sample_name)]
-        except InputError as error:
-            _print_error(str(error))
-            return 2
 
     params = ProfileParams(
         minimum_ani=args.minimum_ani,
@@ -401,107 +403,143 @@ def cmd_contain(args: argparse.Namespace) -> int:
         screen_ani=args.screen_ani,
         no_adjust=args.no_adjust,
     )
-
-    taxonomy_prefix = getattr(args, "taxprof", None)
-    matrix_prefix = getattr(args, "taxmatrix", None)
     write_taxonomy = mode == "profile" and (
-        taxonomy_prefix is not None or matrix_prefix is not None
+        getattr(args, "taxprof", None) is not None
+        or getattr(args, "taxmatrix", None) is not None
     )
-    taxonomies: tuple[str, ...] = ()
-    tax_sources: tuple[str, ...] = ()
 
     # Everything that can fail without the server is checked before sketching.
     _check_output_file(args.output)
     try:
-        if getattr(args, "tax_source", None) and not write_taxonomy:
-            raise TaxonomyError(
-                "--tax-source needs --taxprof or --taxmatrix: it restricts the "
-                "sources of the aggregated 'tax' profile"
-            )
-        if write_taxonomy:
-            # A bad --taxonomy must fail before the server is contacted; only
-            # the *default* depends on what the server has.
-            requested_taxonomies = (
-                None if args.taxonomy is None else parse_taxonomies(args.taxonomy)
-            )
-            _check_output_prefix(taxonomy_prefix)
-            _check_output_prefix(matrix_prefix)
-        else:
-            requested_taxonomies = None
-        with _client_from_args(args) as client:
-            info = client.info()
-            database = info["database"]
-            metadata = info.get("metadata")
-            fields = _resolve_fields(args.fields, metadata)
-            metadata_columns = list((metadata or {}).get("columns") or [])
-            if write_taxonomy:
-                taxonomies = (
-                    requested_taxonomies
-                    if requested_taxonomies is not None
-                    else default_taxonomies(metadata)
-                )
-                tax_sources = _select_tax_sources(
-                    getattr(args, "tax_source", None) or (), taxonomies, metadata
-                )
-                request_fields = _request_fields(fields, taxonomies, metadata)
-            else:
-                request_fields = fields
-            if args.verbose:
-                print(
-                    f"{PROG}: database {database['name']} (c={database['c']}, "
-                    f"k={database['k']}); sketching {len(samples)} sample(s) "
-                    f"with {args.threads} thread(s)",
-                    file=sys.stderr,
-                )
-            sketches = _sketch_all(
-                samples, c=int(database["c"]), k=int(database["k"]), threads=args.threads,
-                verbose=args.verbose,
-            )
-            limit = int(info["limits"]["max_upload_mb"]) * 1024 * 1024
-            total = sum(len(payload) for _, payload in sketches)
-            if total > limit:
-                raise ClientError(
-                    f"sketches total {format_size(total)}, above the server's "
-                    f"{format_size(limit)} upload limit; send fewer samples per request"
-                )
-            if args.verbose:
-                print(
-                    f"{PROG}: sending {len(sketches)} sketch(es), "
-                    f"{format_size(total)}",
-                    file=sys.stderr,
-                )
-            if mode == "profile":
-                result = client.profile(
-                    sketches,
-                    params=params,
-                    fields=request_fields,
-                    tax_sources=tax_sources or None,
-                    taxprof=list(taxonomies) if write_taxonomy else None,
-                )
-            else:
-                result = client.query(sketches, params=params, fields=request_fields)
+        run = _run_contain(args, mode, samples, params, write_taxonomy)
     except (ClientError, InputError, ProtocolError, TaxonomyError) as error:
         _print_error(str(error))
         return 1
 
-    _write_result(result, mode, params, fields, args, metadata_columns=metadata_columns)
+    _write_result(
+        run.result, mode, params, run.fields, args, metadata_columns=run.metadata_columns
+    )
     if write_taxonomy:
-        written = write_outputs(
-            result,
-            taxonomies=taxonomies,
-            taxprof_prefix=taxonomy_prefix,
-            taxmatrix_prefix=matrix_prefix,
-            matrix_value=getattr(args, "taxmatrix_value", "relative"),
-            tax_sources=tax_sources,
-        )
-        for path in written:
-            print(f"{PROG}: wrote {path}", file=sys.stderr)
-        if "tax" in taxonomies:
-            # The 95 % threshold is a prokaryote convention: say so once per
-            # source the merged profile actually used (design note B6).
-            for note in _profile_caveats(result):
-                print(f"{PROG}: warning: {note}", file=sys.stderr)
+        _write_taxonomy_outputs(args, run)
     return 0
+
+
+def _load_samples(args: argparse.Namespace) -> list[SampleInput]:
+    """The samples named on the command line, with ``--sample-name`` applied."""
+    samples = build_sample_inputs(
+        files=args.files,
+        reads=args.reads,
+        first=args.first,
+        second=args.second,
+        interleaved=args.interleaved,
+        specs=args.sample,
+    )
+    if args.sample_name is None:
+        return samples
+    if len(samples) != 1:
+        raise InputError("--sample-name requires exactly one input sample")
+    return [replace(samples[0], name=args.sample_name)]
+
+
+def _run_contain(
+    args: argparse.Namespace,
+    mode: str,
+    samples: Sequence[SampleInput],
+    params: ProfileParams,
+    write_taxonomy: bool,
+) -> _ContainRun:
+    """Validate the taxonomy options, sketch locally and ask the server."""
+    taxonomy_prefix = getattr(args, "taxprof", None)
+    matrix_prefix = getattr(args, "taxmatrix", None)
+    taxonomies: tuple[str, ...] = ()
+    tax_sources: tuple[str, ...] = ()
+    if getattr(args, "tax_source", None) and not write_taxonomy:
+        raise TaxonomyError(
+            "--tax-source needs --taxprof or --taxmatrix: it restricts the "
+            "sources of the aggregated 'tax' profile"
+        )
+    if write_taxonomy:
+        # A bad --taxonomy must fail before the server is contacted; only
+        # the *default* depends on what the server has.
+        requested_taxonomies = (
+            None if args.taxonomy is None else parse_taxonomies(args.taxonomy)
+        )
+        _check_output_prefix(taxonomy_prefix)
+        _check_output_prefix(matrix_prefix)
+    else:
+        requested_taxonomies = None
+    with _client_from_args(args) as client:
+        info = client.info()
+        database = info["database"]
+        metadata = info.get("metadata")
+        fields = _resolve_fields(args.fields, metadata)
+        metadata_columns = list((metadata or {}).get("columns") or [])
+        if write_taxonomy:
+            taxonomies = (
+                requested_taxonomies
+                if requested_taxonomies is not None
+                else default_taxonomies(metadata)
+            )
+            tax_sources = _select_tax_sources(
+                getattr(args, "tax_source", None) or (), taxonomies, metadata
+            )
+            request_fields = _request_fields(fields, taxonomies, metadata)
+        else:
+            request_fields = fields
+        if args.verbose:
+            print(
+                f"{PROG}: database {database['name']} (c={database['c']}, "
+                f"k={database['k']}); sketching {len(samples)} sample(s) "
+                f"with {args.threads} thread(s)",
+                file=sys.stderr,
+            )
+        sketches = _sketch_all(
+            samples, c=int(database["c"]), k=int(database["k"]), threads=args.threads,
+            verbose=args.verbose,
+        )
+        limit = int(info["limits"]["max_upload_mb"]) * 1024 * 1024
+        total = sum(len(payload) for _, payload in sketches)
+        if total > limit:
+            raise ClientError(
+                f"sketches total {format_size(total)}, above the server's "
+                f"{format_size(limit)} upload limit; send fewer samples per request"
+            )
+        if args.verbose:
+            print(
+                f"{PROG}: sending {len(sketches)} sketch(es), "
+                f"{format_size(total)}",
+                file=sys.stderr,
+            )
+        if mode == "profile":
+            result = client.profile(
+                sketches,
+                params=params,
+                fields=request_fields,
+                tax_sources=tax_sources or None,
+                taxprof=list(taxonomies) if write_taxonomy else None,
+            )
+        else:
+            result = client.query(sketches, params=params, fields=request_fields)
+    return _ContainRun(result, fields, metadata_columns, taxonomies, tax_sources)
+
+
+def _write_taxonomy_outputs(args: argparse.Namespace, run: _ContainRun) -> None:
+    """Write the ``--taxprof``/``--taxmatrix`` files and the species caveats."""
+    written = write_outputs(
+        run.result,
+        taxonomies=run.taxonomies,
+        taxprof_prefix=getattr(args, "taxprof", None),
+        taxmatrix_prefix=getattr(args, "taxmatrix", None),
+        matrix_value=getattr(args, "taxmatrix_value", "relative"),
+        tax_sources=run.tax_sources,
+    )
+    for path in written:
+        print(f"{PROG}: wrote {path}", file=sys.stderr)
+    if "tax" in run.taxonomies:
+        # The 95 % threshold is a prokaryote convention: say so once per
+        # source the merged profile actually used (design note B6).
+        for note in _profile_caveats(run.result):
+            print(f"{PROG}: warning: {note}", file=sys.stderr)
 
 
 def _profile_caveats(samples: Sequence[dict[str, Any]]) -> list[str]:
@@ -663,6 +701,33 @@ def _write_result(
                 out.write(line + "\n")
 
 
+def _write_hits_tsv(result: dict[str, Any], output: Any) -> None:
+    """The single-assembly hits table of ``sylphd assembly``."""
+    output.write(
+        "rank\tani\trelation\tshared_rank\taccession\tgenome_id\ttaxon\tgtdb_species\t"
+        "taxonomy_source\tncbi_organism_name\tncbi_taxid\n"
+    )
+    for hit in result.get("hits", ()):
+        output.write(
+            "\t".join(
+                [
+                    str(hit.get("rank", "")),
+                    f"{float(hit.get('ani', 0.0)):.2f}",
+                    str(hit.get("relation") or ""),
+                    str(hit.get("shared_rank") or ""),
+                    str(hit.get("accession") or ""),
+                    str(hit.get("genome_id") or ""),
+                    str(_taxon(hit) or ""),
+                    gtdb_species(hit.get("gtdb_taxonomy")),
+                    str(hit.get("taxonomy_source") or ""),
+                    str(hit.get("ncbi_organism_name") or ""),
+                    "" if hit.get("ncbi_taxid") is None else str(hit["ncbi_taxid"]),
+                ]
+            )
+            + "\n"
+        )
+
+
 # ---------------------------------------------------------------------------
 # assembly
 # ---------------------------------------------------------------------------
@@ -672,18 +737,15 @@ def cmd_assembly(args: argparse.Namespace) -> int:
     path = Path(args.file)
     if args.per_contig:
         return _cmd_assembly_per_contig(args, path)
-    if args.fields is not None:
-        _print_error("--fields is only available with --per-contig")
-        return 2
-    if args.min_contig_length is not None:
-        _print_error("--min-contig-length is only available with --per-contig")
-        return 2
-    if args.consensus_ratio is not None:
-        _print_error("--consensus-ratio is only available with --per-contig")
-        return 2
-    if args.consensus_z is not None:
-        _print_error("--consensus-z is only available with --per-contig")
-        return 2
+    for flag, value in (
+        ("--fields", args.fields),
+        ("--min-contig-length", args.min_contig_length),
+        ("--consensus-ratio", args.consensus_ratio),
+        ("--consensus-z", args.consensus_z),
+    ):
+        if value is not None:
+            _print_error(f"{flag} is only available with --per-contig")
+            return 2
 
     name = args.name or sample_name_from_path(path.name)
     top = args.top if args.top is not None else 10
@@ -736,29 +798,7 @@ def cmd_assembly(args: argparse.Namespace) -> int:
             output.write("\n")
     else:
         with _open_output(args.output) as output:
-            output.write(
-                "rank\tani\trelation\tshared_rank\taccession\tgenome_id\ttaxon\tgtdb_species\t"
-                "taxonomy_source\tncbi_organism_name\tncbi_taxid\n"
-            )
-            for hit in result.get("hits", ()):
-                output.write(
-                    "\t".join(
-                        [
-                            str(hit.get("rank", "")),
-                            f"{float(hit.get('ani', 0.0)):.2f}",
-                            str(hit.get("relation") or ""),
-                            str(hit.get("shared_rank") or ""),
-                            str(hit.get("accession") or ""),
-                            str(hit.get("genome_id") or ""),
-                            str(_taxon(hit) or ""),
-                            gtdb_species(hit.get("gtdb_taxonomy")),
-                            str(hit.get("taxonomy_source") or ""),
-                            str(hit.get("ncbi_organism_name") or ""),
-                            "" if hit.get("ncbi_taxid") is None else str(hit["ncbi_taxid"]),
-                        ]
-                    )
-                    + "\n"
-                )
+            _write_hits_tsv(result, output)
     # JSON is a machine-readable document and has always been silent on stderr.
     if not args.json and not args.quiet:
         print(_assignment_summary(result), file=sys.stderr)
