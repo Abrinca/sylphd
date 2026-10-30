@@ -381,6 +381,7 @@
       const fact = (label, value, title) => el('span', { class: 'fact', title: title || null },
         el('span', { class: 'fact-label', text: label }), el('span', { class: 'fact-value', text: value }));
       const facts = [];
+      if (has(info.version)) facts.push(fact('sylphd', `v${info.version}`, 'sylphd version of this server'));
       if (pooled) {
         // several databases are profiled as one pool: /info's `database` is the pooled view
         facts.push(fact('Databases', String(dbs.length), dbs.map((d) => d.name).join(', ')));
