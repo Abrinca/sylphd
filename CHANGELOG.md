@@ -18,6 +18,9 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **Metadata files older than format 3 are no longer read or updated.** `MetadataDB` and
+  `setup --update` refuse them with a message to rebuild with `sylphd setup`; the format 2 reader
+  fallbacks, the 2 → 3 migration and the `taxonomy_overlap` backfill are gone.
 - **Web: one set of shared helpers for all three modes** (sortable table, segmented controls,
   bar rows, formatters, lineage/rank tables, file names). The per-contig table gains the mobile
   sort control; byte sizes are decimal (kB/MB/GB) everywhere and the in-browser input cap is
@@ -334,6 +337,9 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **Metadata files older than format 3 are no longer read or updated.** `MetadataDB` and
+  `setup --update` refuse them with a message to rebuild with `sylphd setup`; the format 2 reader
+  fallbacks, the 2 → 3 migration and the `taxonomy_overlap` backfill are gone.
 - **A `/contigs` request is one job.** Previously every contig counted as one server job, so
   clients had to chunk to `max_jobs + max_queue` (18 contigs on the public instance) and a second
   run of 100 contigs within a minute hit the rate limit. Now the whole request occupies one job
@@ -418,6 +424,9 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **Metadata files older than format 3 are no longer read or updated.** `MetadataDB` and
+  `setup --update` refuse them with a message to rebuild with `sylphd setup`; the format 2 reader
+  fallbacks, the 2 → 3 migration and the `taxonomy_overlap` backfill are gone.
 - **Removed `--terms-url` and the `terms_url` field of `GET /info`.** Put terms of use into the
   `--about` text instead (plain text is fine).
 - `sylphd serve`: `--name` and `--about` are checked once, before the database is loaded. The
@@ -528,6 +537,9 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **Metadata files older than format 3 are no longer read or updated.** `MetadataDB` and
+  `setup --update` refuse them with a message to rebuild with `sylphd setup`; the format 2 reader
+  fallbacks, the 2 → 3 migration and the `taxonomy_overlap` backfill are gone.
 - `--allow-sequences` now only gates *raw sequence* uploads to `/assembly`; the endpoint itself is
   always served (`/info` lists `/assembly` in `endpoints`). Without the flag a raw upload is still a
   404, now with an explanatory message. `--max-sequence-mb` applies to raw sequences only.
@@ -551,6 +563,9 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **Metadata files older than format 3 are no longer read or updated.** `MetadataDB` and
+  `setup --update` refuse them with a message to rebuild with `sylphd setup`; the format 2 reader
+  fallbacks, the 2 → 3 migration and the `taxonomy_overlap` backfill are gone.
 - **Web page**: the ANI gauge fills up to the value with zone colours (red and striped below
   85 %, orange, green from 95 %), uses a stretched scale for the high range, and marks the
   value with a clearly visible knob. The page now points at the public server.

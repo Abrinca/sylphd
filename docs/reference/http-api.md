@@ -68,17 +68,14 @@ Reports:
   that has GTDB metadata only for taxonomy lookups reports `false`). Results carry no
   per-database field: a hit belongs to the database whose taxonomy it has;
 - `metadata`: `file` (the base name of the SQLite file), `size`, `columns`, `rows`, `release`,
-  `built`, `format_version`, `reps_only` and `sources`, or `null` without `--meta`. A format 3 file (taxonomy sources, see
-  [the metadata reference](metadata.md#taxonomy-sources)) adds `taxonomy_sources` — one object per
+  `built`, `format_version`, `reps_only` and `sources`, or `null` without `--meta`. It also carries `taxonomy_sources` — one object per
   source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`
   (the catalogue URL it was downloaded from, or the **base name** of a local file — never a
   local path), `md5`, `keys`, `has_host` — `taxonomy_overlaps` — the pairs of sources that share keys, each
   pair once, in setup order: `{"sources": [a, b], "keys": n, "examples": [...]}`, where `b` is
   the later-imported source and wins for those keys — and `sylphtax_rules` (the sylph-tax version
-  whose rules apply). `examples` holds up to five shared keys. Both keys are absent for a format 2
-  file, so its response is unchanged;
-  Its `columns` also list the four `tax_*` columns, which `fields` can then select. A format 2 file
-  has none of this, so its response is unchanged;
+  whose rules apply). `examples` holds up to five shared keys.
+  Its `columns` also list the four `tax_*` columns, which `fields` can then select;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
   `name` is the string of `--name` (at most 80 characters, one line); `about` is
   `{"format": "markdown", "text": "..."}` with the contents of the `--about` file (UTF-8, at most
@@ -163,7 +160,7 @@ follow `accession`. Rows keep sylph's column names; in JSON `Eff_cov` is never r
 With `no_adjust`, `Adjusted_ANI` is the naive containment ANI and `ANI_5-95_percentile` is `null`:
 the interval still describes the disabled adjustment.
 
-A metadata file with sylph-tax taxonomy sources (format 3) adds four columns to every row, and
+With sylph-tax taxonomy sources (see [the metadata reference](metadata.md#taxonomy-sources)), every row has four more columns, and
 they are listed in `metadata.columns` so `fields` can select them:
 
 | Column | Meaning |
@@ -175,8 +172,7 @@ they are listed in `metadata.columns` so `fields` can select them:
 
 The server resolves them with sylph-tax's own probe rules over the hit's `Genome_file` and
 `Contig_name` (see [the metadata reference](metadata.md#resolving-a-hit)), so `query` and
-`profile` rows carry them too. Their presence is additive: a format 2 file reports exactly the old
-columns and rows. `/assembly` hits carry the same four fields.
+`profile` rows carry them too. `/assembly` hits carry the same four fields.
 
 ### Server-side taxonomic profiles (`taxprof`) { #taxprof }
 

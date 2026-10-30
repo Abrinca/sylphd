@@ -433,26 +433,6 @@ def _record_overlaps(
     return overlaps
 
 
-def _backfill_overlaps(connection: sqlite3.Connection) -> None:
-    """Fill ``taxonomy_overlap`` for the sources of a file that lacks the table.
-
-    Files written before the table existed (all version 3 files of the first
-    release) have the entries but no counts; ``--update`` adds the table, so it
-    recomputes the pairs once.  Only the counts are recorded: those sources are
-    not being imported now, so nothing is warned about.
-    """
-    connection.execute("DELETE FROM taxonomy_overlap")
-    for source_id, name, ord_value in connection.execute(
-        "SELECT id, name, ord FROM taxonomy_source WHERE kind = 'sylphtax' ORDER BY ord"
-    ).fetchall():
-        _record_overlaps(
-            connection,
-            source_id=int(source_id),
-            name=str(name),
-            ord_value=int(ord_value),
-        )
-
-
 def _report_taxonomy_overlaps(overlaps: Sequence[TaxonomyOverlap]) -> None:
     """Warn about every pair of sources that share keys (logger *and* stderr).
 

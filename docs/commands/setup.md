@@ -19,7 +19,7 @@ stores and reports them. The layout and columns are in the
 | `-m, --metadata FILE ...` | none | GTDB metadata TSV files (`*.tsv.gz`) |
 | `--taxonomy SPEC` | none | taxonomy source, repeatable: a sylph-tax name, `NAME=PATH` or `PATH` |
 | `-o, --output PATH` | required | SQLite file to write |
-| `--update` | off | add the sources to an existing file instead of building one (also migrates format 2 → 3) |
+| `--update` | off | add the sources to an existing file instead of building one |
 | `--cache-dir DIR` | `<output dir>/taxonomy` | where downloaded taxonomy files are kept |
 | `--release N` | none | GTDB release to record in the file (and the name of the virtual source) |
 | `--reps-only` | off | store only species representatives (`gtdb_representative` true), `-m` only |
@@ -46,7 +46,7 @@ sylphd setup -m data/bac120_metadata_r232.tsv.gz data/ar53_metadata_r232.tsv.gz 
 # a local file under a chosen name
 sylphd setup -m data/*.tsv.gz --taxonomy UHGV=./my_uhgv.tsv.gz -o data/meta.sqlite
 
-# add sources to an existing file (and migrate a format 2 file to 3); atomic
+# add sources to an existing file ; atomic
 sylphd setup --update --taxonomy UHGV_ictv -o data/meta.sqlite
 ```
 

@@ -29,7 +29,7 @@ Value conversions while building:
 - booleans `t`/`f` become integers `1`/`0`;
 - numeric columns are `INTEGER` or `REAL`.
 
-## Layout (format version 2) { #layout }
+## Layout { #layout }
 
 The file contains:
 
@@ -57,8 +57,7 @@ representatives. When two input files contain the same accession, the later row 
 ## Taxonomy sources (format version 3) { #taxonomy-sources }
 
 Format version 3 adds [sylph-tax](https://github.com/bluenote-1577/sylph-tax) taxonomy files to the
-file, so hits from non-GTDB databases (UHGV viruses, fungi, MAGs, ...) can be given a lineage. The
-`metadata` view and every metadata column are unchanged: version 3 is a superset of version 2.
+file, so hits from non-GTDB databases (UHGV viruses, fungi, MAGs, ...) can be given a lineage.
 
 A taxonomy file is plain text, one row per line, tab-separated, optionally gzip-compressed
 (detected by magic bytes, not by the name):
@@ -109,8 +108,7 @@ Two kinds of source exist:
 has_host). The file keeps the full `origin`; `/info` publishes only the base name of a local file
 (or the catalogue URL), never a directory. It also reports the shared keys once per pair under
 `metadata.taxonomy_overlaps`, and
-`metadata.sylphtax_rules`; `sylphd info` prints one line per source and one per overlapping pair. A
-format 2 file reports neither key, so its output is unchanged.
+`metadata.sylphtax_rules`; `sylphd info` prints one line per source and one per overlapping pair.
 
 ### Overlapping sources { #overlapping-sources }
 
@@ -133,8 +131,7 @@ import still succeeds. For a shared key the source imported later wins (larger `
 and reported once per pair, in setup order, as
 `metadata.taxonomy_overlaps: [{"sources": [a, b], "keys": n, "examples": [...]}]` by `sylphd info`
 and `GET /info` (an empty list when the sources are disjoint), with `b` the later source that wins
-for those keys and up to five shared keys in `examples`. A version 3 file written before the table
-existed still reads; the next `--update` adds the table and fills the counts once.
+for those keys and up to five shared keys in `examples`.
 
 ### Resolving a hit { #resolving-a-hit }
 
@@ -176,11 +173,11 @@ name) and GlobDB (`GCF_003697165` without the version) resolve from the same tab
 in one function, `sylphd.metadata.sylphtax_probes`, and `tests/test_sylphtax_parity.py` compares
 the whole path with the real sylph-tax.
 
-### Compatibility and `--update`
+### Format version and `--update`
 
-A version 2 file keeps loading and serving exactly as before; `MetadataDB` accepts
-`format_version` 2 and 3 and a version 2 reader ignores the new tables. Upgrading a version 2 file
-copies it and adds the tables without the GTDB TSV files:
+Only format version 3 is read or updated; a file of any other version is refused with a message
+to rebuild it with `sylphd setup`. `--update` adds sources to an existing file without the GTDB
+TSV files:
 
 ```bash
 sylphd setup --update -m old.sqlite --taxonomy UHGV_default -o new.sqlite  # copy
@@ -191,5 +188,5 @@ The copy is built next to the output, in a uniquely named temporary file (so par
 source named `*.tmp` are safe), and replaces the output only on success, exactly like
 `setup --force`, so a failed update leaves the old file untouched. The copy keeps the permission
 bits of the file it replaces; a build to a new path uses the normal umask-derived mode.
-`--update` can also add sources to an existing version 3 file; a source with an existing name is
+A source with an existing name is
 replaced (its `ord` is kept).

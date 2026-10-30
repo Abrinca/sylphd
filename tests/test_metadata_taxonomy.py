@@ -1,4 +1,4 @@
-"""Tests for the format 3 taxonomy tables: build, update, and the v2/v3 reader."""
+"""Tests for the format 3 taxonomy tables: build, update, and the reader."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import threading
 from pathlib import Path
 
 import pytest
-from compat.metadata_v2_reader import MetadataDB as V2MetadataDB
 from conftest import ECOLI_TWO_STAGE
 from starlette.testclient import TestClient
 
@@ -20,6 +19,7 @@ from sylphd.catalog import DATABASES, TAXONOMIES
 from sylphd.download import parse_taxonomy_spec, taxonomy_table
 from sylphd.metadata import (
     METADATA_COLUMNS,
+    METADATA_FORMAT_VERSION,
     MetadataDB,
 )
 from sylphd.metadata_build import build_metadata_db, update_metadata_db
@@ -92,29 +92,6 @@ def _source_ords(path: str | Path) -> list[tuple[str, int]]:
         connection.close()
 
 
-def _to_v2(path: str | Path) -> Path:
-    """Turn a built file into what format 2 wrote: no taxonomy tables, version 2."""
-    path = Path(path)
-    connection = sqlite3.connect(path)
-    try:
-        connection.execute("DROP INDEX IF EXISTS taxonomy_entry_key")
-        for table in (
-            "taxonomy_entry",
-            "taxonomy_source",
-            "taxonomy_overlap",
-            "dict_tax_lineage",
-            "dict_tax_host",
-        ):
-            connection.execute(f"DROP TABLE IF EXISTS {table}")
-        for key in ("taxonomy_sources", "sylphtax_rules"):
-            connection.execute("DELETE FROM info WHERE key = ?", (key,))
-        connection.execute("UPDATE info SET value = '2' WHERE key = 'format_version'")
-        connection.commit()
-    finally:
-        connection.close()
-    return path
-
-
 class TestBuild:
     def test_v3_sources_and_entries(
         self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path, fungi_file: Path
@@ -138,7 +115,6 @@ class TestBuild:
 
         with MetadataDB(output) as db:
             assert db.format_version == "3"
-            assert db.has_taxonomy
             sources = db.taxonomy_sources()
             assert [source["name"] for source in sources] == [
                 "GTDB_r232",
@@ -490,7 +466,7 @@ class TestTemporaryFiles:
     def test_update_can_read_a_file_named_like_the_old_temp(
         self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path
     ) -> None:
-        source = _to_v2(
+        source = Path(
             build_metadata_db([gtdb_source], tmp_path / "out.sqlite.tmp", release=232)[
                 "path"
             ]
@@ -509,7 +485,7 @@ class TestTemporaryFiles:
     def test_an_unrelated_tmp_file_survives_an_update(
         self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path
     ) -> None:
-        path = _to_v2(
+        path = Path(
             build_metadata_db([gtdb_source], tmp_path / "meta.sqlite", release=232)["path"]
         )
         decoy = tmp_path / "meta.sqlite.tmp"
@@ -522,7 +498,7 @@ class TestTemporaryFiles:
     def test_failed_update_removes_only_its_own_temp(
         self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path
     ) -> None:
-        path = _to_v2(
+        path = Path(
             build_metadata_db([gtdb_source], tmp_path / "meta.sqlite", release=232)["path"]
         )
         decoy = tmp_path / "meta.sqlite.tmp"
@@ -581,7 +557,7 @@ class TestPermissions:
     def test_an_in_place_update_keeps_the_mode(
         self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path, mode: int
     ) -> None:
-        path = _to_v2(
+        path = Path(
             build_metadata_db([gtdb_source], tmp_path / "meta.sqlite", release=232)["path"]
         )
         path.chmod(mode)
@@ -595,11 +571,11 @@ class TestPermissions:
     def test_an_update_to_a_new_path_uses_the_umask_mode(
         self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path
     ) -> None:
-        source = _to_v2(
-            build_metadata_db([gtdb_source], tmp_path / "v2.sqlite", release=232)["path"]
+        source = Path(
+            build_metadata_db([gtdb_source], tmp_path / "source.sqlite", release=232)["path"]
         )
         source.chmod(0o600)
-        output = tmp_path / "v3.sqlite"
+        output = tmp_path / "out.sqlite"
         update_metadata_db(
             source, output, taxonomy=[TaxonomySource("UHGV_default", uhgv_file)]
         )
@@ -608,35 +584,33 @@ class TestPermissions:
 
 
 class TestReaderVersions:
-    def test_v2_file_loads_and_serves_unchanged(
-        self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path
+    @pytest.mark.parametrize("version", ["2", "4", None])
+    def test_other_versions_are_refused(
+        self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path, version: str | None
     ) -> None:
-        output = _to_v2(build_metadata_db(
-            [gtdb_source],
-            tmp_path / "meta.sqlite",
-            release=232,
-            taxonomy=[TaxonomySource("UHGV_default", uhgv_file)],
-        )["path"])
-        with MetadataDB(output) as db:
-            assert db.format_version == "2"
-            assert db.has_taxonomy is False
-            assert db.taxonomy_sources() == []
-            summary = db.summary()
-            assert "taxonomy_sources" not in summary
-            assert "sylphtax_rules" not in summary
-            found = db.lookup(["GCF_000005845.2"])
-        assert found["GCF_000005845.2"]["gtdb_taxonomy"] == "d__Bacteria;p__Test"
+        path = Path(build_metadata_db([gtdb_source], tmp_path / "meta.sqlite")["path"])
+        connection = sqlite3.connect(path)
+        if version is None:
+            connection.execute("DELETE FROM info WHERE key = 'format_version'")
+        else:
+            connection.execute(
+                "UPDATE info SET value = ? WHERE key = 'format_version'", (version,)
+            )
+        connection.commit()
+        connection.close()
+        message = f"reads only version {METADATA_FORMAT_VERSION}.*sylphd setup"
+        with pytest.raises(ValueError, match=message):
+            MetadataDB(path)
+        before = path.read_bytes()
+        output = tmp_path / "out.sqlite"
+        with pytest.raises(ValueError, match=message):
+            update_metadata_db(
+                path, output, taxonomy=[TaxonomySource("UHGV_default", uhgv_file)]
+            )
+        assert path.read_bytes() == before
+        assert not output.exists()
 
-        from sylphd.server import ServerConfig, create_app
-
-        app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, meta_path=output))
-        with TestClient(app) as client:
-            metadata = client.get("/info").json()["metadata"]
-            assert metadata["format_version"] == "2"
-            assert "taxonomy_sources" not in metadata
-            assert metadata["rows"] == 2
-
-    def test_v2_file_serves_metadata_columns(
+    def test_file_without_taxonomy_sources_serves_metadata_columns(
         self, tmp_path: Path, tiny_database: Path
     ) -> None:
         from conftest import CLODF13_FASTA
@@ -648,12 +622,12 @@ class TestReaderVersions:
         row = _gtdb_row("GCA_000000001.1", "d__Bacteria;p__Test;c__Test")
         row[METADATA_COLUMNS.index("genome_size") + 1] = "9957"
         source.write_text("\t".join(HEADER) + "\n" + "\t".join(row) + "\n")
-        path = _to_v2(build_metadata_db([source], tmp_path / "meta.sqlite")["path"])
+        path = Path(build_metadata_db([source], tmp_path / "meta.sqlite")["path"])
 
         sketch = sketch_sample(SampleInput("clodf13", ((str(CLODF13_FASTA),),)), c=200, k=31)
         app = create_app(ServerConfig(db_path=tiny_database, meta_path=path))
         with TestClient(app) as client:
-            assert client.get("/info").json()["metadata"]["format_version"] == "2"
+            assert client.get("/info").json()["metadata"]["format_version"] == "3"
             response = client.post(
                 "/query",
                 data={"params": "{}"},
@@ -686,45 +660,19 @@ class TestReaderVersions:
             ("UHGV_default", 3),
         ]
 
-    def test_old_reader_opens_v3(
-        self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path
-    ) -> None:
-        """A format 2 reader (frozen from e72b807) must open a format 3 file.
-
-        The frozen copy lives in ``tests/compat/metadata_v2_reader.py``; reading
-        it from git (``HEAD``) would turn this test into a no-op as soon as
-        format 3 is committed.
-        """
-        output = tmp_path / "meta.sqlite"
-        build_metadata_db(
-            [gtdb_source],
-            output,
-            release=232,
-            taxonomy=[TaxonomySource("UHGV_default", uhgv_file)],
-        )
-        with V2MetadataDB(output) as db:
-            assert db.columns == METADATA_COLUMNS
-            assert db.summary()["rows"] == 2
-            # the old reader reports the file's version, it does not know 3
-            assert db.summary()["format_version"] == "3"
-            assert "taxonomy_sources" not in db.summary()
-            assert db.lookup(["GCF_000005845.2"])["GCF_000005845.2"]["gtdb_taxonomy"] == (
-                "d__Bacteria;p__Test"
-            )
-
 
 class TestUpdate:
-    def test_v2_to_v3_migration(self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path) -> None:
-        v2 = _to_v2(
-            build_metadata_db([gtdb_source], tmp_path / "v2.sqlite", release=232)["path"]
+    def test_update_to_a_new_path(self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path) -> None:
+        old = Path(
+            build_metadata_db([gtdb_source], tmp_path / "source.sqlite", release=232)["path"]
         )
-        before = v2.read_bytes()
-        output = tmp_path / "v3.sqlite"
+        before = old.read_bytes()
+        output = tmp_path / "out.sqlite"
         stats = update_metadata_db(
-            v2, output, taxonomy=[TaxonomySource("UHGV_default", uhgv_file)]
+            old, output, taxonomy=[TaxonomySource("UHGV_default", uhgv_file)]
         )
         assert stats["rows"] == 2
-        assert v2.read_bytes() == before  # the source is untouched
+        assert old.read_bytes() == before  # the source is untouched
         with MetadataDB(output) as db:
             assert db.format_version == "3"
             assert [source["name"] for source in db.taxonomy_sources()] == [
@@ -736,7 +684,7 @@ class TestUpdate:
             assert db.lookup(["GCF_000005845.2"])["GCF_000005845.2"]["genome_size"] == 1000
 
     def test_update_in_place(self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path) -> None:
-        path = _to_v2(
+        path = Path(
             build_metadata_db([gtdb_source], tmp_path / "meta.sqlite", release=232)["path"]
         )
         update_metadata_db(path, path, taxonomy=[TaxonomySource("UHGV_default", uhgv_file)])
@@ -787,7 +735,7 @@ class TestUpdate:
         self, tmp_path: Path, gtdb_source: Path, fungi_file: Path
     ) -> None:
         """The redundant catalogue GTDB file must not replace the virtual source."""
-        path = _to_v2(
+        path = Path(
             build_metadata_db([gtdb_source], tmp_path / "meta.sqlite", release=232)["path"]
         )
         stats = update_metadata_db(
@@ -810,7 +758,7 @@ class TestUpdate:
     def test_update_imports_a_different_gtdb_release(
         self, tmp_path: Path, gtdb_source: Path, fungi_file: Path
     ) -> None:
-        path = _to_v2(
+        path = Path(
             build_metadata_db([gtdb_source], tmp_path / "meta.sqlite", release=232)["path"]
         )
         stats = update_metadata_db(
@@ -828,7 +776,7 @@ class TestUpdate:
     def test_failed_update_keeps_the_file(
         self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path
     ) -> None:
-        path = _to_v2(
+        path = Path(
             build_metadata_db([gtdb_source], tmp_path / "meta.sqlite", release=232)["path"]
         )
         before = path.read_bytes()
@@ -1033,37 +981,6 @@ class TestOverlaps:
             assert db.taxonomy_overlaps() == []
         assert "warning" not in capsys.readouterr().err
 
-    def test_an_old_v3_file_gains_the_counts_on_update(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """A file written before ``taxonomy_overlap`` reads and is filled by --update."""
-        first, second = self._two_sources(tmp_path)
-        path = tmp_path / "meta.sqlite"
-        build_metadata_db(
-            [],
-            path,
-            taxonomy=[TaxonomySource("First", first), TaxonomySource("Second", second)],
-        )
-        # what the first release of format 3 wrote: entries but no overlap table
-        connection = sqlite3.connect(path)
-        connection.execute("DROP TABLE taxonomy_overlap")
-        connection.commit()
-        connection.close()
-        with MetadataDB(path) as db:
-            assert db.taxonomy_overlaps() == []
-        capsys.readouterr()
-        stats = update_metadata_db(path, path)
-        assert stats["taxonomy_overlaps"] == []  # nothing imported, so no warning
-        with MetadataDB(path) as db:
-            assert db.taxonomy_overlaps() == [
-                {
-                    "sources": ["First", "Second"],
-                    "keys": 7,
-                    "examples": ["SHARED-01", "SHARED-02", "SHARED-03", "SHARED-04", "SHARED-05"],
-                }
-            ]
-        assert "warning" not in capsys.readouterr().err
-
     def test_info_reports_the_counts(
         self, tmp_path: Path, gtdb_source: Path
     ) -> None:
@@ -1208,7 +1125,7 @@ class TestCliSpecs:
     def test_update_needs_no_metadata_files(
         self, tmp_path: Path, gtdb_source: Path, uhgv_file: Path, capsys
     ) -> None:
-        path = _to_v2(
+        path = Path(
             build_metadata_db([gtdb_source], tmp_path / "meta.sqlite", release=232)["path"]
         )
         code = cli.main(

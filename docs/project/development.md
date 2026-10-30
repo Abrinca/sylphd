@@ -27,7 +27,7 @@ only needed for manual runs.
 | `test_cli.py` | the command line, including the Unix-socket round trip |
 | `test_sketching.py` | inputs, sample names, `.sylsp` |
 | `test_metadata.py`, `test_download.py` | `setup` and `download` |
-| `test_metadata_taxonomy.py` | format 3 taxonomy tables: build, update, and the v2/v3 reader |
+| `test_metadata_taxonomy.py` | format 3 taxonomy tables: build, update, and the reader |
 | `test_multi_db.py` | a pooled server equals `pysylph.Profiler(*databases)`, single-database goldens, the shared `Profiler` cache |
 | `test_taxonomy.py` | `taxonomy.py`: profile aggregation, `.sylphmpa` and clade rendering |
 | `test_taxonomy_resolve.py` | hit → lineage resolution: probe rules, precedence, `tax_*` rows |

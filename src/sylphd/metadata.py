@@ -14,9 +14,7 @@ Format version 3 adds the ``taxonomy_*`` tables: the GTDB metadata is a
 file is one ``taxonomy_source`` with its ``key -> lineage [-> host]`` rows in
 ``taxonomy_entry``.  ``taxonomy_overlap`` records, per pair of sources, how
 many keys both have: importing overlapping sources is allowed (the one
-imported later wins, as in sylph-tax) but never silent.  Version 2 files keep
-loading and serving; a version 3 file still opens with a version 2 reader,
-which ignores the new tables.
+imported later wins, as in sylph-tax) but never silent.
 
 The writers live in :mod:`sylphd.metadata_build` and the sylph-tax import in
 :mod:`sylphd.taxonomy_sources`.
@@ -38,11 +36,6 @@ from typing import IO, Self
 #: Schema version of the generated SQLite file.  Bump when the column layout
 #: or the meaning of the ``info`` table changes.
 METADATA_FORMAT_VERSION = "3"
-
-
-#: Format versions this reader understands.  Version 2 has no taxonomy
-#: sources; version 3 adds the ``taxonomy_*`` tables (a superset of 2).
-READABLE_FORMAT_VERSIONS = ("2", "3")
 
 
 #: Page size of the generated file.  8 KiB trims the b-tree page slack of the
@@ -418,31 +411,25 @@ class MetadataDB:
                 row[0]: row[1]
                 for row in self._connection.execute("SELECT key, value FROM info")
             }
-        version = self.info.get("format_version", "2")
-        if version not in READABLE_FORMAT_VERSIONS:
+        version = self.info.get("format_version")
+        if version != METADATA_FORMAT_VERSION:
             self._connection.close()
             raise ValueError(
-                f"{self.path} has metadata format version {version}; "
-                f"this sylphd reads {', '.join(READABLE_FORMAT_VERSIONS)}"
+                f"{self.path} has metadata format version {version or 'unknown'}; "
+                f"this sylphd reads only version {METADATA_FORMAT_VERSION}: "
+                "rebuild the file with `sylphd setup`"
             )
         self.format_version: str = version
-        #: True when the file carries the format 3 taxonomy tables.
-        self.has_taxonomy: bool = "taxonomy_source" in tables
-        #: The sources, in ``ord`` order (empty for a version 2 file).
+        #: The sources, in ``ord`` order.
         self._sources: tuple[TaxonomySourceRow, ...] = self._read_sources()
-        #: The de-duplicated overlap pairs, in ``ord`` order; ``()`` for a file
-        #: written before ``taxonomy_overlap`` existed.
-        self._overlaps: tuple[TaxonomyOverlapPair, ...] = self._read_overlaps(
-            "taxonomy_overlap" in tables
-        )
+        #: The de-duplicated overlap pairs, in ``ord`` order.
+        self._overlaps: tuple[TaxonomyOverlapPair, ...] = self._read_overlaps()
         #: The virtual GTDB source, if the file has one.
         self._virtual_source: TaxonomySourceRow | None = next(
             (source for source in self._sources if source.kind == "metadata"), None
         )
 
     def _read_sources(self) -> tuple[TaxonomySourceRow, ...]:
-        if not self.has_taxonomy:
-            return ()
         with self._lock:
             rows = self._connection.execute(
                 "SELECT id, ord, name, kind, origin, md5, rows, has_host "
@@ -462,7 +449,7 @@ class MetadataDB:
             for row in rows
         )
 
-    def _read_overlaps(self, has_table: bool) -> tuple[TaxonomyOverlapPair, ...]:
+    def _read_overlaps(self) -> tuple[TaxonomyOverlapPair, ...]:
         """The de-duplicated overlap pairs, each source pair listed once.
 
         ``taxonomy_overlap`` stores both directions of a pair; the pair is
@@ -470,8 +457,6 @@ class MetadataDB:
         The first shared keys are read here, once at startup, because the
         metadata file only stores the counts.
         """
-        if not has_table:
-            return ()
         sources = {source.id: source for source in self._sources}
         sources_by_name = {source.name: source for source in self._sources}
         with self._lock:
@@ -549,7 +534,7 @@ class MetadataDB:
         return self.columns + self.taxonomy_columns
 
     def taxonomy_sources(self) -> list[dict[str, object]]:
-        """The taxonomy sources of the file, in ``ord`` order (empty for v2).
+        """The taxonomy sources of the file, in ``ord`` order .
 
         ``keys`` is the number of stored keys of the source.  Keys shared with
         another source are reported once per pair at the metadata level
@@ -769,11 +754,9 @@ class MetadataDB:
             summary["sources"] = json.loads(self.info.get("sources", "[]"))
         except json.JSONDecodeError:
             summary["sources"] = []
-        if self.has_taxonomy:
-            # Additive: a format 2 file reports exactly what it always did.
-            summary["taxonomy_sources"] = self.taxonomy_sources()
-            summary["taxonomy_overlaps"] = self.taxonomy_overlaps()
-            summary["sylphtax_rules"] = self.info.get("sylphtax_rules") or None
+        summary["taxonomy_sources"] = self.taxonomy_sources()
+        summary["taxonomy_overlaps"] = self.taxonomy_overlaps()
+        summary["sylphtax_rules"] = self.info.get("sylphtax_rules") or None
         return summary
 
     def close(self) -> None:

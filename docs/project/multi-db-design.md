@@ -387,7 +387,7 @@ dict_tax_host    (id INTEGER PRIMARY KEY, value TEXT NOT NULL)
 - `info` gets `format_version = "3"`, `taxonomy_sources` (JSON list with name, rows, md5, origin)
   and the sylph-tax version whose rules were implemented (`sylphtax_rules = "1.9.2"`).
 
-**Migration.** v3 is a superset of v2:
+**Migration.** *(Historical: format 2 is no longer read; only v3 is supported.)* v3 was a superset of v2:
 
 - Reader: `MetadataDB` accepts versions 2 and 3; v2 means no `taxonomy_*` tables and behaves as
   today. It already only requires the `metadata` view and `info`.
@@ -678,11 +678,10 @@ before step 0:
    5.45 GiB peak (GTDB alone: 2.21/4.43 GiB), `Profiler` construction 93 ms, plain-database scan
    ~30 ms per sample. Numbers and method in `scratch/multi-db/REPORT.md`.
 2. **B schema and `setup`.** Format v3, `taxonomy_*` tables, `--taxonomy SPEC` (`UHGV_default`,
-   `FungiRefSeq-latest` for the target), `--update`, reader for v2/v3, `download
-   --taxonomy`/`--list-taxonomies` (httpx mocked as in `test_download.py`). Tests: v2 file loads
-   and serves; v3 built from small synthetic files (header row, gzip, 3 columns, duplicate keys
-   across sources and across the 20,000-row batch split); the frozen v2 reader
-   (`tests/compat/metadata_v2_reader.py`, commit `e72b807`) opens a v3 file. **Done 2026-10-29**:
+   `FungiRefSeq-latest` for the target), `--update`, reader for v3, `download
+   --taxonomy`/`--list-taxonomies` (httpx mocked as in `test_download.py`). Tests: v3 built from small synthetic files (header row, gzip, 3 columns, duplicate keys
+   across sources and across the 20,000-row batch split); a frozen v2 reader
+   opened a v3 file (since removed). **Done 2026-10-29**:
    real-data run in `scratch/taxonomy/REPORT.md` (v3 file +25.8 MiB, `--update` 1.4–1.9 s).
 3. **B resolution and the `tax` profile.** `sylphtax_probes`, `MetadataDB.resolve`, `tax_*`
    columns, `--taxonomy tax`, `--tax-source`, exact-sylph-tax aggregation (hosts resolved by `ord`

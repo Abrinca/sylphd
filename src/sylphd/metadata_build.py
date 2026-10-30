@@ -29,7 +29,6 @@ from .metadata import (
     METADATA_FORMAT_VERSION,
     METADATA_PAGE_SIZE,
     NULL_MARKERS,
-    READABLE_FORMAT_VERSIONS,
     normalize_accession,
     open_text,
 )
@@ -37,7 +36,6 @@ from .taxonomy_sources import (
     TaxonomyOverlap,
     TaxonomySource,
     _add_taxonomy_source,
-    _backfill_overlaps,
     _Dictionary,
     _insert_source_row,
     _load_dictionary,
@@ -164,21 +162,15 @@ def _taxonomy_schema_sql() -> tuple[str, ...]:
         "CREATE INDEX taxonomy_entry_key ON taxonomy_entry (key)",
         "CREATE TABLE dict_tax_lineage (id INTEGER PRIMARY KEY, value TEXT NOT NULL)",
         "CREATE TABLE dict_tax_host (id INTEGER PRIMARY KEY, value TEXT NOT NULL)",
-        _OVERLAP_TABLE_SQL,
+        (
+            "CREATE TABLE taxonomy_overlap (\n"
+            "    source_id INTEGER NOT NULL,\n"
+            "    other_id INTEGER NOT NULL,\n"
+            "    keys INTEGER NOT NULL,\n"
+            "    PRIMARY KEY (source_id, other_id)\n"
+            ") WITHOUT ROWID"
+        ),
     )
-
-
-#: ``taxonomy_overlap``: ``(source, other) -> shared keys``.  A table of its
-#: own rather than a column so that a version 3 file written before it existed
-#: still reads, and gets it filled by the next ``--update``.
-_OVERLAP_TABLE_SQL = (
-    "CREATE TABLE IF NOT EXISTS taxonomy_overlap (\n"
-    "    source_id INTEGER NOT NULL,\n"
-    "    other_id INTEGER NOT NULL,\n"
-    "    keys INTEGER NOT NULL,\n"
-    "    PRIMARY KEY (source_id, other_id)\n"
-    ") WITHOUT ROWID"
-)
 
 
 def _create_schema(connection: sqlite3.Connection) -> None:
@@ -326,7 +318,6 @@ def _import_taxonomy(
     *,
     release: str | None,
     has_virtual: bool,
-    first_ord: int,
     lineages: _Dictionary,
     hosts: _Dictionary,
     progress: object,
@@ -346,7 +337,7 @@ def _import_taxonomy(
         imported = _add_taxonomy_source(
             connection,
             source,
-            ord_value=max(_next_ord(connection), first_ord),
+            ord_value=_next_ord(connection),
             lineages=lineages,
             hosts=hosts,
             progress=progress,
@@ -497,7 +488,6 @@ def build_metadata_db(
             taxonomy,
             release=release_text,
             has_virtual=bool(files),
-            first_ord=1,
             lineages=lineages,
             hosts=hosts,
             progress=callback,
@@ -543,18 +533,15 @@ def _taxonomy_source_list(connection: sqlite3.Connection) -> list[dict[str, obje
     """The sources in ``ord`` order, each with its ``overlaps`` counts.
 
     ``overlaps`` maps an other source's name to the number of keys both have;
-    it is empty when the file has no ``taxonomy_overlap`` table (a version 3
-    file written before it existed) or no overlap.
+    it is empty for a source without overlap.
     """
     columns = ("name", "kind", "ord", "origin", "md5", "rows", "has_host", "built")
-    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
     overlaps: dict[int, dict[str, int]] = {}
-    if "taxonomy_overlap" in tables:
-        for source_id, other, keys in connection.execute(
-            "SELECT o.source_id, s.name, o.keys FROM taxonomy_overlap AS o "
-            "JOIN taxonomy_source AS s ON s.id = o.other_id ORDER BY s.ord"
-        ):
-            overlaps.setdefault(int(source_id), {})[str(other)] = int(keys)
+    for source_id, other, keys in connection.execute(
+        "SELECT o.source_id, s.name, o.keys FROM taxonomy_overlap AS o "
+        "JOIN taxonomy_source AS s ON s.id = o.other_id ORDER BY s.ord"
+    ):
+        overlaps.setdefault(int(source_id), {})[str(other)] = int(keys)
     sources = []
     for row in connection.execute(
         "SELECT id, name, kind, ord, origin, md5, rows, has_host, built "
@@ -577,13 +564,10 @@ def update_metadata_db(
 ) -> dict[str, object]:
     """Copy an existing metadata database, add taxonomy sources, write ``output``.
 
-    This is ``setup --update``: it adds the ``taxonomy_*`` tables to a version
-    2 file (and the virtual GTDB source), bumps ``format_version`` to 3, and
-    appends (or replaces, by name) the given sources.  The GTDB rows are copied
-    as they are, so no GTDB TSV files are needed.  A version 3 file written
-    before ``taxonomy_overlap`` existed gets it (and its counts) here.  The copy
-    is built next to ``output`` and replaces it only on success, like
-    ``setup --force``; a failure leaves ``output`` untouched.
+    This is ``setup --update``: it appends (or replaces, by name) the given
+    sources to a format 3 file.  The GTDB rows are copied as they are, so no
+    GTDB TSV files are needed.  The copy is built next to ``output`` and
+    replaces it only on success, like ``setup --force``; a failure leaves ``output`` untouched.
     """
     source_path = Path(source)
     output_path = Path(output)
@@ -618,35 +602,12 @@ def update_metadata_db(
                 row["key"]: row["value"]
                 for row in connection.execute("SELECT key, value FROM info")
             }
-        version = info.get("format_version", "2")
-        if version not in READABLE_FORMAT_VERSIONS:
+        version = info.get("format_version")
+        if version != METADATA_FORMAT_VERSION:
             raise ValueError(
-                f"{source_path} has metadata format version {version}; "
-                f"this sylphd reads {', '.join(READABLE_FORMAT_VERSIONS)}"
-            )
-        if "taxonomy_source" not in tables:
-            for statement in _taxonomy_schema_sql():
-                connection.execute(statement)
-            # A version 2 file has no sources to count; a version 3 file written
-            # before ``taxonomy_overlap`` existed has them, so fill it now (once).
-            needs_backfill = False
-        elif "taxonomy_overlap" not in tables:
-            connection.execute(_OVERLAP_TABLE_SQL)
-            needs_backfill = True
-        else:
-            needs_backfill = False
-        if needs_backfill:
-            _backfill_overlaps(connection)
-        if version == "2":
-            _add_virtual_gtdb_source(connection, info)
-            info["format_version"] = METADATA_FORMAT_VERSION
-            info["sylphtax_rules"] = SYLPHTAX_VERSION
-            _write_info(
-                connection,
-                {
-                    "format_version": METADATA_FORMAT_VERSION,
-                    "sylphtax_rules": SYLPHTAX_VERSION,
-                },
+                f"{source_path} has metadata format version {version or 'unknown'}; "
+                f"this sylphd reads only version {METADATA_FORMAT_VERSION}: "
+                "rebuild the file with `sylphd setup`"
             )
 
         lineages = _load_dictionary(connection, "dict_tax_lineage")
@@ -663,7 +624,6 @@ def update_metadata_db(
             taxonomy,
             release=info.get("release") or None,
             has_virtual=has_virtual,
-            first_ord=0,
             lineages=lineages,
             hosts=hosts,
             progress=progress,
@@ -671,7 +631,6 @@ def update_metadata_db(
         sources = _taxonomy_source_list(connection)
         _finish(connection, {
             "taxonomy_sources": json.dumps(sources),
-            "format_version": METADATA_FORMAT_VERSION,
             "sylphtax_rules": info.get("sylphtax_rules", SYLPHTAX_VERSION),
         })
         rows = connection.execute("SELECT COUNT(*) FROM metadata_data").fetchone()[0]
@@ -685,15 +644,3 @@ def update_metadata_db(
         overlaps=overlaps,
         release=info.get("release") or None,
     )
-
-
-def _add_virtual_gtdb_source(
-    connection: sqlite3.Connection, info: dict[str, str]
-) -> None:
-    """Register the GTDB rows of a version 2 file as the virtual source."""
-    try:
-        rows = _gtdb_row_count(connection)
-    except sqlite3.OperationalError:
-        return
-    if rows:
-        _insert_virtual_gtdb_source(connection, info.get("release") or None, rows)
