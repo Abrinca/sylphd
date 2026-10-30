@@ -82,7 +82,7 @@ Each request is logged as one line — method, path, status, elapsed ms and requ
 `uvicorn.error` logger at INFO. **No client address is logged**: the address (or the
 `X-Forwarded-For` one behind a `--trusted-proxy`) only keys the rate limit in memory, and the
 example `Caddyfile` deletes `remote_ip`, `remote_port`, `client_ip` and the forwarding headers from
-its access log too. (Caddy's own runtime log can still name a peer when a TLS handshake fails.)
+its access log too. It also drops the query string, because `/assembly` carries the sample name, length and GC in it. (Caddy's own runtime log can still name a peer when a TLS handshake fails.)
 `--log-level warning` silences the access log. See [`sylphd serve`](../commands/serve.md#logging).
 
 ## Usage statistics

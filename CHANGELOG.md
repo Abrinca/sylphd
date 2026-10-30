@@ -4,6 +4,13 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The example `deploy/Caddyfile` also drops the query string from Caddy's access log: `/assembly`
+  carries the sample name, length and GC in it.
+
 ## [0.3.2] - 2026-10-31
 
 ### Added
