@@ -28,36 +28,58 @@
         </div>
       </div>
       <section id="server-panel" class="server-panel" data-state="checking" aria-label="Server">
-        <div class="sp-top">
-          <button type="button" id="status" class="status" data-state="checking" title="Click to re-check the server">
-            <span class="dot" aria-hidden="true"></span>
-            <span class="status-text">Checking server…</span>
-          </button>
-          <span class="sp-name" id="sp-name"></span>
-          <code class="sp-addr" id="sp-addr"></code>
-          <span class="sp-actions">
-            <button type="button" id="sp-change" class="link-btn" aria-expanded="false" aria-controls="sp-connect">Change server</button>
-            <a id="sp-reset" class="link-btn" href="#" title="Remove ?api= and use the default server" hidden>reset</a>
-          </span>
+        <div class="sp-bar">
+          <div class="sp-main">
+            <div class="sp-summary">
+              <button type="button" id="status" class="status" data-state="checking" title="Checking server…" aria-label="Checking server…">
+                <span class="dot" aria-hidden="true"></span>
+                <span class="status-text">Checking server…</span>
+              </button>
+              <button type="button" id="sp-retry" class="btn btn-small sp-retry" hidden>Retry now</button>
+              <div id="sp-identity" class="sp-identity"></div>
+            </div>
+            <div class="sp-actions">
+              <button type="button" id="sp-details-toggle" class="btn btn-small" aria-expanded="false" aria-controls="sp-details">Details ▾</button>
+              <button type="button" id="sp-change" class="btn btn-small btn-icon" aria-expanded="false" aria-controls="sp-connect" aria-label="Change server" title="Change server">
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M11 2l3 3L5 14H2v-3L11 2z"/></svg>
+              </button>
+              <a id="sp-reset" class="btn btn-small btn-icon" href="#" aria-label="Reset to the default server" title="Reset to the default server" hidden>
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9L1.8 6.5M1.8 2.5v4h4"/></svg>
+              </a>
+            </div>
+          </div>
+          <div class="sp-privacy-line">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" class="sp-shield"><path fill="currentColor" d="M8 1 2 3.5v4.2c0 3.4 2.4 6.1 6 7.3 3.6-1.2 6-3.9 6-7.3V3.5L8 1Zm-1 9.6L4.6 8.2l1-1L7 8.6l3.4-3.4 1 1L7 10.6Z"/></svg>
+            <span>Your sequences never leave your computer. <a href="terms.html">Terms of use</a></span>
+          </div>
         </div>
-        <div id="status-detail" class="status-detail" role="status"></div>
-        <div id="sp-catalog" class="sp-catalog" aria-label="Databases and taxonomy sources" hidden></div>
         <div id="sp-connect" class="sp-connect" hidden></div>
-        <div id="sp-about" class="sp-about" hidden>
-          <div class="sp-about-label">From the server operator</div>
-          <div id="sp-about-body" class="sp-about-body collapsed"></div>
-          <button type="button" id="sp-about-toggle" class="link-btn" aria-expanded="false" aria-controls="sp-about-body" hidden>Show more</button>
-          <p id="sp-about-note" class="sp-about-note" hidden>This text comes from the server you connected to; sylphd does not verify it.</p>
+        <div id="sp-details" class="sp-details" hidden>
+          <div class="sp-details-overview">
+            <div class="sp-details-field">
+              <span class="sp-details-label">Server</span>
+              <code class="sp-addr" id="sp-details-addr"></code>
+            </div>
+            <div id="status-detail" class="status-detail" role="status"></div>
+          </div>
+          <div id="sp-catalog" class="sp-catalog" aria-label="Databases and taxonomy sources" hidden></div>
+          <div id="sp-about" class="sp-about" hidden>
+            <div class="sp-about-label">From the server operator</div>
+            <div id="sp-about-body" class="sp-about-body"></div>
+            <p id="sp-about-note" class="sp-about-note" hidden>This text comes from the server you connected to; sylphd does not verify it.</p>
+          </div>
+          <div class="sp-details-legal">
+            <p class="privacy">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1 2 3.5v4.2c0 3.4 2.4 6.1 6 7.3 3.6-1.2 6-3.9 6-7.3V3.5L8 1Zm-1 9.6L4.6 8.2l1-1L7 8.6l3.4-3.4 1 1L7 10.6Z"/></svg>
+              <span><strong>Privacy:</strong> <strong>your sequences never leave your computer.</strong> Assemblies and reads are sketched in your browser and only the sketch (k-mer hashes and counts, no sequence) is sent to the server, which does not store or log it. In per-contig mode that is one small sketch per record, plus its length, GC and k-mer count. Only sizes, timings and request outcomes are recorded.<span id="sp-privacy-usage" hidden> This server also keeps <a href="#usage" id="sp-privacy-usage-link">usage statistics</a>.</span></span>
+            </p>
+            <p class="privacy terms-note">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 2.2a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM7 6.5h2V12H7V6.5Z"/></svg>
+              <span><strong>Terms:</strong> see the <a href="terms.html">terms of use</a>.</span>
+            </p>
+          </div>
         </div>
       </section>
-      <p class="privacy">
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1 2 3.5v4.2c0 3.4 2.4 6.1 6 7.3 3.6-1.2 6-3.9 6-7.3V3.5L8 1Zm-1 9.6L4.6 8.2l1-1L7 8.6l3.4-3.4 1 1L7 10.6Z"/></svg>
-        <span><strong>Privacy:</strong> <strong>your sequences never leave your computer.</strong> Assemblies and reads are sketched in your browser and only the sketch (k-mer hashes and counts, no sequence) is sent to the server, which does not store or log it. In per-contig mode that is one small sketch per record, plus its length, GC and k-mer count. Only sizes, timings and request outcomes are recorded.</span>
-      </p>
-      <p class="privacy terms-note">
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 2.2a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM7 6.5h2V12H7V6.5Z"/></svg>
-        <span><strong>Terms:</strong> free for academic use via this web page and, for regular light use, via the API from your own scripts. For heavy or commercial use, please contact us first: <a href="https://abrinca.com/contact" rel="noopener">https://abrinca.com/contact</a>. See the <a href="terms.html">terms of use</a>.</span>
-      </p>
       <nav class="tabs" id="tabs" aria-label="Mode" data-modes="assembly reads" hidden>
         <a class="tab" href="#assembly" data-tab="assembly">
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><use href="#i-assembly"/></svg>Assembly</a>
@@ -95,7 +117,7 @@
           <h3>Identify an assembly</h3>
           <p class="mode-lead">Find the closest GTDB genomes of a bacterial or archaeal genome and get a species call.</p>
           <ul class="mode-facts">
-            <li>Paste FASTA or upload a file (gzip is fine, up to <strong>2&nbsp;GiB</strong>), or a <code>.sylsp</code> sketch you made earlier</li>
+            <li>Paste FASTA or upload a file (gzip is fine, up to <strong>2&nbsp;GB</strong>), or a <code>.sylsp</code> sketch you made earlier</li>
             <li>Species call at 95&nbsp;% ANI, with the lineage relation of every hit</li>
             <li><strong>Sketched locally in your browser:</strong> the sequence never leaves your computer, only a small sketch is uploaded</li>
           </ul>

@@ -8,6 +8,10 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **Web: a compact server bar.** It leads with the server's host, which the server cannot fake,
+  then the version, genome count and usage chip, plus one privacy line. Limits, databases, taxonomy
+  sources, the operator's name and text and the full privacy and terms text move into a *Details*
+  panel that starts collapsed; Change server and reset are icon buttons.
 - **Web: usage statistics modal.** The `#usage` view is replaced with an accessible modal
   dialog over the current page, keeping the user's input, mode and results intact underneath. The
   modal opens from the status-line chip and can be dismissed by clicking outside, Escape, or the

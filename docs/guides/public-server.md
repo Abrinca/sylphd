@@ -170,8 +170,8 @@ browser rule, not access control: see the [security notes](../reference/security
 
 `--name TEXT` and `--about FILE` let you tell visitors what this server is, for example which
 database it holds. The [web app](https://abrinca.github.io/sylphd/) shows both in a panel at the top
-of every page, next to the server address, headed *From the server operator*, collapsed to a few
-lines with *Show more* when it is long. `GET /info` reports them as `name` and `about` (see the
+of every page under *Details ▾*: the name as an *Operator* fact and the full description headed
+*From the server operator*. `GET /info` reports them as `name` and `about` (see the
 [HTTP API](../reference/http-api.md#get-info)); both are absent when you set nothing.
 
 ```bash

@@ -97,7 +97,7 @@ sketch the server takes; typical sketch sizes are in
 ## The Assembly mode sketches the same way { #assembly-mode }
 
 The Assembly tab uses the same WebAssembly sketcher: a pasted FASTA goes straight to it, a file
-(plain or `.gz`, up to 2 GiB) through the same decompress and sketch workers.
+(plain or `.gz`, up to 2 GB) through the same decompress and sketch workers.
 The page counts the records, length and GC content while sketching, sends only the sketch to
 [`POST /assembly`](../reference/http-api.md#post-assembly) (`Content-Type:
 application/vnd.sylph.sketch`) and marks the result *sketched locally*. A 2.8 Mb assembly takes

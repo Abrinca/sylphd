@@ -164,7 +164,7 @@ Cost is per contig but small: against a 200 000-genome database, 236 short conti
 
 In the [web app](https://abrinca.github.io/sylphd/#assembly) the sketching happens in your browser
 (WebAssembly, the same code as for [reads](profiling-in-browser.md)). Paste FASTA or drop a file of
-up to 2 GiB (gzip is fine); only the sketch is sent, and the result shows a *sketched locally* badge.
+up to 2 GB (gzip is fine); only the sketch is sent, and the result shows a *sketched locally* badge.
 You can also upload a sketch you made earlier (`.sylsp`, for example from `sylph sketch` or
 pysylph, or downloaded from the [Reads tab](profiling-in-browser.md#reupload)): it is sent as it
 is, after the page has checked its `c` and `k` against the server. Records, length and GC are

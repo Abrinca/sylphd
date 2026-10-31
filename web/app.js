@@ -24,9 +24,11 @@
     progress: $('progress'), progressText: $('progress-text'), results: $('results'),
     status: $('status'), statusText: document.querySelector('#status .status-text'),
     statusDetail: $('status-detail'), catalog: $('sp-catalog'),
-    panel: $('server-panel'), spName: $('sp-name'), spAddr: $('sp-addr'),
+    panel: $('server-panel'), spIdentity: $('sp-identity'), spRetry: $('sp-retry'),
+    spDetails: $('sp-details'), spDetailsToggle: $('sp-details-toggle'), spDetailsAddr: $('sp-details-addr'),
+    spPrivacyUsage: $('sp-privacy-usage'), spPrivacyUsageLink: $('sp-privacy-usage-link'),
     spChange: $('sp-change'), spReset: $('sp-reset'), spConnect: $('sp-connect'), spAbout: $('sp-about'),
-    spAboutBody: $('sp-about-body'), spAboutToggle: $('sp-about-toggle'), spAboutNote: $('sp-about-note'), banner: $('server-banner'), submitHint: $('submit-hint'),
+    spAboutBody: $('sp-about-body'), spAboutNote: $('sp-about-note'), banner: $('server-banner'), submitHint: $('submit-hint'),
   };
 
   /* ----------------------------------------------------------- helpers */
@@ -152,11 +154,25 @@
   /* -------------------------------------------------------- server info */
   let serverInfo = null;
   let infoTimer = null;
+  const usageOn = () => (serverInfo && serverInfo.usage && serverInfo.usage.enabled ? serverInfo.usage : null);
 
   function setStatus(state, text) {
     ui.status.dataset.state = state;
     ui.statusText.textContent = text;
     ui.panel.dataset.state = state;
+    if (state === 'online') {
+      ui.status.setAttribute('aria-label', 'Server online');
+      ui.status.setAttribute('title', 'Server online');
+      if (ui.spRetry) ui.spRetry.hidden = true;
+    } else {
+      ui.status.setAttribute('aria-label', text);
+      ui.status.setAttribute('title', text);
+      if (ui.spRetry) {
+        ui.spRetry.hidden = false;
+        ui.spRetry.disabled = state === 'checking';
+        ui.spRetry.textContent = state === 'checking' ? 'Checking…' : 'Retry now';
+      }
+    }
   }
 
   // Why the server cannot be used right now: null (usable or not yet known),
@@ -226,6 +242,18 @@
     ui.spChange.focus();
   }
   ui.spChange.addEventListener('click', () => (ui.spConnect.hidden ? openConnect() : closeConnect()));
+  ui.spDetailsToggle.addEventListener('click', () => {
+    const open = ui.spDetails.hidden;
+    ui.spDetails.hidden = !open;
+    ui.spDetailsToggle.setAttribute('aria-expanded', String(open));
+    ui.spDetailsToggle.textContent = open ? 'Details ▴' : 'Details ▾';
+  });
+  if (ui.spPrivacyUsageLink) {
+    ui.spPrivacyUsageLink.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      if (window.SylphdUsage) window.SylphdUsage.openModal();
+    });
+  }
 
   const shownProblem = () => serverProblem;
 
@@ -285,20 +313,61 @@
   /* ------------------------------------------------------ server panel */
   const defaultApi = (configured || '').trim().replace(/\/+$/, '');
 
-  // Name, address and reset link: from /info when known, else from the address alone.
+  function cleanHost(urlStr) {
+    if (!urlStr) return '(no server configured)';
+    try {
+      const u = new URL(urlStr);
+      const path = u.pathname.replace(/\/+$/, '');
+      return u.host + (path && path !== '/' ? path : '');
+    } catch {
+      return urlStr.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '').replace(/\/+$/, '');
+    }
+  }
+
+  // Server identity in the compact bar (cleaned host, sylphd version, genome count, usage chip joined with ·).
   function renderPanelHead() {
-    const name = serverInfo && typeof serverInfo.name === 'string' && serverInfo.name.trim() ? serverInfo.name.trim() : '';
-    // without a name the address alone identifies the server
-    ui.spName.textContent = name;
-    ui.spName.hidden = !name;
-    ui.spAddr.textContent = API || '(no server configured)';
-    ui.spAddr.hidden = false;
-    ui.spAddr.classList.toggle('sp-addr-main', !name);
+    if (ui.spDetailsAddr) ui.spDetailsAddr.textContent = API || '(no server configured)';
+
+    const hostEl = el('strong', { class: 'sp-host', title: API || null, text: cleanHost(API) });
+
+    const metaItems = [];
+    if (serverInfo) {
+      if (has(serverInfo.version)) {
+        metaItems.push(el('span', { class: 'sp-ver', text: `sylphd v${serverInfo.version}` }));
+      }
+      const db = serverInfo.database || {};
+      if (isNum(db.genomes)) {
+        metaItems.push(el('span', { class: 'sp-genomes', text: `${fmtInt(db.genomes)} genomes` }));
+      }
+      if (usageOn()) {
+        metaItems.push(el('a', {
+          class: 'fact-link sp-usage-chip',
+          href: '#usage',
+          title: 'This server reports that it keeps usage statistics',
+          onclick: (ev) => {
+            ev.preventDefault();
+            if (window.SylphdUsage) window.SylphdUsage.openModal();
+          },
+        }, el('span', { class: 'fact-value', text: 'usage statistics on' })));
+      }
+    }
+
+    const kids = [hostEl];
+    if (metaItems.length) {
+      const metaKids = [];
+      for (let i = 0; i < metaItems.length; i++) {
+        if (i > 0) metaKids.push(el('span', { class: 'sp-sep', 'aria-hidden': 'true', text: '·' }));
+        metaKids.push(metaItems[i]);
+      }
+      kids.push(el('span', { class: 'sp-meta' }, ...metaKids));
+    }
+    ui.spIdentity.replaceChildren(...kids);
+
     ui.spReset.hidden = !apiOverride;
     ui.spReset.href = pageUrl(null);
   }
 
-  // The operator's Markdown text, collapsed to a few lines when long. Rebuilt only when the text changes.
+  // The operator's Markdown text, rendered in full under Details.
   let aboutShown = null;
   function renderAbout() {
     const about = serverInfo && serverInfo.about;
@@ -314,26 +383,7 @@
     if (md === aboutShown) return;
     aboutShown = md;
     ui.spAboutBody.replaceChildren(window.SylphdAbout.render(md));
-    setAboutCollapsed(true);
-    requestAnimationFrame(measureAbout);
   }
-  function setAboutCollapsed(collapsed) {
-    ui.spAboutBody.classList.toggle('collapsed', collapsed);
-    ui.spAboutToggle.textContent = collapsed ? 'Show more' : 'Show less';
-    ui.spAboutToggle.setAttribute('aria-expanded', String(!collapsed));
-  }
-  // Show the toggle only when the text is longer than the collapsed height.
-  function measureAbout() {
-    if (ui.spAbout.hidden) return;
-    const collapsed = ui.spAboutBody.classList.contains('collapsed');
-    ui.spAboutBody.classList.add('collapsed');
-    const long = ui.spAboutBody.scrollHeight > ui.spAboutBody.clientHeight + 2;
-    if (!collapsed) ui.spAboutBody.classList.remove('collapsed');
-    ui.spAboutToggle.hidden = !long && collapsed;
-    if (!long) ui.spAboutBody.classList.remove('collapsed');
-  }
-  ui.spAboutToggle.addEventListener('click', () => setAboutCollapsed(!ui.spAboutBody.classList.contains('collapsed')));
-  window.addEventListener('resize', () => { if (!ui.spAbout.hidden) measureAbout(); });
 
   async function loadInfo() {
     clearTimeout(infoTimer);
@@ -341,6 +391,7 @@
       serverInfo = null;
       setStatus('offline', 'Public server offline');
       ui.statusDetail.replaceChildren();
+      if (ui.spPrivacyUsage) ui.spPrivacyUsage.hidden = true;
       renderPanelHead();
       renderAbout();
       renderCatalog();
@@ -349,14 +400,15 @@
       return;
     }
     setStatus('checking', 'Checking server…');
-    const retryBtn = $('retry-now');
-    if (retryBtn) { retryBtn.disabled = true; retryBtn.textContent = 'Checking…'; }
+    const retryBtns = document.querySelectorAll('#retry-now, #sp-retry');
+    retryBtns.forEach((b) => { b.disabled = true; b.textContent = 'Checking…'; });
     try {
       new URL(API);
     } catch {
       serverInfo = null;
       setStatus('offline', 'No valid API URL');
       ui.statusDetail.replaceChildren();
+      if (ui.spPrivacyUsage) ui.spPrivacyUsage.hidden = true;
       renderPanelHead();
       renderAbout();
       renderCatalog();
@@ -381,14 +433,10 @@
       const fact = (label, value, title) => el('span', { class: 'fact', title: title || null },
         el('span', { class: 'fact-label', text: label }), el('span', { class: 'fact-value', text: value }));
       const facts = [];
-      if (has(info.version)) facts.push(fact('sylphd', `v${info.version}`, 'sylphd version of this server'));
-      if (pooled) {
-        // several databases are profiled as one pool: /info's `database` is the pooled view
-        facts.push(fact('Databases', String(dbs.length), dbs.map((d) => d.name).join(', ')));
-        if (isNum(db.genomes)) facts.push(fact('Genomes', fmtInt(db.genomes), `Number of reference genomes in all ${dbs.length} databases`));
-      } else {
+      const name = typeof info.name === 'string' && info.name.trim() ? info.name.trim() : '';
+      if (name) facts.push(fact('Operator', name, 'Reported by the server operator'));
+      if (!pooled) {
         facts.push(fact('Database', gtdbServed && meta.release ? `GTDB r${meta.release}` : (db.name || '?'), `Reference database: ${db.name || 'unknown'}`));
-        if (isNum(db.genomes)) facts.push(fact('Genomes', fmtInt(db.genomes), 'Number of reference genomes in the database'));
       }
       if (isNum(db.c) && isNum(db.k)) facts.push(fact('Sketch', `c=${db.c} · k=${db.k}`, 'sylph subsampling rate c and k-mer size k; sketches must match (same k, c no larger than this)'));
       if (isNum(lim.max_upload_mb)) {
@@ -398,19 +446,9 @@
         const w = Math.round(lim.rate_limit.window_seconds);
         facts.push(fact('Rate', `${lim.rate_limit.count} / ${w === 60 ? 'min' : `${w} s`}`, 'Requests allowed per client address'));
       }
-      // self-reported by the server, like its about text
-      if (usageOn()) {
-        facts.push(el('a', {
-          class: 'fact fact-link', href: '#usage',
-          title: 'this server reports that it keeps usage statistics',
-          onclick: (ev) => {
-            ev.preventDefault();
-            if (window.SylphdUsage) window.SylphdUsage.openModal();
-          },
-        }, el('span', { class: 'fact-value', text: 'usage statistics on' })));
-      }
-      const frag = [el('span', { class: 'facts' }, ...facts)];
+      const frag = facts.length ? [el('span', { class: 'facts' }, ...facts)] : [];
       ui.statusDetail.replaceChildren(...frag);
+      if (ui.spPrivacyUsage) ui.spPrivacyUsage.hidden = !usageOn();
       renderPanelHead();
       renderAbout();
       renderCatalog();
@@ -422,13 +460,14 @@
       serverInfo = null;
       setStatus('offline', 'Server offline');
       ui.statusDetail.replaceChildren();
+      if (ui.spPrivacyUsage) ui.spPrivacyUsage.hidden = true;
       renderPanelHead();
       renderAbout();
       renderCatalog();
       setProblem('offline');
       notifyInfo();
-      const rb = $('retry-now');
-      if (rb) { rb.disabled = false; rb.textContent = 'Retry now'; }
+      const retryBtns = document.querySelectorAll('#retry-now, #sp-retry');
+      retryBtns.forEach((b) => { b.disabled = false; b.textContent = 'Retry now'; });
       infoTimer = setTimeout(loadInfo, 20000);
     }
   }
@@ -500,9 +539,6 @@
     setTimeout(() => c.abort(), ms);
     return c.signal;
   }
-
-  // The server's `usage` object when it keeps usage statistics, else null (self-reported).
-  const usageOn = () => (serverInfo && serverInfo.usage && serverInfo.usage.enabled ? serverInfo.usage : null);
 
   // The sketch is checked against the server's upload limit before it is sent.
   const sketchLimitBytes = () => ((serverInfo && serverInfo.limits && serverInfo.limits.max_upload_mb) || 0) * 1024 * 1024;
@@ -674,6 +710,7 @@
   ui.clear.addEventListener('click', () => { clearInput(); ui.results.replaceChildren(); });
   ui.chipRemove.addEventListener('click', clearInput);
   ui.status.addEventListener('click', loadInfo);
+  if (ui.spRetry) ui.spRetry.addEventListener('click', loadInfo);
 
   ui.example.addEventListener('click', async () => {
     ui.example.disabled = true;
