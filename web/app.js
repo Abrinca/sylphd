@@ -460,9 +460,7 @@
     }
   }
 
-  // The server's databases as one small table: genomes (right-aligned) and the taxonomy sources
-  // that cover them, computed by the server at startup. A source's share is only spelled out
-  // when it covers less than all of the database's genomes.
+  // The server's databases as one small table, then the taxonomy sources of its metadata file.
   function renderCatalog() {
     const info = serverInfo;
     const dbs = info && Array.isArray(info.databases)
@@ -470,7 +468,6 @@
     const meta = (info && info.metadata) || {};
     const sources = Array.isArray(meta.taxonomy_sources)
       ? meta.taxonomy_sources.filter((s) => s && typeof s.name === 'string') : [];
-    const byName = new Map(sources.map((s) => [s.name, s]));
     const sourceTitle = (s) => [
       s.kind === 'metadata' ? 'the GTDB metadata of this server' : 'imported sylph-tax file',
       s.origin ? `origin: ${s.origin}` : '',
@@ -479,14 +476,9 @@
     ].filter(Boolean).join('\n') || null;
     const parts = [];
     if (dbs.length) {
-      // Only say how a database was sketched when the databases disagree.
-      const mixedSketch = dbs.some((d) => d.c !== dbs[0].c || d.k !== dbs[0].k);
       const head = el('tr', null,
         el('th', { scope: 'col', text: 'Database' }),
-        el('th', { scope: 'col', class: 'sp-num', text: 'Genomes' }),
-        mixedSketch ? el('th', { scope: 'col', text: 'Sketch' }) : null,
-        el('th', { scope: 'col', text: 'Taxonomy source' }));
-      const covered = new Set();
+        el('th', { scope: 'col', class: 'sp-num', text: 'Genomes' }));
       const rows = dbs.map((d) => {
         const twoStage = d.kind === 'two-stage';
         const kind = twoStage ? '.syl2db' : '.syldb';
@@ -494,52 +486,33 @@
         const name = has(d.name) ? String(d.name) : (file || '?');
         const title = [file && file !== name ? file : '', kind, twoStage ? 'two-stage database' : 'plain database']
           .filter(Boolean).join('\n');
-        const cells = Array.isArray(d.taxonomy_sources)
-          ? d.taxonomy_sources.filter((c) => c && typeof c.name === 'string') : [];
-        let sourceCell = '–';
-        if (cells.length) {
-          const kids = [];
-          cells.forEach((c, i) => {
-            covered.add(c.name);
-            const partial = isNum(d.genomes) && isNum(c.genomes) && c.genomes < d.genomes;
-            const share = partial && d.genomes > 0
-              ? ` (${Math.min(99, Math.round((c.genomes * 100) / d.genomes))} %)` : '';
-            if (i) kids.push(', ');
-            kids.push(el('span', { class: 'sp-src', title: sourceTitle(byName.get(c.name) || {}) }, c.name));
-            if (share) kids.push(el('span', { class: 'sp-share', text: share }));
-          });
-          sourceCell = kids;
-        }
         return el('tr', null,
           el('th', { scope: 'row', class: 'sp-db-name', title }, name),
-          el('td', { class: 'sp-num', text: isNum(d.genomes) ? fmtInt(d.genomes) : '–' }),
-          mixedSketch
-            ? el('td', { class: 'sp-num', text: isNum(d.c) && isNum(d.k) ? `c=${d.c} · k=${d.k}` : '–' })
-            : null,
-          el('td', { class: 'sp-sources' }, sourceCell));
+          el('td', { class: 'sp-num', text: isNum(d.genomes) ? fmtInt(d.genomes) : '–' }));
       });
       parts.push(el('div', { class: 'sp-table-wrap' }, el('table', { class: 'sp-table' },
         el('thead', null, head), el('tbody', null, ...rows))));
-      // The server lists each overlapping pair once, with its shared keys and examples.
-      const overlaps = Array.isArray(meta.taxonomy_overlaps)
-        ? meta.taxonomy_overlaps.filter((p) => p && Array.isArray(p.sources) && p.sources.length === 2) : [];
-      if (overlaps.length) {
-        const involved = new Set();
-        for (const p of overlaps) for (const name of p.sources) involved.add(name);
-        const detail = overlaps.map((p) => {
-          const examples = Array.isArray(p.examples) && p.examples.length ? ` (e.g. ${p.examples.slice(0, 5).join(', ')})` : '';
-          return `${p.sources[0]} and ${p.sources[1]} share ${fmtInt(p.keys)} keys${examples}`;
-        }).join('; ');
-        parts.push(el('p', {
-          class: 'sp-note sp-note-warn',
-          title: `${detail}. Where two sources have a key, the source the server imported later wins.`,
-        }, `⚠ ${involved.size} sources overlap`));
-      }
-      // A source that covers no genome of any loaded database is reported separately.
-      const unused = sources.map((s) => s.name).filter((name) => !covered.has(name));
-      if (unused.length) {
-        parts.push(el('p', { class: 'sp-note' }, 'Not used by a loaded database: ', el('b', { text: unused.join(', ') })));
-      }
+    }
+    if (sources.length) {
+      parts.push(el('div', { class: 'sp-sources' },
+        el('span', { class: 'sp-sources-label', text: 'Taxonomy sources' }),
+        el('ul', { class: 'sp-source-list' }, sources.map((s) =>
+          el('li', { class: 'sp-src', title: sourceTitle(s), text: s.name })))));
+    }
+    // The server lists each overlapping pair once, with its shared keys and examples.
+    const overlaps = Array.isArray(meta.taxonomy_overlaps)
+      ? meta.taxonomy_overlaps.filter((p) => p && Array.isArray(p.sources) && p.sources.length === 2) : [];
+    if (overlaps.length) {
+      const involved = new Set();
+      for (const p of overlaps) for (const name of p.sources) involved.add(name);
+      const detail = overlaps.map((p) => {
+        const examples = Array.isArray(p.examples) && p.examples.length ? ` (e.g. ${p.examples.slice(0, 5).join(', ')})` : '';
+        return `${p.sources[0]} and ${p.sources[1]} share ${fmtInt(p.keys)} keys${examples}`;
+      }).join('; ');
+      parts.push(el('p', {
+        class: 'sp-note sp-note-warn',
+        title: `${detail}. Where two sources have a key, the source the server imported later wins.`,
+      }, `⚠ ${involved.size} sources overlap`));
     }
     ui.catalog.replaceChildren(...parts);
     ui.catalog.hidden = !parts.length;

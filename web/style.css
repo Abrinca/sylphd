@@ -186,11 +186,15 @@ a:hover { text-decoration-thickness: 2px; }
 .sp-table tbody tr:last-child th, .sp-table tbody tr:last-child td { border-bottom: 0; }
 .sp-table .sp-num { text-align: right; font-variant-numeric: tabular-nums; padding-right: 10px; }
 .sp-table th.sp-db-name { color: var(--fg); font-weight: 600; cursor: help; }
-.sp-src { cursor: help; }
-.sp-share { color: var(--muted); font-variant-numeric: tabular-nums; }
-.sp-note { margin: 0; font-size: .82rem; color: var(--muted); }
-.sp-note b { color: var(--fg); font-weight: 600; }
+.sp-sources { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.sp-sources-label {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-weight: 600;
+}
+.sp-source-list { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.sp-src { color: var(--fg); font-weight: 600; cursor: help; overflow-wrap: anywhere; }
 .sp-note-warn {
+  margin: 0; font-size: .82rem;
   border-left: 3px solid color-mix(in srgb, var(--distant) 55%, var(--border));
   padding-left: 8px; cursor: help;
   color: color-mix(in srgb, var(--distant) 80%, var(--fg)); font-weight: 600;

@@ -6,11 +6,6 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ## [0.3.3] - 2026-10-31
 
-### Added
-
-- `GET /info` reports `databases[].taxonomy_sources`: how many genomes of each database each
-  taxonomy source of the metadata file covers, computed once at startup.
-
 ### Changed
 
 - **Web: a compact server bar.** It leads with the server's host, which the server cannot fake,
@@ -18,8 +13,8 @@ All notable changes to `sylphd` are documented here. The format follows
   sources, the operator's name and text and the full privacy and terms text move into a *Details*
   panel that starts collapsed; Change server and reset are icon buttons.
 - **Web: the Details panel** lists Server, Operator, Sketch, Upload and Rate as one aligned
-  list, then a database table (genomes, taxonomy sources and how much of each database they
-  cover) with the overlap warning beneath it.
+  list, then a table of the databases with their genome counts and a list of the metadata file's
+  taxonomy sources, with the overlap warning beneath it.
 - **Web: usage statistics modal.** The `#usage` view is replaced with an accessible modal
   dialog over the current page, keeping the user's input, mode and results intact underneath. The
   modal opens from the status-line chip and can be dismissed by clicking outside, Escape, or the
