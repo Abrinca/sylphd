@@ -699,6 +699,7 @@ def create_app(
     if metadata_store is None and config.meta_path is not None:
         metadata_store = MetadataDB(config.meta_path)
     loaded.annotate_gtdb(metadata_store)
+    loaded.annotate_taxonomy(metadata_store)
 
     routes = [
         Route("/", _index, methods=["GET"]),

@@ -25,7 +25,7 @@
     status: $('status'), statusText: document.querySelector('#status .status-text'),
     statusDetail: $('status-detail'), catalog: $('sp-catalog'),
     panel: $('server-panel'), spIdentity: $('sp-identity'), spRetry: $('sp-retry'),
-    spDetails: $('sp-details'), spDetailsToggle: $('sp-details-toggle'), spDetailsAddr: $('sp-details-addr'),
+    spDetails: $('sp-details'), spDetailsToggle: $('sp-details-toggle'),
     spPrivacyUsage: $('sp-privacy-usage'), spPrivacyUsageLink: $('sp-privacy-usage-link'),
     spChange: $('sp-change'), spReset: $('sp-reset'), spConnect: $('sp-connect'), spAbout: $('sp-about'),
     spAboutBody: $('sp-about-body'), spAboutNote: $('sp-about-note'), banner: $('server-banner'), submitHint: $('submit-hint'),
@@ -326,8 +326,6 @@
 
   // Server identity in the compact bar (cleaned host, sylphd version, genome count, usage chip joined with ·).
   function renderPanelHead() {
-    if (ui.spDetailsAddr) ui.spDetailsAddr.textContent = API || '(no server configured)';
-
     const hostEl = el('strong', { class: 'sp-host', title: API || null, text: cleanHost(API) });
 
     const metaItems = [];
@@ -422,22 +420,13 @@
       const info = await res.json();
       serverInfo = info;
       const db = info.database || {};
-      const meta = info.metadata || {};
-      const dbs = Array.isArray(info.databases) ? info.databases : [];
-      const pooled = dbs.length > 1;
-      // Only call the database "GTDB r<release>" when a loaded database really is GTDB's:
-      // a fungi-only server can have GTDB metadata for taxonomy lookups without serving it.
-      const gtdbServed = dbs.some((d) => d.gtdb === true);
       setStatus('online', 'Server online');
       const lim = info.limits || {};
-      const fact = (label, value, title) => el('span', { class: 'fact', title: title || null },
-        el('span', { class: 'fact-label', text: label }), el('span', { class: 'fact-value', text: value }));
-      const facts = [];
+      const fact = (label, value, title) => el('div', { class: 'sp-fact' },
+        el('dt', { text: label }), el('dd', { title: title || null, text: value }));
+      const facts = [fact('Server', API || '(no server configured)', 'The API URL this page talks to')];
       const name = typeof info.name === 'string' && info.name.trim() ? info.name.trim() : '';
       if (name) facts.push(fact('Operator', name, 'Reported by the server operator'));
-      if (!pooled) {
-        facts.push(fact('Database', gtdbServed && meta.release ? `GTDB r${meta.release}` : (db.name || '?'), `Reference database: ${db.name || 'unknown'}`));
-      }
       if (isNum(db.c) && isNum(db.k)) facts.push(fact('Sketch', `c=${db.c} · k=${db.k}`, 'sylph subsampling rate c and k-mer size k; sketches must match (same k, c no larger than this)'));
       if (isNum(lim.max_upload_mb)) {
         facts.push(fact('Upload', `≤ ${lim.max_upload_mb} MB`, 'Maximum size of the sketch you can send, not of your sequence files. Typical sketch sizes are listed in the public-server guide under "Sizing the upload limit" (docs/guides/public-server/).'));
@@ -446,8 +435,7 @@
         const w = Math.round(lim.rate_limit.window_seconds);
         facts.push(fact('Rate', `${lim.rate_limit.count} / ${w === 60 ? 'min' : `${w} s`}`, 'Requests allowed per client address'));
       }
-      const frag = facts.length ? [el('span', { class: 'facts' }, ...facts)] : [];
-      ui.statusDetail.replaceChildren(...frag);
+      ui.statusDetail.replaceChildren(el('dl', { class: 'sp-facts' }, ...facts));
       if (ui.spPrivacyUsage) ui.spPrivacyUsage.hidden = !usageOn();
       renderPanelHead();
       renderAbout();
@@ -472,44 +460,66 @@
     }
   }
 
-  // Databases (only when the server pools several) and the taxonomy sources of a format 3
-  // metadata file. A single-database server without taxonomy sources shows nothing here, so
-  // its panel is unchanged.
+  // The server's databases as one small table: genomes (right-aligned) and the taxonomy sources
+  // that cover them, computed by the server at startup. A source's share is only spelled out
+  // when it covers less than all of the database's genomes.
   function renderCatalog() {
     const info = serverInfo;
-    const parts = [];
-    const dbs = info && Array.isArray(info.databases) ? info.databases : [];
-    if (dbs.length > 1) {
-      parts.push(el('div', { class: 'sp-group' },
-        el('span', { class: 'sp-group-label', text: 'Databases' }),
-        el('ul', { class: 'sp-dbs' }, dbs.map((d) => {
-          const twoStage = d.kind === 'two-stage';
-          const kind = twoStage ? '.syl2db' : '.syldb';
-          return el('li', {
-            class: 'sp-db',
-            title: `${d.name}${d.file && d.file !== d.name ? ` (${d.file})` : ''}: ${kind === '.syl2db' ? 'two-stage database' : 'plain database'}`,
-          },
-          el('span', { class: 'sp-db-name', text: d.name || d.file || '?' }),
-          el('span', { class: 'sp-db-kind', text: kind }),
-          isNum(d.genomes) ? el('span', { class: 'sp-db-num', text: `${fmtInt(d.genomes)} genomes` }) : null,
-          isNum(d.c) && isNum(d.k) ? el('span', { class: 'sp-db-num', text: `c=${d.c} · k=${d.k}` }) : null);
-        }))));
-    }
+    const dbs = info && Array.isArray(info.databases)
+      ? info.databases.filter((d) => d && typeof d === 'object') : [];
     const meta = (info && info.metadata) || {};
-    const sources = info && info.metadata && Array.isArray(info.metadata.taxonomy_sources)
-      ? info.metadata.taxonomy_sources.filter((s) => s && typeof s.name === 'string') : [];
-    if (sources.length) {
-      const chips = sources.map((s) => el('span', {
-        class: 'sp-chip',
-        title: [
-          s.kind === 'metadata' ? 'the GTDB metadata of this server' : 'imported sylph-tax file',
-          s.origin ? `origin: ${s.origin}` : '',
-          s.md5 ? `md5: ${s.md5}` : '',
-          s.has_host ? 'carries virus hosts' : '',
-        ].filter(Boolean).join('\n'),
-      },
-      el('span', { class: 'sp-chip-name', text: s.name }),
-      isNum(s.keys) ? el('span', { class: 'sp-chip-num', text: `${fmtInt(s.keys)} keys` }) : null));
+    const sources = Array.isArray(meta.taxonomy_sources)
+      ? meta.taxonomy_sources.filter((s) => s && typeof s.name === 'string') : [];
+    const byName = new Map(sources.map((s) => [s.name, s]));
+    const sourceTitle = (s) => [
+      s.kind === 'metadata' ? 'the GTDB metadata of this server' : 'imported sylph-tax file',
+      s.origin ? `origin: ${s.origin}` : '',
+      s.md5 ? `md5: ${s.md5}` : '',
+      s.has_host ? 'carries virus hosts' : '',
+    ].filter(Boolean).join('\n') || null;
+    const parts = [];
+    if (dbs.length) {
+      // Only say how a database was sketched when the databases disagree.
+      const mixedSketch = dbs.some((d) => d.c !== dbs[0].c || d.k !== dbs[0].k);
+      const head = el('tr', null,
+        el('th', { scope: 'col', text: 'Database' }),
+        el('th', { scope: 'col', class: 'sp-num', text: 'Genomes' }),
+        mixedSketch ? el('th', { scope: 'col', text: 'Sketch' }) : null,
+        el('th', { scope: 'col', text: 'Taxonomy source' }));
+      const covered = new Set();
+      const rows = dbs.map((d) => {
+        const twoStage = d.kind === 'two-stage';
+        const kind = twoStage ? '.syl2db' : '.syldb';
+        const file = has(d.file) ? String(d.file) : '';
+        const name = has(d.name) ? String(d.name) : (file || '?');
+        const title = [file && file !== name ? file : '', kind, twoStage ? 'two-stage database' : 'plain database']
+          .filter(Boolean).join('\n');
+        const cells = Array.isArray(d.taxonomy_sources)
+          ? d.taxonomy_sources.filter((c) => c && typeof c.name === 'string') : [];
+        let sourceCell = '–';
+        if (cells.length) {
+          const kids = [];
+          cells.forEach((c, i) => {
+            covered.add(c.name);
+            const partial = isNum(d.genomes) && isNum(c.genomes) && c.genomes < d.genomes;
+            const share = partial && d.genomes > 0
+              ? ` (${Math.min(99, Math.round((c.genomes * 100) / d.genomes))} %)` : '';
+            if (i) kids.push(', ');
+            kids.push(el('span', { class: 'sp-src', title: sourceTitle(byName.get(c.name) || {}) }, c.name));
+            if (share) kids.push(el('span', { class: 'sp-share', text: share }));
+          });
+          sourceCell = kids;
+        }
+        return el('tr', null,
+          el('th', { scope: 'row', class: 'sp-db-name', title }, name),
+          el('td', { class: 'sp-num', text: isNum(d.genomes) ? fmtInt(d.genomes) : '–' }),
+          mixedSketch
+            ? el('td', { class: 'sp-num', text: isNum(d.c) && isNum(d.k) ? `c=${d.c} · k=${d.k}` : '–' })
+            : null,
+          el('td', { class: 'sp-sources' }, sourceCell));
+      });
+      parts.push(el('div', { class: 'sp-table-wrap' }, el('table', { class: 'sp-table' },
+        el('thead', null, head), el('tbody', null, ...rows))));
       // The server lists each overlapping pair once, with its shared keys and examples.
       const overlaps = Array.isArray(meta.taxonomy_overlaps)
         ? meta.taxonomy_overlaps.filter((p) => p && Array.isArray(p.sources) && p.sources.length === 2) : [];
@@ -520,14 +530,16 @@
           const examples = Array.isArray(p.examples) && p.examples.length ? ` (e.g. ${p.examples.slice(0, 5).join(', ')})` : '';
           return `${p.sources[0]} and ${p.sources[1]} share ${fmtInt(p.keys)} keys${examples}`;
         }).join('; ');
-        chips.push(el('span', {
-          class: 'sp-chip sp-chip-warn',
+        parts.push(el('p', {
+          class: 'sp-note sp-note-warn',
           title: `${detail}. Where two sources have a key, the source the server imported later wins.`,
         }, `⚠ ${involved.size} sources overlap`));
       }
-      parts.push(el('div', { class: 'sp-group' },
-        el('span', { class: 'sp-group-label', text: sources.length === 1 ? 'Taxonomy source' : 'Taxonomy sources' }),
-        el('div', { class: 'sp-chips' }, chips)));
+      // A source that covers no genome of any loaded database is reported separately.
+      const unused = sources.map((s) => s.name).filter((name) => !covered.has(name));
+      if (unused.length) {
+        parts.push(el('p', { class: 'sp-note' }, 'Not used by a loaded database: ', el('b', { text: unused.join(', ') })));
+      }
     }
     ui.catalog.replaceChildren(...parts);
     ui.catalog.hidden = !parts.length;

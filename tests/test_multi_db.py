@@ -236,7 +236,7 @@ class TestPooledMatchesPysylph:
         assert entry["file"] == "ecoli.syl2db"
         # /info is public: file names only, never absolute paths.
         assert "path" not in entry and "path" not in info["database"]
-        assert {key: value for key, value in entry.items() if key not in {"file", "kind", "gtdb"}} == info["database"]
+        assert {key: value for key, value in entry.items() if key not in {"file", "kind", "gtdb", "taxonomy_sources"}} == info["database"]
         assert entry["kind"] == "two-stage"
         assert entry["gtdb"] is False  # this server has no metadata file
 

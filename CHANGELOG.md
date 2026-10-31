@@ -4,7 +4,12 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.3] - 2026-10-31
+
+### Added
+
+- `GET /info` reports `databases[].taxonomy_sources`: how many genomes of each database each
+  taxonomy source of the metadata file covers, computed once at startup.
 
 ### Changed
 
@@ -12,6 +17,9 @@ All notable changes to `sylphd` are documented here. The format follows
   then the version, genome count and usage chip, plus one privacy line. Limits, databases, taxonomy
   sources, the operator's name and text and the full privacy and terms text move into a *Details*
   panel that starts collapsed; Change server and reset are icon buttons.
+- **Web: the Details panel** lists Server, Operator, Sketch, Upload and Rate as one aligned
+  list, then a database table (genomes, taxonomy sources and how much of each database they
+  cover) with the overlap warning beneath it.
 - **Web: usage statistics modal.** The `#usage` view is replaced with an accessible modal
   dialog over the current page, keeping the user's input, mode and results intact underneath. The
   modal opens from the status-line chip and can be dismissed by clicking outside, Escape, or the
@@ -652,6 +660,7 @@ server with a sketching client: the database is loaded once and shared, clients 
   for Linux x86_64 and aarch64, CPython 3.14, so a production server can install without a Rust
   toolchain.
 
+[0.3.3]: https://github.com/Abrinca/sylphd/releases/tag/v0.3.3
 [0.3.2]: https://github.com/Abrinca/sylphd/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Abrinca/sylphd/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Abrinca/sylphd/releases/tag/v0.3.0

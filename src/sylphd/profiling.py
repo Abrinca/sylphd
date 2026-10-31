@@ -134,6 +134,11 @@ class LoadedDatabase:
         #: :meth:`DatabaseSet.annotate_gtdb`; the web panel only says "GTDB
         #: r<release>" when a loaded database really is GTDB's.
         self.gtdb = False
+        #: How many of this database's genomes each taxonomy source covers
+        #: (``[{"name": ..., "genomes": n}]``, sources with n > 0 only, in
+        #: source order).  Set at startup by
+        #: :meth:`DatabaseSet.annotate_taxonomy`; empty without metadata.
+        self.taxonomy_sources: list[dict[str, Any]] = []
 
     def _plain_parameters(self) -> tuple[int, int]:
         """``k`` and the smallest ``c`` over the genomes of a plain database.
@@ -188,6 +193,7 @@ class LoadedDatabase:
             "screen_c": self.screen_c,
             "two_stage": self.two_stage,
             "gtdb": self.gtdb,
+            "taxonomy_sources": self.taxonomy_sources,
         }
 
     def genome_names(self, limit: int) -> list[str]:
@@ -376,6 +382,23 @@ class DatabaseSet:
             return
         for database in self.databases:
             database.gtdb = database.serves_gtdb(metadata, sample)
+
+    def annotate_taxonomy(self, metadata: MetadataDB | None) -> None:
+        """Record on each database how many genomes each taxonomy source covers.
+
+        ``/info`` reports it per database; it is computed once here and never
+        per request.  Reading every genome name of a two-stage database
+        decodes its genomes, so this is startup work.  Without metadata every
+        list is empty.
+        """
+        for database in self.databases:
+            database.taxonomy_sources = (
+                []
+                if metadata is None
+                else metadata.taxonomy_coverage(
+                    database.genome_names(database.genomes)
+                )
+            )
 
     # -- requests --------------------------------------------------------
 

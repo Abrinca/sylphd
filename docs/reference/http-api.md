@@ -37,7 +37,7 @@ with no `Content-Encoding`. A response is compressed once: a reverse proxy in fr
 ## `GET /health`
 
 ```json
-{"status": "ok", "service": "sylphd", "version": "0.3.2", "uptime_seconds": 12.345,
+{"status": "ok", "service": "sylphd", "version": "0.3.3", "uptime_seconds": 12.345,
  "jobs_running": 1, "jobs_queued": 0}
 ```
 
@@ -66,8 +66,12 @@ Reports:
   `kind` (`two-stage` for a `.syl2db`, `plain` for a `.syldb`), `size`, `sha256`,
   `genomes`, `c`, `k`, `screen_c`, `two_stage` and `gtdb` (`true` when a sample of up to 100
   genome names of the database are GTDB accessions of the metadata file; a fungi or UHGV server
-  that has GTDB metadata only for taxonomy lookups reports `false`). Results carry no
-  per-database field: a hit belongs to the database whose taxonomy it has;
+  that has GTDB metadata only for taxonomy lookups reports `false`). `taxonomy_sources` says how
+  many genomes of the database each taxonomy source of the metadata file covers
+  (`[{"name": ..., "genomes": n}]`, only sources with `n > 0`, in source order; `[]` without
+  metadata), computed once at startup: a genome counts for a source when sylph-tax's probe for its
+  genome name resolves through that source, so a key shared by two sources counts for both.
+  Results carry no per-database field: a hit belongs to the database whose taxonomy it has;
 - `metadata`: `file` (the base name of the SQLite file), `size`, `columns`, `rows`, `release`,
   `built`, `format_version`, `reps_only` and `sources`, or `null` without `--meta`. It also carries `taxonomy_sources` — one object per
   source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`

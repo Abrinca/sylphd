@@ -307,6 +307,11 @@ def sylphtax_probes(genome_file: str, contig_name: str) -> SylphTaxProbes:
     )
 
 
+#: How many genome names :meth:`MetadataDB.taxonomy_coverage` probes at once:
+#: large enough to keep the SQL statements few, small enough that the probe
+#: keys of a 170k-genome database are never all in memory.
+COVERAGE_CHUNK = 20_000
+
 #: The columns a resolved hit carries (format 3).  They are *virtual*: they are
 #: not in the ``metadata`` view, ``resolve`` fills them.
 HIT_TAXONOMY_COLUMNS: tuple[str, ...] = (
@@ -559,6 +564,39 @@ class MetadataDB:
     def source_names(self) -> list[str]:
         """Names of the taxonomy sources, in ``ord`` order."""
         return [source.name for source in self._sources]
+
+    def taxonomy_coverage(self, genomes: Iterable[str]) -> list[dict[str, object]]:
+        """How many of ``genomes`` each taxonomy source resolves, in ``ord`` order.
+
+        A source covers a genome when one of sylph-tax's probe keys for the
+        genome name (as a hit without a contig) resolves through that source,
+        which is the lookup :meth:`resolve` does, restricted per source so a
+        key shared by two sources counts for both.  The server computes this
+        once at startup for ``/info``'s ``databases[].taxonomy_sources``, so
+        it chunks the names and keeps only the counts.  Sources covering no
+        genome are left out; without sources the result is empty.
+        """
+        names = list(dict.fromkeys(str(name) for name in genomes if name))
+        if not self._sources or not names:
+            return []
+        covered = [0] * len(self._sources)
+        for start in range(0, len(names), COVERAGE_CHUNK):
+            probes = [
+                sylphtax_probes(name, "") for name in names[start : start + COVERAGE_CHUNK]
+            ]
+            keys = {key for probe in probes for key in probe.probe_keys()}
+            for index, source in enumerate(self._sources):
+                entries = self._taxonomy_entries(keys, {source.name})
+                covered[index] += sum(
+                    1
+                    for probe in probes
+                    if any(key in entries for key in probe.probe_keys())
+                )
+        return [
+            {"name": source.name, "genomes": count}
+            for source, count in zip(self._sources, covered)
+            if count
+        ]
 
     def _chunked_lookup(self, accessions: Sequence[str]) -> dict[str, dict[str, object]]:
         unique = list(dict.fromkeys(accession for accession in accessions if accession))
