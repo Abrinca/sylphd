@@ -13,27 +13,18 @@
 //!   the record removed, and greedy minimum spacing of 30 bp along it.
 //!   That count is the exact denominator of the contig-relative ANI.
 //!
-//! Ported from:
-//! * sylph (MIT OR Apache-2.0, Copyright (c) 2023 Jim Shaw), commit
-//!   4b5c2beb05312d9da9006529b12ad24ec47f0914:
-//!   `src/seeding.rs` `fmh_seeds_positions` (lines 148-215),
-//!   `src/avx2_seeding.rs` `extract_markers_avx2_positions` (lines 151-273),
-//!   `src/sketch.rs` `extract_markers_positions` (lines 72-94) and the
-//!   duplicate/spacing part of `sketch_genome` (lines 628-655).
-//! * pysylph (MIT, Martin Larralde), branch `multi-db`,
-//!   `Sketcher.sketch_genome` (`src/pysylph/lib.rs` 1056-1141), which
-//!   hard-codes `min_spacing = 30`.
-//!
-//! The sample sketch is built by the same [`SketchBuilder`] the read sketcher
-//! uses, so its bytes are the same ones `push` would produce for that record.
+//! Both come from sylph: the sample sketch from [`SketchBuilder`] (a
+//! `ReadSketcher`), the genome-style count from one
+//! [`sylph::sketchers::GenomeSketcher`] per record (i.e.
+//! `sketch_genome_individual`).
 
 use std::collections::VecDeque;
 
-use fxhash::FxHashSet;
+use sylph::seeding::Seeding;
+use sylph::sketchers::GenomeSketcher;
 
 use crate::gzip::GzipDecoder;
 use crate::parser::{record_name, RecordParser};
-use crate::seeding::{Seeding, BYTE_TO_SEQ};
 use crate::sketch::{count_gc, SketchBuilder, DEFAULT_FPR};
 
 /// pysylph's `Sketcher` (and sylph's CLI default) minimum spacing.
@@ -50,107 +41,13 @@ pub const MAX_RECORDS: u64 = 1_000_000;
 /// CLI. Checked while parsing, before the buffers grow.
 pub const MAX_RECORD_LENGTH: usize = 50_000_000;
 
-/// The `(position, hash)` markers of one sequence, in the order sylph's
-/// seeding emits them. `position` is the end offset of the k-mer in the
-/// sequence (sylph's convention, used by the spacing filter).
-pub type Markers = Vec<(usize, u64)>;
-
-/// Port of sylph `src/seeding.rs` `fmh_seeds_positions` (lines 148-215): every
-/// k-mer of the sequence, no end trimming.
-pub fn fmh_seeds_positions(string: &[u8], out: &mut Markers, c: usize, k: usize) {
-    if string.len() < k {
-        return;
-    }
-    let mut rolling_f: u64 = 0;
-    let mut rolling_r: u64 = 0;
-
-    let reverse_shift = 2 * (k - 1);
-    let mask = u64::MAX >> (std::mem::size_of::<u64>() * 8 - 2 * k);
-    let rev_mask = !(3u64 << (2 * k - 2));
-    let threshold = u64::MAX / (c as u64);
-
-    for i in 0..k - 1 {
-        let nuc_f = BYTE_TO_SEQ[string[i] as usize] as u64;
-        let nuc_r = 3 - nuc_f;
-        rolling_f <<= 2;
-        rolling_f |= nuc_f;
-        rolling_r >>= 2;
-        rolling_r |= nuc_r << reverse_shift;
-    }
-    for (i, &byte) in string.iter().enumerate().skip(k - 1) {
-        let nuc_f = BYTE_TO_SEQ[byte as usize] as u64;
-        let nuc_r = 3 - nuc_f;
-        rolling_f = ((rolling_f << 2) | nuc_f) & mask;
-        rolling_r = ((rolling_r >> 2) & rev_mask) | (nuc_r << reverse_shift);
-
-        let hash = crate::seeding::mm_hash64(rolling_f.min(rolling_r));
-        if hash < threshold {
-            out.push((i, hash));
-        }
-    }
-}
-
-/// Port of sylph `src/avx2_seeding.rs` `extract_markers_avx2_positions`
-/// (lines 151-273): the same k-mers as `fmh_seeds_positions`, except that the
-/// read is split into four equal segments and the last
-/// `(n - k + 1) % 4` k-mers are dropped, and nothing is emitted for
-/// `n < 2k`. This is what sylph and pysylph do on x86_64 with AVX2.
-pub fn fmh_seeds_avx2_positions(string: &[u8], out: &mut Markers, c: usize, k: usize) {
-    if string.len() < k {
-        return;
-    }
-    let seg = (string.len() - k + 1) / 4;
-    if string.len() < 2 * k || seg == 0 {
-        return;
-    }
-    let reverse_shift = 2 * (k - 1);
-    let mask = u64::MAX >> (64 - 2 * k);
-    let rev_mask = !(3u64 << (2 * k - 2));
-    let threshold = u64::MAX / (c as u64);
-
-    let mut f = [0u64; 4];
-    let mut r = [0u64; 4];
-    for i in 0..k - 1 {
-        for s in 0..4 {
-            let nuc_f = BYTE_TO_SEQ[string[s * seg + i] as usize] as u64;
-            f[s] = (f[s] << 2) | nuc_f;
-            r[s] = (r[s] >> 2) | ((3 - nuc_f) << reverse_shift);
-        }
-    }
-    for i in k - 1..seg + k - 1 {
-        for s in 0..4 {
-            let nuc_f = BYTE_TO_SEQ[string[s * seg + i] as usize] as u64;
-            f[s] = ((f[s] << 2) | nuc_f) & mask;
-            r[s] = ((r[s] >> 2) & rev_mask) | ((3 - nuc_f) << reverse_shift);
-            let hash = crate::seeding::mm_hash64(f[s].min(r[s]));
-            if hash < threshold {
-                // sylph reports the end offset as `s * seg + i`
-                out.push((s * seg + i, hash));
-            }
-        }
-    }
-}
-
-/// `(position, hash)` markers with the configured seeding behaviour.
-pub fn extract_markers_positions(
-    seeding: Seeding,
-    string: &[u8],
-    out: &mut Markers,
-    c: usize,
-    k: usize,
-) {
-    match seeding {
-        Seeding::Avx2 => fmh_seeds_avx2_positions(string, out, c, k),
-        Seeding::Scalar => fmh_seeds_positions(string, out, c, k),
-    }
-}
-
 /// The genome-style k-mers of one sequence, in sketch order: selected hashes
 /// that occur exactly once in the sequence, greedily spaced by more than
 /// `min_spacing` end positions.
 ///
 /// Line by line `Sketcher.sketch_genome(name, [seq]).kmers` for a single
-/// contig (pysylph `src/pysylph/lib.rs` 1108-1140).
+/// contig: one [`GenomeSketcher`] fed that contig, which is exactly what
+/// `sketch_genome_individual` does.
 pub fn genome_kmers(
     seeding: Seeding,
     seq: &[u8],
@@ -158,32 +55,9 @@ pub fn genome_kmers(
     k: usize,
     min_spacing: usize,
 ) -> Vec<u64> {
-    let mut markers: Markers = Vec::new();
-    extract_markers_positions(seeding, seq, &mut markers, c, k);
-    // pysylph sorts `(contig, pos, hash)`; one contig leaves (pos, hash)
-    markers.sort_unstable();
-
-    let mut seen: FxHashSet<u64> = FxHashSet::default();
-    let mut duplicated: FxHashSet<u64> = FxHashSet::default();
-    for &(_, hash) in &markers {
-        if !seen.insert(hash) {
-            duplicated.insert(hash);
-        }
-    }
-
-    let mut kept = Vec::with_capacity(markers.len());
-    let mut last_pos = 0usize;
-    for &(pos, hash) in &markers {
-        if duplicated.contains(&hash) {
-            continue;
-        }
-        // sylph: `last_pos == 0 || pos - last_pos > min_spacing`
-        if last_pos == 0 || pos - last_pos > min_spacing {
-            kept.push(hash);
-            last_pos = pos;
-        }
-    }
-    kept
+    let mut sketcher = GenomeSketcher::new(c, k, min_spacing, false, seeding);
+    sketcher.push_contig(b"", seq);
+    sketcher.finish(String::new()).genome_kmers
 }
 
 /// One finished record.
@@ -394,9 +268,10 @@ impl ContigSketcher {
 mod tests {
     use super::*;
 
-    /// Straightforward reference: every k-mer window, canonical hash via
-    /// `map`-style 2-bit packing, per-window hashes, dedupe on the hash, then
-    /// the greedy spacing over window starts (converted to end positions).
+    /// Straightforward reference for the genome-style count: every k-mer
+    /// window of the sequence, canonical hash via 2-bit packing, drop the tail
+    /// that sylph's AVX2 kernel never visits, dedupe on the hash, then the
+    /// greedy spacing over end positions.
     fn reference_genome_kmers(seq: &[u8], c: usize, k: usize, min_spacing: usize) -> Vec<u64> {
         let code = |b: u8| -> u64 {
             match b.to_ascii_uppercase() {
@@ -410,8 +285,10 @@ mod tests {
         };
         let threshold = u64::MAX / (c as u64);
         let mut hashes: Vec<(usize, u64)> = Vec::new();
-        if seq.len() >= k {
-            for start in 0..=seq.len() - k {
+        if seq.len() >= k && seq.len() >= 2 * k {
+            // the AVX2 positions kernel only visits the first 4 * seg windows
+            let seen = 4 * ((seq.len() - k + 1) / 4);
+            for start in 0..seen {
                 let mut forward = 0u64;
                 let mut reverse = 0u64;
                 for i in 0..k {
@@ -419,7 +296,7 @@ mod tests {
                     forward = (forward << 2) | nuc;
                     reverse |= (3 - nuc) << (2 * i);
                 }
-                let hash = crate::seeding::mm_hash64(forward.min(reverse));
+                let hash = sylph::seeding::mm_hash64(forward.min(reverse));
                 if hash < threshold {
                     hashes.push((start + k - 1, hash));
                 }
@@ -459,9 +336,9 @@ mod tests {
     fn genome_kmers_matches_reference() {
         let c = 20;
         for k in [21usize, 31] {
-            for len in [0usize, 1, 10, k - 1, k, k + 1, 4 * k, 1000, 5000, 20_000] {
+            for len in [0usize, 1, 10, k - 1, k, k + 1, 2 * k, 4 * k, 1000, 5000, 20_000] {
                 let seq = random_seq(len as u64 * 31 + k as u64, len);
-                let got = genome_kmers(Seeding::Scalar, &seq, c, k, DEFAULT_MIN_SPACING);
+                let got = genome_kmers(Seeding::Avx2Compat, &seq, c, k, DEFAULT_MIN_SPACING);
                 let want = reference_genome_kmers(&seq, c, k, DEFAULT_MIN_SPACING);
                 assert_eq!(got, want, "k={k} len={len}");
             }
@@ -471,36 +348,32 @@ mod tests {
     #[test]
     fn genome_kmers_spacing_and_duplicates() {
         let seq = random_seq(7, 3000);
-        let dense = genome_kmers(Seeding::Scalar, &seq, 1, 31, 0);
-        let spaced = genome_kmers(Seeding::Scalar, &seq, 1, 31, DEFAULT_MIN_SPACING);
+        let dense = genome_kmers(Seeding::Avx2Compat, &seq, 1, 31, 0);
+        let spaced = genome_kmers(Seeding::Avx2Compat, &seq, 1, 31, DEFAULT_MIN_SPACING);
         assert!(spaced.len() < dense.len());
         assert_eq!(dense, reference_genome_kmers(&seq, 1, 31, 0));
 
         // a tandem repeat of one unit: every k-mer is repeated -> nothing left
         let unit = random_seq(11, 100);
         let tandem: Vec<u8> = unit.iter().copied().cycle().take(3000).collect();
-        assert!(genome_kmers(Seeding::Scalar, &tandem, 1, 31, 30).is_empty());
+        assert!(genome_kmers(Seeding::Avx2Compat, &tandem, 1, 31, 30).is_empty());
         // ... while the sample sketch keeps them
-        let mut builder = SketchBuilder::new(1, 31, true, DEFAULT_FPR, Seeding::Scalar).unwrap();
+        let mut builder = SketchBuilder::new(1, 31, true, DEFAULT_FPR, Seeding::Avx2Compat).unwrap();
         builder.add_single(&tandem);
         assert!(builder.kmers() > 0);
     }
 
     #[test]
-    fn avx2_positions_drop_the_tail_like_the_sample_path() {
-        // k=21: n-k+1 = 85 for n=105, so one k-mer is dropped per segment
+    fn avx2_positions_drop_the_tail_and_short_reads() {
+        // k=21: n-k+1 = 85 for n=105, so the AVX2 kernel visits 84 windows
         let seq = random_seq(3, 105);
-        let mut scalar = Vec::new();
-        let mut avx2 = Vec::new();
-        fmh_seeds_positions(&seq, &mut scalar, 1, 21);
-        fmh_seeds_avx2_positions(&seq, &mut avx2, 1, 21);
-        assert!(avx2.len() < scalar.len());
-        // positions of the AVX2 markers are a subset of the scalar ones
-        for (pos, hash) in &avx2 {
-            assert!(scalar.contains(&(*pos, *hash)), "pos {pos}");
-        }
-        // reads shorter than 2k produce nothing in the AVX2 path
-        assert!(genome_kmers(Seeding::Avx2, &seq[..2 * 21 - 1], 1, 21, 30).is_empty());
+        let dense = genome_kmers(Seeding::Avx2Compat, &seq, 1, 21, 0);
+        assert_eq!(dense.len(), 4 * ((seq.len() - 21 + 1) / 4));
+        assert_eq!(dense, reference_genome_kmers(&seq, 1, 21, 0));
+
+        // reads shorter than 2k produce no genome-style k-mers in the AVX2 path
+        let short = &seq[..2 * 21 - 1];
+        assert!(genome_kmers(Seeding::Avx2Compat, short, 1, 21, 0).is_empty());
     }
 
     #[test]
@@ -508,28 +381,24 @@ mod tests {
         let fasta = b">a\nACGTACGTACGTACGTACGTACGT\n>b\nACGTACGTACGTACGTACGTACGT\n";
 
         // one record allowed: the second is refused
-        let mut s =
-            ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Scalar, 1, 0).unwrap();
+        let mut s = ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Avx2Compat, 1, 0).unwrap();
         s.push(fasta).unwrap();
         let error = s.end_file().unwrap_err();
         assert!(error.contains("more than 1 records"), "{error}");
         assert!(error.contains("sylphd command line"), "{error}");
 
         // a record longer than the limit is refused while parsing ...
-        let mut s =
-            ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Scalar, 0, 10).unwrap();
+        let mut s = ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Avx2Compat, 0, 10).unwrap();
         let error = s.push(fasta).unwrap_err();
         assert!(error.contains("per-record limit"), "{error}");
 
         // ... also when it is split over several FASTA lines
-        let mut s =
-            ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Scalar, 0, 10).unwrap();
+        let mut s = ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Avx2Compat, 0, 10).unwrap();
         let error = s.push(b">a\nACGTAC\nGTACGT\n").unwrap_err();
         assert!(error.contains("per-record limit"), "{error}");
 
         // 0 means unlimited
-        let mut s =
-            ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Scalar, 0, 0).unwrap();
+        let mut s = ContigSketcher::with_limits(1, 21, 1, 30, Seeding::Avx2Compat, 0, 0).unwrap();
         s.push(fasta).unwrap();
         s.end_file().unwrap();
         assert_eq!(s.seen, 2);
@@ -538,7 +407,7 @@ mod tests {
     #[test]
     fn streams_records_and_sketches_only_long_enough_ones() {
         let fasta = b">a first\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n>b\nACGT\n>c\n";
-        let mut s = ContigSketcher::new(1, 21, 20, 30, Seeding::Scalar).unwrap();
+        let mut s = ContigSketcher::new(1, 21, 20, 30, Seeding::Avx2Compat).unwrap();
         s.push(fasta).unwrap();
         s.end_file().unwrap();
         let records: Vec<ContigRecord> = std::iter::from_fn(|| s.take_next()).collect();

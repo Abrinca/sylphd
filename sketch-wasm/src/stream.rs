@@ -10,9 +10,10 @@
 
 use std::collections::VecDeque;
 
+use sylph::seeding::Seeding;
+
 use crate::gzip::GzipDecoder;
 use crate::parser::RecordParser;
-use crate::seeding::Seeding;
 use crate::sketch::{SketchBuilder, DEFAULT_FPR};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -57,7 +58,8 @@ pub struct StreamSketcher {
 
 impl StreamSketcher {
     pub fn new(c: usize, k: usize, deduplicate: bool) -> Result<Self, String> {
-        Self::with_options(c, k, deduplicate, DEFAULT_FPR, Seeding::default())
+        // x86_64/pysylph parity is the browser's default (see lib.rs)
+        Self::with_options(c, k, deduplicate, DEFAULT_FPR, Seeding::Avx2Compat)
     }
 
     pub fn with_options(

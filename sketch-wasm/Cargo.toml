@@ -3,7 +3,7 @@ name = "sylph-sketch-wasm"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-description = "Browser (WebAssembly) read sketching for sylphd: a minimal port of the code behind pysylph's Sketcher.sketch_single / sketch_paired."
+description = "Browser (WebAssembly) read sketching for sylphd, on top of the sylph library core (the code behind pysylph's Sketcher)."
 publish = false
 
 [lib]
@@ -11,18 +11,21 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wasm-bindgen = "=0.2.129"
-fxhash = "0.2"
+# The sylph library core: seeding, k-mer kernels and streaming sketchers.
+# `default-features = false` leaves out the CLI/needletail/rayon/... stack;
+# `approx-dedup` adds the cuckoo-filter paired-read dedup that pysylph's
+# `sketch_paired` uses by default.
+sylph = { git = "https://github.com/MrTomRod/sylph", branch = "sketch-core", default-features = false, features = ["approx-dedup"] }
 memchr = "2"
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 zlib-rs = { version = "0.6", default-features = false, features = ["std"] }
-rand = { version = "0.8", default-features = false }
-rand_xoshiro = "0.6"
-scalable_cuckoo_filter = "0.2"
 js-sys = "0.3"
-# `ScalableCuckooFilterBuilder::new()` calls `rand::thread_rng()`, which needs
-# a `getrandom` backend on wasm32-unknown-unknown. We replace that RNG with a
-# seeded one right away, so a custom (non-random) backend is registered in
-# `src/lib.rs` instead of pulling in the JS `crypto` glue.
+# `scalable_cuckoo_filter` (behind sylph's `approx-dedup`) calls
+# `rand::thread_rng()`, which needs a `getrandom` backend on
+# wasm32-unknown-unknown. sylph/the filter only use those bytes to seed an RNG
+# that is replaced by a seeded one immediately, so a custom (non-random)
+# backend is registered in `src/lib.rs` instead of pulling in the JS `crypto`
+# glue.
 getrandom = { version = "0.2", features = ["custom"] }
 
 [dev-dependencies]

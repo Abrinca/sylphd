@@ -1,7 +1,9 @@
-//! Browser read sketching for sylphd.
+//! Browser read sketching for sylphd, on top of the sylph library core.
 //!
-//! A minimal port of what pysylph's `Sketcher.sketch_single` /
-//! `sketch_paired` do (see `sketch.rs`), behind a streaming wasm-bindgen API:
+//! The k-mer seeding and the streaming sketchers are sylph's own
+//! (`sylph::seeding`, `sylph::sketchers`, the code behind pysylph); this crate
+//! adds the chunk-safe parser, the gzip decoder and a streaming wasm-bindgen
+//! API:
 //!
 //! ```js
 //! const s = new WasmSketcher(200, 31, true);
@@ -12,19 +14,18 @@
 pub mod contig;
 pub mod gzip;
 pub mod parser;
-pub mod seeding;
 pub mod sketch;
 pub mod stream;
 
+use sylph::seeding::Seeding;
 use wasm_bindgen::prelude::*;
 
 use contig::{ContigRecord, ContigSketcher};
-use seeding::Seeding;
 use stream::StreamSketcher;
 
-/// `rand::thread_rng()` is called (and its result discarded) by
-/// `ScalableCuckooFilterBuilder::new()`; the filter is then given a seeded RNG.
-/// Nothing depends on these bytes, so no entropy source is needed.
+/// `scalable_cuckoo_filter`'s builder (used by sylph's `approx-dedup` feature)
+/// calls `rand::thread_rng()` and discards the result; the filter is then given
+/// a seeded RNG. Nothing depends on these bytes, so no entropy source is needed.
 #[cfg(target_arch = "wasm32")]
 fn unused_getrandom(buf: &mut [u8]) -> Result<(), getrandom::Error> {
     for (i, byte) in buf.iter_mut().enumerate() {
@@ -49,8 +50,11 @@ fn js_err(message: String) -> JsError {
 impl WasmSketcher {
     /// `c`: subsampling rate (sylphd's database uses 200); `k`: 21 or 31;
     /// `deduplicate`: sylph's read dedup (default true). `scalar_seeding`:
-    /// emulate sylph on CPUs without AVX2 instead of on x86_64 with AVX2
-    /// (default false; see `seeding::Seeding`).
+    /// use this build's native seeding kernel instead of the portable
+    /// emulation of sylph's x86_64 AVX2 kernel (default false). The wasm32
+    /// native kernel is sylph's scalar one, i.e. pysylph on a CPU without
+    /// AVX2; the default is bit-identical to pysylph on x86_64 (see
+    /// `sylph::seeding::Seeding`).
     #[wasm_bindgen(constructor)]
     pub fn new(
         c: usize,
@@ -59,9 +63,9 @@ impl WasmSketcher {
         scalar_seeding: Option<bool>,
     ) -> Result<WasmSketcher, JsError> {
         let seeding = if scalar_seeding.unwrap_or(false) {
-            Seeding::Scalar
+            Seeding::Native
         } else {
-            Seeding::Avx2
+            Seeding::Avx2Compat
         };
         Ok(Self {
             inner: StreamSketcher::with_options(
@@ -260,9 +264,9 @@ impl WasmContigSketcher {
             contig::MAX_RECORD_LENGTH as u64,
         )? as usize;
         let seeding = if scalar_seeding.unwrap_or(false) {
-            Seeding::Scalar
+            Seeding::Native
         } else {
-            Seeding::Avx2
+            Seeding::Avx2Compat
         };
         Ok(Self {
             inner: ContigSketcher::with_limits(
