@@ -17,9 +17,8 @@ pure-Rust `zlib-rs` backend, compiled to wasm. Details below.
 
 | Path | |
 |---|---|
-| `src/seeding.rs` | k-mer hashing/seeding ported from sylph (scalar `fmh_seeds`, plus an emulation of sylph's x86_64 AVX2 path) |
-| `src/sketch.rs` | what pysylph's `Sketcher.sketch_single` / `sketch_paired` do: read dedup (exact set for single, scalable cuckoo filter for pairs), mean read length, bincode `SequencesSketch` writer |
-| `src/contig.rs` | per-contig mode: each FASTA/FASTQ record as its own sample sketch, plus its genome-style k-mer count (duplicate removal + 30 bp minimum spacing, as `Sketcher.sketch_genome`) |
+| `src/sketch.rs` | thin adapter over sylph's `ReadSketcher` / `PairedReadSketcher`: progress counters (reads/bases/gc), pysylph's mean read length, deterministic bincode `SequencesSketch` writer |
+| `src/contig.rs` | per-contig mode: each FASTA/FASTQ record as its own sample sketch (`ReadSketcher`), plus its genome-style k-mer count (sylph's `GenomeSketcher`: duplicate removal + 30 bp minimum spacing, as `Sketcher.sketch_genome`) |
 | `src/parser.rs` | streaming FASTQ/FASTA record parser (chunk-safe, CRLF, multi-line FASTA, header/name) |
 | `src/gzip.rs` | push/pull multi-member gzip decoder: own header/trailer/member loop around `flate2`'s raw inflate (`zlib-rs` backend), CRC32 inline, deferred or off |
 | `src/stream.rs` | single / two-stream paired / interleaved front end |
@@ -27,14 +26,17 @@ pure-Rust `zlib-rs` backend, compiled to wasm. Details below.
 | `tests/` | native equality tests against pysylph, node check of the wasm build, per-contig parity (`contigs_check.mjs`, `contigs_pipeline_check.mjs`), gzip tests, `browser_check.mjs` (`web/sketching.js` and its workers in Firefox/Chromium via playwright-core), `bench_gunzip.mjs`, `make_fixtures.py` |
 | `.cargo/config.toml` | builds wasm32 with `+simd128` |
 
-Ported code carries attribution comments with file and line numbers. Sources:
-[sylph](https://github.com/bluenote-1577/sylph) (MIT OR Apache-2.0, (c) 2023 Jim Shaw) at commit
-`4b5c2beb05312d9da9006529b12ad24ec47f0914` (MrTomRod/sylph, `expose-library-api`, the revision
-pysylph pins) and [pysylph](https://github.com/althonos/pysylph) (MIT, Martin Larralde), branch
-`multi-db`. No dependency on the `sylph` crate (it pulls in needletail, zlib-ng, rayon, clap ...);
-dependencies are `wasm-bindgen` (+`js-sys` for the per-contig record objects), `fxhash`, `memchr`,
-`scalable_cuckoo_filter` (+`rand`, `rand_xoshiro`), `flate2` (+`zlib-rs`). All build for
-`wasm32-unknown-unknown`.
+The k-mer seeding, read/duplicate handling and genome-style sketching are not
+reimplemented here: they come from the
+[sylph](https://github.com/bluenote-1577/sylph) library core (MIT OR
+Apache-2.0, (c) 2023 Jim Shaw; fork `MrTomRod/sylph`, branch `sketch-core`),
+the same kernels pysylph exposes. `sylph` is pulled with
+`default-features = false` (no needletail/rayon/clap/zlib-ng stack) plus
+`approx-dedup` (the seeded cuckoo filter behind pysylph's paired default).
+The rest of the dependencies are `wasm-bindgen` (+`js-sys` for the per-contig
+record objects), `memchr`, `flate2` (+`zlib-rs`) and `getrandom` (a custom,
+non-random backend for the filter's discarded `thread_rng()` seeding). All
+build for `wasm32-unknown-unknown`.
 
 ## Build and run
 
@@ -48,6 +50,10 @@ python3 -m http.server -d ../web 8799
 
 `build.sh` runs `wasm-opt -O3` if it is on `PATH` (not used for the numbers below).
 Any static file server works as long as it serves `.wasm` as `application/wasm`.
+
+The `sylph` dependency is a git dependency on branch `sketch-core`; `build.sh`
+uses `--locked`, so `Cargo.lock` pins that branch's commit. After the branch is
+pushed, regenerate the lock if its tip changed (`cargo update -p sylph`).
 
 JS API. The whole pipeline is in `web/` (`sketching.js` starts `decompress-worker.js` -> `sketch-worker.js`); the pieces:
 
@@ -139,8 +145,6 @@ All of these are identical (`SKETCH_WASM_BIG=1` adds a large ONT file, which you
 `node tests/node_check.mjs [--big]` (after `./build.sh` and `cargo test`) loads the **wasm32
 build** in node and compares its output byte for byte with the native sketches (32-bit
 `usize`, hashing etc. all agree, including paired mode).
-`tests/seedcheck/` compares the seeding functions with the sylph crate itself on 450k random
-reads (N and lower case included).
 `tests/gzip.rs`, and the parser tests in `tests/pysylph_equality.rs`, cover chunk boundaries
 (1-byte chunks), CRLF, missing final newline, multi-line FASTA, quality lines starting with `@`,
 corrupt/truncated gzip and a few malformed inputs.
@@ -173,14 +177,14 @@ entries (the wasm always writes them sorted). Tandem repeats give
 
 ### Differences and things to know
 
-* **Seeding differs between sylph builds.** `sketch::extract_markers` uses an AVX2 implementation
-  on x86_64 that splits each read into four segments and *drops the last `(n-k+1) mod 4` k-mers*
-  (and reads of exactly `k` bases); the scalar code (aarch64, no AVX2) considers all k-mers. So
-  pysylph's sketches already differ by CPU. Default here: the **AVX2 behaviour, emulated
-  in scalar code** (same k-mers and insertion order, bit-identical to pysylph on x86_64, which is
-  what the server and most users run). `scalar_seeding = true` gives the other behaviour, verified
-  against `sylph::seeding::fmh_seeds`. Statistically the two are equivalent (up to 3 k-mers per
-  read at the ends differ).
+* **Seeding differs between sylph builds.** sylph's AVX2 kernel on x86_64 splits each read into
+  four segments and *drops the last `(n-k+1) mod 4` k-mers* (and reads of exactly `k` bases); the
+  scalar code (aarch64, no AVX2) considers all k-mers, so pysylph's sketches already differ by
+  CPU. Default here: `sylph::seeding::Seeding::Avx2Compat`, the portable scalar emulation of the
+  AVX2 kernel (same k-mers and insertion order, bit-identical to pysylph on x86_64, which is what
+  the server and most users run). `scalar_seeding = true` passes `Seeding::Native`, which on
+  wasm32 is sylph's scalar kernel (pysylph on a CPU without AVX2). Statistically the two are
+  equivalent (up to 3 k-mers per read at the ends differ).
 * Entries are written sorted by k-mer; byte order otherwise as sylph's bincode layout (see
   `src/sylphd/sketchcheck.py`). `file_name` = the name passed to `finish`, `sample_name` = None.
 * Same restrictions as `Sketcher`: `k` is 21 or 31; the paired path uses the default `fpr`

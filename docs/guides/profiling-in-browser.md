@@ -112,7 +112,7 @@ see, so the summary shows "–" for them, and the result is marked *uploaded ske
 ## Building the sketcher
 
 The sketcher is the Rust crate in [`sketch-wasm/`](https://github.com/Abrinca/sylphd/tree/main/sketch-wasm),
-a minimal port of the code behind pysylph's `Sketcher`. The binaries are not committed: the Pages
+which runs sylph's own library core (the kernels behind pysylph's `Sketcher`) on WebAssembly. The binaries are not committed: the Pages
 workflow and `scripts/preview-pages.sh` build them into `web/wasm/` (needs `cargo`, the
 `wasm32-unknown-unknown` target and `wasm-bindgen-cli` 0.2.129). Serving `web/` without that
 directory still works; the Reads mode then says that the sketcher is missing.
