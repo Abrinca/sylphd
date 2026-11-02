@@ -269,7 +269,7 @@ dependencies = [
 [[package]]
 name = "sylph"
 version = "1.0.0"
-source = "git+https://github.com/MrTomRod/sylph?branch=sketch-core#b640bc011f8b9bd23010057b47c1c171c66aa657"
+source = "git+https://github.com/MrTomRod/sylph?branch=sketch-core#49e8f6effe568625339057cb24eb2ac04295da1a"
 dependencies = [
  "bincode",
  "fxhash",
