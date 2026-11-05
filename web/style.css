@@ -684,11 +684,18 @@ details.adv .options { margin-top: 10px; }
 .taxtree { width: 100%; }
 .taxtree-sunburst { aspect-ratio: 1; max-height: 680px; max-width: 680px; margin: 0 auto; }
 .taxtree-treemap { height: clamp(320px, 62vh, 620px); }
-.taxtree-host { margin-bottom: 14px; }
+.taxtree-host { position: relative; margin-bottom: 14px; }
+.taxtree-menu {
+  position: absolute; z-index: 5; max-width: min(340px, 90%); padding: 10px 12px; font-size: .88rem;
+  background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow);
+}
+.taxtree-menu-name { font-weight: 600; overflow-wrap: anywhere; }
+.taxtree-menu-path { margin-top: 2px; overflow-wrap: anywhere; }
+.taxtree-menu a { display: block; margin-top: 6px; }
 .taxtree-status { margin: 8px 0; font-size: .9rem; }
 .taxtree-error { color: var(--offline); }
-/* Reads in no database (sylph --estimate-unknown): hatched the other way from "not classified". */
-.seg-cat-unknown { background: repeating-linear-gradient(45deg, var(--muted) 0 2px, transparent 2px 5px); }
+/* Reads in no database (sylph --estimate-unknown): plain grey, not a taxon and not striped. */
+.seg-cat-unknown { background: var(--cat-other); }
 .more-rows { margin: 10px 0 0; }
 .more-rows:empty { display: none; }
 

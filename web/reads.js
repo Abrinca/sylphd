@@ -1026,6 +1026,7 @@
       body.replaceChildren(...abundanceBody(run).filter(Boolean));
       dlBtn.textContent = `Download sylphmpa (${taxonomyLabel(shownTaxonomy())})`;
       allBtn.hidden = shownTaxonomy() === 'tax';
+      svgBtn.hidden = !tree();
       // the sunburst and treemap show every source at every rank
       taxCtl.hidden = tree();
       rankCtl.hidden = tree();
@@ -1033,6 +1034,11 @@
     };
     dlBtn.addEventListener('click', () => downloadSylphmpa(run, shownTaxonomy()));
     // sylph-tax's own merged profile of every source, as `sylph-tax taxprof` writes it
+    // the sunburst or treemap as drawn (ECharts' SVG renderer), current zoom included
+    const svgBtn = el('button', { type: 'button', class: 'btn', text: 'Download SVG', onclick: () => {
+      const svg = treeHandle && treeHandle.svg();
+      if (svg) download(exportAs(run, `${view.chart}.svg`), svg, 'image/svg+xml');
+    } });
     const allBtn = el('button', { type: 'button', class: 'btn', title: TAXONOMY_TITLES.tax, text: 'Download sylphmpa (All sources)', onclick: () => downloadSylphmpa(run, 'tax') });
     allBtn.hidden = true;
     const taxonomies = taxonomiesWithData(sample);
@@ -1067,7 +1073,7 @@
             : 'Share of the reads (k-mers) assigned to the genome'],
           ['relative', 'Taxonomic', 'Share of the organisms, corrected for genome size'],
         ], view.metric, (v) => { choose('metric', v); draw(); })));
-    card.append(el('div', { class: 'card-head' }, el('h2', { text: 'Abundance' }), el('div', { class: 'export' }, dlBtn, payloadFor(sample, 'tax') ? allBtn : null)), controls, body);
+    card.append(el('div', { class: 'card-head' }, el('h2', { text: 'Abundance' }), el('div', { class: 'export' }, dlBtn, payloadFor(sample, 'tax') ? allBtn : null, svgBtn)), controls, body);
     draw();
     // the unknown fraction is a share of the sample, which estimated read counts do not give
     if (hasUnknown(run.result)) {

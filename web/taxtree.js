@@ -52,7 +52,8 @@
         if (tokens.length === 1) missing += value;
         continue;
       }
-      byPath.set(path, { ...parseToken(tokens[tokens.length - 1]), value, children: [] });
+      const token = tokens[tokens.length - 1];
+      byPath.set(path, { ...parseToken(token), token, value, children: [] });
     }
     const bins = new Map();
     for (const [path, node] of byPath) {
@@ -67,16 +68,16 @@
       bins.get(source).children.push(node);
       bins.get(source).value += node.value;
     }
-    const tidy = (node) => {
+    const tidy = (node, source) => {
       const names = [node.name];
       while (node.children.length === 1) {
         node = node.children[0];
         names.push(node.name);
       }
-      const { children, ...out } = { ...node, name: names.join(' › ') };
-      return children.length ? { ...out, children: children.sort((a, b) => b.value - a.value).map(tidy) } : out;
+      const { children, ...out } = { ...node, name: names.join(' › '), source };
+      return children.length ? { ...out, children: children.sort((a, b) => b.value - a.value).map((c) => tidy(c, source)) } : out;
     };
-    const tree = [...bins.values()].sort((a, b) => b.value - a.value).map((bin) => ({ ...tidy(bin), kind: 'source', source: bin.name }));
+    const tree = [...bins.values()].sort((a, b) => b.value - a.value).map((bin) => ({ ...tidy(bin, bin.name), kind: 'source' }));
     if (missing > 0.0005) tree.push({ name: 'No taxonomy', value: missing, kind: 'none' });
     for (const extra of extras) if (extra.value > 0.0005) tree.push({ ...extra });
     return tree;
@@ -89,14 +90,14 @@
     return {
       palette: Array.from({ length: 10 }, (_, i) => v(`--cat-${i + 1}`)),
       sources: [v('--src-1'), v('--src-2'), v('--src-3')],
-      fg: v('--fg'), muted: v('--muted'), card: v('--card'), border: v('--border'), soft: v('--soft'),
+      fg: v('--fg'), muted: v('--muted'), card: v('--card'), border: v('--border'), soft: v('--soft'), other: v('--cat-other'),
     };
   }
 
-  // Diagonal lines as a fill pattern, rising for the unknown share and falling for hits without
-  // taxonomy, as in the bar chart. (A pattern color works in both charts; ECharts' per-item
-  // `decal` is ignored by the sunburst.)
-  function hatch(colors, rising) {
+  // Diagonal lines as a fill pattern for hits without taxonomy, as "not classified" in the bar
+  // chart. (A pattern color works in both charts; ECharts' per-item `decal` is ignored by the
+  // sunburst.)
+  function hatch(colors) {
     const canvas = Object.assign(document.createElement('canvas'), { width: 6, height: 6 });
     const g = canvas.getContext('2d');
     g.fillStyle = colors.border;
@@ -105,22 +106,36 @@
     g.lineWidth = 1.5;
     for (const shift of [-6, 0, 6]) {
       g.beginPath();
-      g.moveTo(shift, rising ? 6 : 0);
-      g.lineTo(shift + 6, rising ? 0 : 6);
+      g.moveTo(shift, 0);
+      g.lineTo(shift + 6, 6);
       g.stroke();
     }
     return { image: canvas, repeat: 'repeat' };
   }
 
   // A source bin takes a muted source tone; each clade below it takes the page's categorical
-  // palette (largest first, cycling), and its descendants keep that color.
+  // palette (largest first, cycling), and its descendants keep that color. The reads in no
+  // database are plain grey.
   function paint(tree, colors) {
     const tint = (node, color) => ({ ...node, itemStyle: { color }, ...(node.children && { children: node.children.map((c) => tint(c, color)) }) });
     return tree.map((node, i) => {
-      if (node.kind !== 'source') return { ...node, itemStyle: { color: hatch(colors, node.kind === 'unknown') } };
+      if (node.kind !== 'source') return { ...node, itemStyle: { color: node.kind === 'unknown' ? colors.other : hatch(colors) } };
       const children = node.children && node.children.map((child, j) => tint(child, colors.palette[j % colors.palette.length]));
       return { ...node, children, itemStyle: { color: colors.sources[i % colors.sources.length] } };
     });
+  }
+
+  /* ------------------------------------------------------------ details */
+  const rankOf = (data, rankName) => (data.rank === 'source' ? 'taxonomy source' : data.rank ? rankName(data.rank) : '');
+  // The names above a node (the rim fillers of a top-level leaf repeat its name: not a lineage).
+  const lineage = (p) => (p.treePathInfo || []).slice(1, -1).map((n) => n.name).filter((name) => name !== p.name);
+
+  // Where a clade can be looked up: GTDB's tree browser for a GTDB source, NCBI Taxonomy by name
+  // for the other ranked names. Catalogue IDs (vOTU-171526) have no public page.
+  function taxonLinks(data) {
+    if (!data.token || !/__/.test(data.token)) return [];
+    if (/^GTDB/i.test(data.source || '')) return [['Open in GTDB', `https://gtdb.ecogenomic.org/tree?r=${encodeURIComponent(data.token)}`]];
+    return [['Search NCBI Taxonomy', `https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?name=${encodeURIComponent(parseToken(data.token).name)}`]];
   }
 
   /* ------------------------------------------------------------ options */
@@ -131,12 +146,12 @@
       borderColor: colors.border,
       textStyle: { color: colors.fg },
       formatter: (p) => {
-        const rank = p.data.rank === 'source' ? 'taxonomy source' : p.data.rank ? rankName(p.data.rank) : '';
-        // (the rim fillers of a top-level leaf repeat its name: not a lineage)
-        const above = (p.treePathInfo || []).slice(1, -1).map((n) => n.name).filter((name) => name !== p.name);
+        const rank = rankOf(p.data, rankName);
+        const above = lineage(p);
         return `<strong>${encode(p.name)}</strong> <span style="opacity:.7">${encode(rank)}</span>`
           + `<br>${encode(fmtVal(Number(p.value) || 0))}`
-          + (above.length ? `<br><span style="opacity:.7">${encode(above.join(' › '))}</span>` : '');
+          + (above.length ? `<br><span style="opacity:.7">${encode(above.join(' › '))}</span>` : '')
+          + '<br><span style="opacity:.7">right click (or long press) for links</span>';
       },
     };
   }
@@ -161,6 +176,7 @@
     const { colors } = ctx;
     return {
       aria: { enabled: true, label: { description: ctx.description } },
+      backgroundColor: colors.card,
       tooltip: tooltip(ctx, encode),
       series: [{
         type: 'sunburst',
@@ -183,6 +199,7 @@
     const upper = { ...text, show: true, height: 22 };
     return {
       aria: { enabled: true, label: { description: ctx.description } },
+      backgroundColor: colors.card,
       tooltip: tooltip(ctx, encode),
       series: [{
         type: 'treemap',
@@ -207,41 +224,96 @@
   }
 
   /**
-   * Draw `kind` ('sunburst' or 'treemap') into `host`. Returns a handle with dispose().
+   * Draw `kind` ('sunburst' or 'treemap') into `host`, with ECharts' SVG renderer (so the chart
+   * downloads as SVG). Returns a handle with svg() and dispose().
    * opts: { tree (from buildTree), fmtVal, rankName, description }
+   *
+   * Right click (or a long press) opens a panel with the node's details and links; Escape closes
+   * it, or else resets the treemap's view.
    */
   function render(host, kind, opts) {
-    const box = Object.assign(document.createElement('div'), { className: `taxtree taxtree-${kind}` });
-    const status = Object.assign(document.createElement('p'), { className: 'taxtree-status muted', textContent: 'Loading the chart…' });
-    const reset = Object.assign(document.createElement('button'), { type: 'button', className: 'link-btn taxtree-reset', textContent: 'Reset view' });
-    host.replaceChildren(...(kind === 'treemap' ? [reset] : []), box, status);
+    const make = (tag, props) => Object.assign(document.createElement(tag), props);
+    const box = make('div', { className: `taxtree taxtree-${kind}` });
+    const status = make('p', { className: 'taxtree-status muted', textContent: 'Loading the chart…' });
+    const reset = make('button', { type: 'button', className: 'link-btn taxtree-reset', textContent: 'Reset view (Esc)' });
+    const menu = make('div', { className: 'taxtree-menu', hidden: true });
+    menu.setAttribute('role', 'dialog');
+    menu.setAttribute('aria-label', 'Taxon details');
+    host.replaceChildren(...(kind === 'treemap' ? [reset] : []), box, menu, status);
     let chart = null;
     let disposed = false;
+    let press = null;
     const observer = new ResizeObserver(() => chart && chart.resize());
     const scheme = matchMedia('(prefers-color-scheme: dark)');
+    // the hover tooltip would cover the panel, so it is off while the panel is open
+    const showMenu = (open) => {
+      menu.hidden = !open;
+      if (chart) chart.setOption({ tooltip: { show: !open } });
+    };
     const draw = () => {
       if (!chart) return;
+      menu.hidden = true;
       const ctx = { ...opts, colors: themeColors() };
       const tree = paint(opts.tree, ctx.colors);
       const encode = window.echarts.format.encodeHTML;
       chart.setOption(kind === 'sunburst' ? sunburstOption(tree, ctx, encode) : treemapOption(tree, ctx, encode), true);
     };
+
+    const openMenu = (p) => {
+      clearTimeout(press);
+      const data = p.data || {};
+      const line = (className, textContent) => make('div', { className, textContent });
+      const facts = [rankOf(data, opts.rankName), opts.fmtVal(Number(p.value) || 0)].filter(Boolean).join(' · ');
+      const above = lineage(p);
+      menu.replaceChildren(
+        line('taxtree-menu-name', p.name), line('muted', facts),
+        ...(above.length ? [line('muted taxtree-menu-path', above.join(' › '))] : []),
+        ...taxonLinks(data).map(([textContent, href]) => make('a', { href, textContent, target: '_blank', rel: 'noopener' })),
+      );
+      showMenu(true);
+      // at the pointer, kept inside the chart
+      const x = Math.min(p.event.offsetX, box.clientWidth - menu.offsetWidth - 4);
+      const y = Math.min(p.event.offsetY, box.clientHeight - menu.offsetHeight - 4);
+      menu.style.left = `${Math.max(0, x)}px`;
+      menu.style.top = `${box.offsetTop + Math.max(0, y)}px`;
+    };
+    const onPointer = (e) => { if (!menu.hidden && !menu.contains(e.target)) showMenu(false); };
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.target.closest('input, textarea, select, dialog')) return;
+      if (!menu.hidden) showMenu(false);
+      else if (kind === 'treemap') draw();
+      else return;
+      e.preventDefault();
+    };
     reset.addEventListener('click', draw);
+
     loadECharts().then((echarts) => {
       if (disposed) return;
       status.remove();
-      chart = echarts.init(box);
+      chart = echarts.init(box, null, { renderer: 'svg' });
       draw();
+      chart.on('contextmenu', (p) => { p.event.event.preventDefault(); openMenu(p); });
+      // a long press on a touch screen (iOS has no contextmenu event)
+      chart.on('mousedown', (p) => {
+        if (p.event.event.pointerType === 'touch' || p.event.event.type === 'touchstart') press = setTimeout(() => openMenu(p), 550);
+      });
+      for (const end of ['mouseup', 'mousemove', 'globalout']) chart.getZr().on(end, () => clearTimeout(press));
       observer.observe(box);
       scheme.addEventListener('change', draw);
+      document.addEventListener('pointerdown', onPointer);
+      document.addEventListener('keydown', onKey);
     }, (error) => {
       status.textContent = error.message;
       status.classList.add('taxtree-error');
     });
     return {
+      svg: () => (chart ? chart.renderToSVGString() : null),
       dispose() {
         disposed = true;
+        clearTimeout(press);
         scheme.removeEventListener('change', draw);
+        document.removeEventListener('pointerdown', onPointer);
+        document.removeEventListener('keydown', onKey);
         observer.disconnect();
         if (chart) chart.dispose();
         chart = null;

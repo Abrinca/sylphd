@@ -14,7 +14,10 @@ All notable changes to `sylphd` are documented here. The format follows
   from the server's *All sources* (sylph-tax) profile, plus the reads in no database in the
   sequence view. Click to zoom in; hover for the lineage; the treemap also pans by dragging and
   zooms with the mouse wheel. An *Unknown reads: Show / Hide* switch (all three charts) leaves the
-  unknown share out and rescales the rest to the reads found. Drawn with Apache ECharts 6.1.0
+  unknown share out and rescales the rest to the reads found. Right click (or a long press) opens
+  a panel with the clade's details and a GTDB or NCBI Taxonomy link; Escape resets the treemap;
+  *Download SVG* saves the chart (ECharts' SVG renderer). The reads in no database are plain grey
+  in all three charts. Drawn with Apache ECharts 6.1.0
   (Apache-2.0, vendored unmodified in `web/vendor/`, loaded only when one of these charts is chosen).
 - **One taxonomic profile per taxonomy source: `tax:<source>`.** `/profile` `taxprof` (and
   `sylphd profile --taxonomy`) accept e.g. `tax:UHGV_default`, bit-exact

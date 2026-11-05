@@ -146,7 +146,7 @@ const pw = require('node:module').createRequire(process.env.PLAYWRIGHT_DIR + '/'
 (async () => {
   const [url, api, sketchPath, info, profile] = JSON.parse(process.argv[1]);
   const browser = await pw.chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXE });
-  const page = await browser.newPage();
+  const page = await browser.newPage({ acceptDownloads: true });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   let requested = '';
@@ -191,7 +191,7 @@ const pw = require('node:module').createRequire(process.env.PLAYWRIGHT_DIR + '/'
   const charts = {};
   for (const kind of ['sunburst', 'treemap']) {
     await page.click(`input[name="r-chart"][value="${kind}"]`);
-    await page.waitForSelector(`${card} .taxtree-${kind} canvas`, { timeout: 30000 });
+    await page.waitForSelector(`${card} .taxtree-${kind} svg`, { timeout: 30000 });
     charts[kind] = await page.evaluate((card) => {
       const chart = window.echarts.getInstanceByDom(document.querySelector(`${card} .taxtree`));
       const series = chart.getOption().series[0];
@@ -216,11 +216,28 @@ const pw = require('node:module').createRequire(process.env.PLAYWRIGHT_DIR + '/'
     const bars = await snap();
     const head = await page.textContent(`${card} .abund-head`);
     await page.click('input[name="r-chart"][value="treemap"]');
-    await page.waitForSelector(`${card} .taxtree-treemap canvas`, { timeout: 30000 });
+    await page.waitForSelector(`${card} .taxtree-treemap svg`, { timeout: 30000 });
     const tree = await page.evaluate((card) => window.echarts.getInstanceByDom(document.querySelector(`${card} .taxtree`))
       .getOption().series[0].data.map((n) => [n.name, Math.round(n.value * 100) / 100]), card);
     const roam = await page.evaluate((card) => window.echarts.getInstanceByDom(document.querySelector(`${card} .taxtree`)).getOption().series[0].roam, card);
-    hidden = { bars, head, tree, roam };
+    // right click on the largest box (GTDB, the left part): a panel with details and a GTDB link
+    await page.waitForTimeout(800);
+    await page.locator(`${card} .taxtree`).scrollIntoViewIfNeeded();
+    const box = await page.locator(`${card} .taxtree`).boundingBox();
+    await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.5, { button: 'right' });
+    const menu = await page.evaluate((card) => {
+      const m = document.querySelector(`${card} .taxtree-menu`);
+      return { hidden: m.hidden, text: m.innerText, links: [...m.querySelectorAll('a')].map((a) => a.href) };
+    }, card);
+    await page.keyboard.press('Escape');
+    const menuAfterEsc = await page.evaluate((card) => document.querySelector(`${card} .taxtree-menu`).hidden, card);
+    // the chart as SVG
+    const [svgDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator(`${card} .export button`, { hasText: 'SVG' }).click(),
+    ]);
+    const svg = require('node:fs').readFileSync(await svgDownload.path(), 'utf8');
+    hidden = { bars, head, tree, roam, menu, menuAfterEsc, svg: { name: svgDownload.suggestedFilename(), start: svg.slice(0, 4), lactobacillus: svg.includes('Lactobacillus') } };
   }
   console.log(JSON.stringify({ errors, gtdbSeq, gtdbTax, ncbiTax, uhgv, uhgvSubfam, params, charts, backToBars, unknownCtl, hidden }));
   await browser.close();
@@ -302,7 +319,7 @@ def test_reads_in_no_database_are_shown(web_origin: str, sketch_file: Path) -> N
         chart = result["charts"][kind]
         assert chart["type"] == kind
         assert chart["hidden"] == [True, True]  # every source at every rank: no taxonomy or rank control
-        assert chart["downloads"] == ["Download sylphmpa (All sources)"]
+        assert chart["downloads"] == ["Download sylphmpa (All sources)", "Download SVG"]
         assert chart["legend"] == ["GTDB_r232", "UHGV_default", "FungiRefSeq-latest", label]
         gtdb, uhgv_bin, fungi, unknown = chart["data"]
         assert gtdb[0] == "GTDB_r232 › Bacteria" and gtdb[1] == pytest.approx(18.0)
@@ -326,3 +343,13 @@ def test_reads_in_no_database_are_shown(web_origin: str, sketch_file: Path) -> N
     assert [name for name, _ in hidden["tree"]] == ["GTDB_r232 › Bacteria", "UHGV_default › vFAM-1 › vSUBFAM-1 › vOTU-1", "FungiRefSeq-latest › Fungi › Ascomycota › Candida gamma"]
     assert hidden["tree"][0][1] == pytest.approx(90.0)
     assert hidden["roam"] is True  # drag and wheel zoom
+
+    # right click: the clade's details and a GTDB link; Escape closes the panel
+    menu = hidden["menu"]
+    assert menu["hidden"] is False
+    assert "GTDB_r232" in menu["text"] and "%" in menu["text"]
+    assert menu["links"] and menu["links"][0].startswith("https://gtdb.ecogenomic.org/tree?r=")
+    assert hidden["menuAfterEsc"] is True
+    # the chart downloads as SVG (ECharts' SVG renderer)
+    assert hidden["svg"]["name"].endswith(".treemap.svg")
+    assert hidden["svg"]["start"] == "<svg" and hidden["svg"]["lactobacillus"]

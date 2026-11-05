@@ -46,11 +46,14 @@ speed. **Cancel** stops the workers immediately.
   one chart: one bin per source (e.g. `GTDB_r232`, `UHGV_default`), subdivided by that source's own
   ranks down to species (or vOTU), from the server's *All sources* profile (sylph-tax's merged
   tree, the `.sylphmpa` of the download button); a chain of single children is one node, e.g.
-  *GTDB_r232 › Bacteria*. In the sequence view the reads in no database are their own bin, so a
+  *GTDB_r232 › Bacteria*. In the sequence view the reads in no database are their own bin (plain grey), so a
   poorly covered sample shows its dark matter at a glance. Click a sector or box to zoom in; the
   sunburst zooms out with its centre (its rings widen as you zoom in, labels that do not fit are
   hidden); the treemap zooms out with the path below it, pans by dragging and zooms with the mouse wheel
-  (*Reset view* lays it out again). **Unknown reads: Hide** (in every chart) leaves the unknown
+  (*Reset view* or Escape lays it out again). Right click a sector or box (or press and hold it
+  on a touch screen) for its rank, value, lineage and a link (GTDB's tree browser for GTDB clades,
+  an NCBI Taxonomy search for other ranked names). **Download SVG** saves the chart as drawn,
+  zoom included. **Unknown reads: Hide** (in every chart) leaves the unknown
   share out and rescales the rest to shares of the reads found in the databases, as `sylph
   profile` reports them without `--estimate-unknown`. Hover for the full lineage and value. The chart library (Apache
   ECharts, 369 kB gzipped, vendored) is loaded the first time one of these charts is chosen.

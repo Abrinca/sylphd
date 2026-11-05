@@ -41,4 +41,5 @@ Then also update the versions in `docs/project/license.md` and the CHANGELOG. `w
 `RETURN_DOM_FRAGMENT` options and its `afterSanitizeAttributes` hook.
 `web/taxtree.js` relies on ECharts' `sunburst` and `treemap` series (their built-in zoom, `levels`,
 `label.overflow`/`lineOverflow`, `labelLayout.hideOverlap`, image-pattern colors, the treemap `roam` and
-`breadcrumb`), `echarts.init`, `setOption`, `format.encodeHTML` and `getInstanceByDom` (tests).
+`breadcrumb`), `echarts.init` with the SVG renderer, `setOption`, `on('contextmenu')`, `renderToSVGString`,
+`format.encodeHTML` and `getInstanceByDom` (tests).
