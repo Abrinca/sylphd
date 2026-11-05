@@ -148,10 +148,12 @@ const pw = require('node:module').createRequire(process.env.PLAYWRIGHT_DIR + '/'
     taxonomies: [...document.querySelectorAll('input[name="r-tax"]')].map((i) => i.value),
   }));
   const { names, head, taxonomies } = rendered;
-  // the metric switch still works on server clades
+  // the metric switch still works on server clades (sequence is the default)
+  await page.click('input[name="r-metric"][value="relative"]');
+  await page.waitForFunction(() => document.querySelector('.abund-head').textContent.includes('taxonomic abundance'));
+  const taxonomicHead = await page.textContent('.abund-head');
   await page.click('input[name="r-metric"][value="sequence"]');
   await page.waitForFunction(() => document.querySelector('.abund-head').textContent.includes('sequence abundance'));
-  const sequenceHead = await page.textContent('.abund-head');
   await page.click('input[name="r-metric"][value="relative"]');
   const download = await Promise.all([
     page.waitForEvent('download'),
@@ -160,17 +162,16 @@ const pw = require('node:module').createRequire(process.env.PLAYWRIGHT_DIR + '/'
   const path = await download.path();
   const text = require('node:fs').readFileSync(path, 'utf8');
   const filename = download.suggestedFilename();
-  // the "tax" profile (all sources) charts too
-  await page.click('input[name="r-tax"][value="tax"]');
-  await page.waitForFunction(() => document.querySelector('.abund-head').textContent.includes('All sources'));
-  const taxHead = await page.textContent('.abund-head');
+  // the "tax" profile (all sources) is not charted next to GTDB, but downloadable
+  const taxButton = page.locator('section[aria-label="Abundance"] .export button', { hasText: 'All sources' });
+  const taxHead = await taxButton.textContent();
   const taxDownload = await Promise.all([
     page.waitForEvent('download'),
-    page.click('section[aria-label="Abundance"] .export button'),
+    taxButton.click(),
   ]).then(([d]) => d);
   const taxText = require('node:fs').readFileSync(await taxDownload.path(), 'utf8');
   console.log(JSON.stringify({
-    names, head, taxonomies, text, filename, errors, sequenceHead,
+    names, head, taxonomies, text, filename, errors, taxonomicHead,
     taxHead, taxText, taxFilename: taxDownload.suggestedFilename(),
   }));
   await browser.close();
@@ -188,16 +189,16 @@ def test_reads_tab_renders_server_clades(page_server, sketch_file: Path) -> None
     assert done.returncode == 0, done.stderr
     result = json.loads(done.stdout)
     assert result["errors"] == []
-    # gtdb, plus the "tax" profile of the metadata file's sources (here the
-    # virtual GTDB source, both of which the server can produce)
-    assert result["taxonomies"] == ["gtdb", "tax"]
+    # the chart: gtdb only (NCBI has no lineage here, and the "tax" profile of
+    # the metadata file's sources is a download, not a chart, next to it)
+    assert result["taxonomies"] == ["gtdb"]
     assert any("Test" in name for name in result["names"]), result["names"]
-    assert "taxonomic abundance" in result["head"]
-    assert "sequence abundance" in result["sequenceHead"]
+    assert "sequence abundance" in result["head"]
+    assert "taxonomic abundance" in result["taxonomicHead"]
     assert result["text"].startswith("#SampleID\tclodf13\tTaxonomies_used:['gtdb']\n")
     assert "d__Bacteria" in result["text"]
     assert result["filename"] == "sylphd_clodf13_reads.gtdb.sylphmpa"
-    # "All sources": the same clades under the sylph-tax rule, still charted
+    # "All sources": the same clades under the sylph-tax rule, downloadable
     assert "All sources" in result["taxHead"]
     assert result["taxText"].startswith("#SampleID\tclodf13\tTaxonomies_used:['GTDB_r232']\n")
     assert result["taxFilename"] == "sylphd_clodf13_reads.tax.sylphmpa"

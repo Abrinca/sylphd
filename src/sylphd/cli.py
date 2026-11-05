@@ -60,6 +60,7 @@ from .sketching import (
 from .taxonomy import (
     TaxonomyError,
     default_taxonomies,
+    is_sylphtax,
     parse_taxonomies,
     resolve_taxonomy_columns,
     write_outputs,
@@ -554,7 +555,7 @@ def _write_taxonomy_outputs(args: argparse.Namespace, run: _ContainRun) -> None:
     )
     for path in written:
         print(f"{PROG}: wrote {path}", file=sys.stderr)
-    if "tax" in run.taxonomies:
+    if any(is_sylphtax(taxonomy) for taxonomy in run.taxonomies):
         # The 95 % threshold is a prokaryote convention: say so once per
         # source the merged profile actually used (design note B6).
         for note in _profile_caveats(run.result):

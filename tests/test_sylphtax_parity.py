@@ -187,6 +187,26 @@ def test_server_taxprof_payload_matches_golden(rows: list[dict], sample: str) ->
     assert payload["tax"]["sylphmpa"] == (DATA / f"{sample}.sylphmpa").read_text()
 
 
+@pytest.mark.parametrize("source", SOURCE_NAMES)
+@pytest.mark.parametrize("sample", [sample["name"] for sample in CASES["samples"]])
+def test_one_source_matches_sylph_tax(metadata: Path, rows: list[dict], sample: str, source: str) -> None:
+    """``tax:<source>`` is ``sylph-tax taxprof -t <source>``, byte for byte.
+
+    The hits are re-resolved against that one source, as the server does, so a
+    key that a later source overrides in the merged profile keeps this
+    source's lineage here (the cases have such a key).
+    """
+    row_set = next(s for s in rows if s["name"] == sample)
+    with MetadataDB(metadata) as db:
+        def resolve(hits: list[dict], only: str) -> list[dict]:
+            found = db.resolve([(r["Genome_file"], r["Contig_name"]) for r in hits], sources=[only])
+            return [{**row, **taxonomy.columns()} for row, taxonomy in zip(hits, found)]
+
+        payload = build_taxprof(sample, (f"tax:{source}",), row_set["rows"], resolve_source=resolve)
+    golden = (DATA / f"{sample}.only-{source}.sylphmpa").read_text()
+    assert payload[f"tax:{source}"]["sylphmpa"] == golden
+
+
 def test_golden_annotated_hosts(rows: list[dict]) -> None:
     """The resolved hosts, against a real ``sylph-tax taxprof -a`` run.
 

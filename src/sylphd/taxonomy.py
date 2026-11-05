@@ -52,14 +52,25 @@ dictionary; a hit without any taxonomy becomes ``NO_TAXONOMY;t__<file>:<contig>`
 and then by decreasing relative abundance (stable); empty tokens / no
 ``unclassified X`` filling.  Nothing is normalised here — the server did the
 resolution and this module only aggregates.
+
+One source: ``tax:<source>``
+----------------------------
+``tax:UHGV_default`` is ``sylph-tax taxprof -t UHGV_default``: the same rule
+as ``tax``, but only that source's lineages count, so every hit from another
+source is ``NO_TAXONOMY`` (sylph-tax given a single taxonomy file cannot
+resolve the others).  Its payload also carries the source's ``ranks``, read
+from the token prefixes (``s__Name`` is rank ``s``, ``vOTU-052719`` is rank
+``vOTU``) and ordered as the lineages order them, and every clade's ``rank``,
+so a chart can show one rank of a source whose lineages skip ranks.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 #: Rank prefixes of the GTDB/NCBI lineages, in lineage order.
 RANKS: tuple[str, ...] = ("d", "p", "c", "o", "f", "g", "s")
@@ -75,6 +86,9 @@ NO_TAXONOMY = "NO_TAXONOMY"
 
 #: The taxonomy name for the exact-sylph-tax merged profile.
 SYLPHTAX = "tax"
+
+#: Prefix of the one-source sylph-tax profiles (``tax:UHGV_default``).
+SOURCE_PREFIX = f"{SYLPHTAX}:"
 
 #: Metadata column holding the lineage for each rank-based taxonomy.
 TAXONOMY_COLUMNS: dict[str, str] = {
@@ -143,8 +157,53 @@ class CladeAbundance:
 # ---------------------------------------------------------------------------
 
 
+def source_of(taxonomy: str) -> str | None:
+    """The source name of a ``tax:<source>`` taxonomy, else ``None``."""
+    if taxonomy.startswith(SOURCE_PREFIX):
+        return taxonomy[len(SOURCE_PREFIX):] or None
+    return None
+
+
+def is_sylphtax(taxonomy: str) -> bool:
+    """``tax`` or ``tax:<source>``: aggregated by sylph-tax's own rule."""
+    return taxonomy == SYLPHTAX or source_of(taxonomy) is not None
+
+
+def taxonomy_file_label(taxonomy: str) -> str:
+    """The taxonomy as it appears in file names (``tax.UHGV_default``)."""
+    source = source_of(taxonomy)
+    return taxonomy if source is None else f"{SYLPHTAX}.{_safe_name(source)}"
+
+
+def available_taxonomies(metadata: Mapping[str, Any] | None) -> list[str]:
+    """Every taxonomy this metadata can aggregate, for ``/info``.
+
+    ``gtdb``/``ncbi`` when their column exists, then ``tax`` and one
+    ``tax:<source>`` per sylph-tax source when the file has sources.
+    """
+    if not metadata:
+        return []
+    columns = {str(column) for column in metadata.get("columns") or ()}
+    names = [name for name, column in TAXONOMY_COLUMNS.items() if column in columns]
+    if has_taxonomy_sources(metadata) and set(SYLPHTAX_PROFILE_COLUMNS) <= columns:
+        names.append(SYLPHTAX)
+        names.extend(f"{SOURCE_PREFIX}{name}" for name in _source_names(metadata))
+    return names
+
+
+def _source_names(metadata: Mapping[str, Any] | None) -> list[str]:
+    return [
+        str(source.get("name"))
+        for source in (metadata or {}).get("taxonomy_sources") or ()
+        if isinstance(source, Mapping) and source.get("name")
+    ]
+
+
 def parse_taxonomies(text: str | Sequence[str] | None) -> tuple[str, ...]:
     """Parse ``--taxonomy`` (``"gtdb,ncbi"``, ``"gtdb"``, ``"tax"``, ...).
+
+    ``tax:<source>`` names one sylph-tax source; its name keeps its case and is
+    checked against the server by :func:`resolve_taxonomy_columns`.
 
     ``None`` is the rank-based default (``gtdb,ncbi``); the command line
     decides separately whether ``tax`` belongs to the default, because that
@@ -156,13 +215,19 @@ def parse_taxonomies(text: str | Sequence[str] | None) -> tuple[str, ...]:
     parts = text.split(",") if isinstance(text, str) else [str(part) for part in text]
     selected: list[str] = []
     for part in parts:
-        name = part.strip().lower()
+        name = part.strip()
         if not name:
             continue
-        if name not in TAXONOMIES:
+        if name.lower().startswith(SOURCE_PREFIX):
+            name = SOURCE_PREFIX + name[len(SOURCE_PREFIX):].strip()
+            if source_of(name) is None:
+                raise TaxonomyError(f"{part.strip()!r} names no taxonomy source (tax:<source>)")
+        else:
+            name = name.lower()
+        if source_of(name) is None and name not in TAXONOMIES:
             raise TaxonomyError(
                 f"unknown taxonomy {part.strip()!r} "
-                f"(choose from: {', '.join(TAXONOMIES)})"
+                f"(choose from: {', '.join(TAXONOMIES)}, or tax:<source>)"
             )
         if name not in selected:
             selected.append(name)
@@ -205,19 +270,27 @@ def resolve_taxonomy_columns(
             "the server has no metadata database; --taxprof/--taxmatrix need "
             "'gtdb_taxonomy'/'ncbi_taxonomy' (start it with 'sylphd serve --meta')"
         )
-    if SYLPHTAX in taxonomies and not has_taxonomy_sources(metadata):
+    if any(is_sylphtax(taxonomy) for taxonomy in taxonomies) and not has_taxonomy_sources(metadata):
         raise TaxonomyError(
             "the server has no sylph-tax taxonomy sources, so there is nothing "
             "for '--taxonomy tax' to aggregate; add sources with "
             "'sylphd setup --taxonomy' and restart the server"
         )
+    known = _source_names(metadata)
+    for taxonomy in taxonomies:
+        source = source_of(taxonomy)
+        if source is not None and source not in known:
+            raise TaxonomyError(
+                f"the server has no taxonomy source {source!r} "
+                f"(it has: {', '.join(known) or 'none'})"
+            )
     available = [str(column) for column in metadata.get("columns") or ()]
     columns: list[str] = []
     missing: list[str] = []
     for taxonomy in taxonomies:
         needed: Sequence[str] = (
             SYLPHTAX_PROFILE_COLUMNS
-            if taxonomy == SYLPHTAX
+            if is_sylphtax(taxonomy)
             else (TAXONOMY_COLUMNS[taxonomy],)
         )
         for column in needed:
@@ -341,6 +414,8 @@ def aggregate_rows(
     """
     if taxonomy == SYLPHTAX:
         return aggregate_sylphtax_rows(rows)
+    if source_of(taxonomy) is not None:
+        return aggregate_sylphtax_rows(rows, source=source_of(taxonomy))
     try:
         column = TAXONOMY_COLUMNS[taxonomy]
     except KeyError:
@@ -413,8 +488,15 @@ def hit_taxonomy_string(row: Mapping[str, Any]) -> str:
     return probes.no_taxonomy
 
 
-def aggregate_sylphtax_rows(rows: Iterable[Mapping[str, Any]]) -> list[CladeAbundance]:
+def aggregate_sylphtax_rows(
+    rows: Iterable[Mapping[str, Any]], source: str | None = None
+) -> list[CladeAbundance]:
     """Aggregate one sample exactly as ``sylph-tax taxprof`` does.
+
+    With ``source`` only that taxonomy source's lineages are used, as
+    ``sylph-tax taxprof -t <source>``: a hit resolved from another source
+    becomes ``NO_TAXONOMY``, the default sylph-tax writes for a hit its
+    taxonomy files do not know.
 
     Differs from :func:`aggregate_rows` on purpose, because sylph-tax does:
 
@@ -433,6 +515,8 @@ def aggregate_sylphtax_rows(rows: Iterable[Mapping[str, Any]]) -> list[CladeAbun
     strain_stats: dict[str, tuple[float | None, float | None]] = {}
 
     for row in rows:
+        if source is not None and row.get("tax_source") != source:
+            row = {**row, "tax_lineage": None}
         tax_str = hit_taxonomy_string(row)
         row_relative = _number(row.get("Taxonomic_abundance"))
         row_sequence = _number(row.get("Sequence_abundance"))
@@ -463,6 +547,51 @@ def aggregate_sylphtax_rows(rows: Iterable[Mapping[str, Any]]) -> list[CladeAbun
     ]
     clades.sort(key=lambda item: (item.depth, -item.relative))
     return clades
+
+
+#: A rank-tagged lineage token: ``s__Name`` (rank ``s``) or ``vOTU-052719``
+#: (rank ``vOTU``, an identifier of a source without ``x__`` prefixes).
+_TOKEN_RANK = re.compile(r"^([A-Za-z]+)__|^([A-Za-z]+)-\d+$")
+
+
+def token_rank(token: str) -> str | None:
+    """The rank a lineage token names, or ``None`` (``UNKNOWN``, strains)."""
+    match = _TOKEN_RANK.match(token)
+    if match is None:
+        return None
+    rank = match.group(1) or match.group(2)
+    return None if rank == "t" else rank
+
+
+def clade_rank(clade: str) -> str | None:
+    """The rank of a clade's last token."""
+    return token_rank(clade.rsplit("|", 1)[-1])
+
+
+def lineage_ranks(clades: Iterable[CladeAbundance]) -> list[str]:
+    """The ranks of these clades, ordered from the root as the lineages order them.
+
+    Lineages may skip ranks (a vOTU without a vGENUS), so the order is merged
+    from every lineage: a rank comes after every rank seen above it; ties keep
+    first-seen order.
+    """
+    seen: dict[str, None] = {}
+    above: dict[str, set[str]] = {}
+    for item in clades:
+        path = [rank for rank in map(token_rank, item.clade.split("|")) if rank is not None]
+        for index, rank in enumerate(path):
+            seen.setdefault(rank, None)
+            above.setdefault(rank, set()).update(path[:index])
+    ordered: list[str] = []
+    pending = list(seen)
+    while pending:
+        ready = next(
+            (rank for rank in pending if not (above[rank] - set(ordered) - {rank})),
+            pending[0],  # a cycle (inconsistent lineages): keep first-seen order
+        )
+        ordered.append(ready)
+        pending.remove(ready)
+    return ordered
 
 
 def aggregate_samples(
@@ -629,12 +758,18 @@ def taxprof_payload(
     text = "\n".join(
         taxprof_lines(name, taxonomy, clades, taxonomies_used=used)
     ) + "\n"
-    return {
+    payload: dict[str, Any] = {
         "columns": list(TAXPROF_COLUMNS),
         "taxonomies_used": used,
         "clades": [clade_dict(item) for item in clades],
         "sylphmpa": text,
     }
+    if source_of(taxonomy) is not None:
+        # One source's own ranks: the clades are matched by rank, not depth.
+        payload["ranks"] = lineage_ranks(clades)
+        for entry, item in zip(payload["clades"], clades):
+            entry["rank"] = clade_rank(item.clade)
+    return payload
 
 
 def build_taxprof(
@@ -643,27 +778,45 @@ def build_taxprof(
     rows: Iterable[Mapping[str, Any]],
     *,
     tax_sources: Sequence[str] = (),
+    resolve_source: Callable[[list[Mapping[str, Any]], str], list[Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
-    """Aggregate one sample's ``/profile`` rows for every requested taxonomy."""
+    """Aggregate one sample's ``/profile`` rows for every requested taxonomy.
+
+    ``resolve_source(rows, source)`` re-resolves the hits against that one
+    source for a ``tax:<source>`` profile, as ``sylph-tax taxprof -t <source>``
+    sees them: a key in several sources then takes this source's lineage, not
+    the later source's that the merged resolution picked.  Without it the rows
+    are used as resolved (only the hits attributed to the source count).
+    """
     materialized = list(rows)
     payload: dict[str, Any] = {}
     for taxonomy in taxonomies:
-        used = list(tax_sources) if taxonomy == SYLPHTAX else [taxonomy]
+        source = source_of(taxonomy)
+        taxonomy_rows = (
+            resolve_source(materialized, source)
+            if source is not None and resolve_source is not None
+            else materialized
+        )
+        used = (
+            list(tax_sources) if taxonomy == SYLPHTAX
+            else [source] if source is not None
+            else [taxonomy]
+        )
         payload[taxonomy] = taxprof_payload(
             name,
             taxonomy,
-            aggregate_rows(materialized, taxonomy),
+            aggregate_rows(taxonomy_rows, taxonomy),
             taxonomies_used=used,
         )
     return payload
 
 
 def taxprof_path(prefix: str, name: str, taxonomy: str) -> Path:
-    return Path(f"{prefix}{_safe_name(name)}.{taxonomy}.sylphmpa")
+    return Path(f"{prefix}{_safe_name(name)}.{taxonomy_file_label(taxonomy)}.sylphmpa")
 
 
 def taxmatrix_path(prefix: str, taxonomy: str) -> Path:
-    return Path(f"{prefix}{taxonomy}.tsv")
+    return Path(f"{prefix}{taxonomy_file_label(taxonomy)}.tsv")
 
 
 def write_outputs(

@@ -225,6 +225,42 @@ class TestProfileQuery:
             "#SampleID\tclodf13\tTaxonomies_used:['gtdb']\n"
         )
 
+    def test_taxprof_of_one_source(self, tiny_database, tiny_metadata) -> None:
+        """`tax:<source>` is that source alone, with its ranks; /info lists it."""
+        app = create_app(
+            ServerConfig(db_path=tiny_database, meta_path=tiny_metadata)
+        )
+        sketch = pysylph.Sketcher(c=200, k=31).sketch_single(
+            "clodf13", _reads(CLODF13_FASTA)
+        ).to_bytes()
+        with TestClient(app) as test_client:
+            metadata = test_client.get("/info").json()["metadata"]
+            source = metadata["taxonomy_sources"][0]["name"]
+            assert metadata["taxonomies"] == ["gtdb", "ncbi", "tax", f"tax:{source}"]
+            response = _post(
+                test_client,
+                "profile",
+                [("clodf13", sketch)],
+                names=["clodf13"],
+                taxprof=[f"tax:{source}"],
+            )
+            unknown = _post(
+                test_client,
+                "profile",
+                [("clodf13", sketch)],
+                taxprof=["tax:NoSuchSource"],
+            )
+        assert response.status_code == 200
+        payload = response.json()[0]["taxprof"][f"tax:{source}"]
+        assert payload["taxonomies_used"] == [source]
+        assert payload["sylphmpa"].startswith(f"#SampleID\tclodf13\tTaxonomies_used:['{source}']\n")
+        assert payload["ranks"] == ["d", "p", "c"]
+        ranks = {clade["clade_name"]: clade["rank"] for clade in payload["clades"]}
+        assert ranks["d__Bacteria|p__Test|c__Test"] == "c"
+        assert ranks["d__Bacteria|p__Test|c__Test|t__GCA_000000001.1"] is None
+        assert unknown.status_code == 400
+        assert "no taxonomy source 'NoSuchSource'" in unknown.json()["error"]
+
     def test_taxprof_needs_metadata(self, client: TestClient) -> None:
         response = _post(
             client,
@@ -777,3 +813,25 @@ class TestConcurrency:
                 )
                 good = future.result(timeout=10)
             assert good.status_code == 200
+
+
+def test_unknown_estimate_of_a_contig_sketch_is_null(tiny_database) -> None:
+    """``estimate_unknown`` on a sketch without read statistics answers, not 500.
+
+    ``sylph profile -u`` reports ``True_cov`` inf and NaN abundances for a sketch
+    made from contigs; JSON has no such numbers, so they are ``null`` (and the
+    TSV cells empty) instead of failing the JSON encoding.
+    """
+    sketch = pysylph.Sketcher(c=200, k=31).sketch_single("clodf13", _reads(CLODF13_FASTA))
+    app = create_app(ServerConfig(db_path=tiny_database))
+    with TestClient(app) as test_client:
+        response = _post(test_client, "profile", [("clodf13", sketch.to_bytes())], estimate_unknown=True)
+    assert response.status_code == 200
+    (row,) = response.json()[0]["rows"]
+    assert row["Eff_cov"] is None
+    assert row["Sequence_abundance"] is None
+    assert row["Taxonomic_abundance"] is None
+    assert row["Adjusted_ANI"] == pytest.approx(100.0)
+    header = columns_for_mode("profile", ProfileParams(estimate_unknown=True))
+    cells = dict(zip(header, format_row(row, header).split("\t")))
+    assert cells["True_cov"] == "" and cells["Sequence_abundance"] == ""

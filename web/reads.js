@@ -22,11 +22,22 @@
   const { RANK_NAMES } = S;
   const RANKS = Object.keys(RANK_NAMES);
   const TAXONOMY_LABELS = { gtdb: 'GTDB', ncbi: 'NCBI', tax: 'All sources' };
+  // The row column holding each taxonomy's lineage (the server's TAXONOMY_COLUMNS);
+  // "tax" spans every source, so it has none.
+  const TAXONOMY_COLUMNS = { gtdb: 'gtdb_taxonomy', ncbi: 'ncbi_taxonomy' };
   const TAXONOMY_TITLES = {
     gtdb: 'GTDB lineage of the matched genome',
     ncbi: 'NCBI lineage of the matched genome',
     tax: 'The server’s sylph-tax profile over all its taxonomy sources (viruses, fungi, …)',
   };
+  // "tax:<source>": one sylph-tax source alone (sylph-tax taxprof -t <source>), charted
+  // by the ranks its lineages name (the server sends them as `ranks`).
+  const sourceOf = (taxonomy) => (String(taxonomy).startsWith('tax:') ? String(taxonomy).slice(4) : null);
+  const taxonomyLabel = (taxonomy) => TAXONOMY_LABELS[taxonomy] || sourceOf(taxonomy) || taxonomy;
+  const taxonomyTitle = (taxonomy) => TAXONOMY_TITLES[taxonomy]
+    || (sourceOf(taxonomy) ? `Lineages of the taxonomy source ${sourceOf(taxonomy)} (sylph-tax); other hits are shown per source` : '');
+  // Ranks of other schemes that the GTDB names lack (fungal lineages start at k__).
+  const EXTRA_RANK_NAMES = { k: 'kingdom' };
 
   /* ---------------------------------------------------------- formatting */
   // an abundance (a percentage that can be tiny), unlike S.fmtPct's fixed decimals
@@ -99,7 +110,10 @@
   ui.name = el('input', { type: 'text', id: 'r-name', maxlength: String(NAME_MAX), autocomplete: 'off', spellcheck: 'false', placeholder: 'sample' });
   ui.minAni = el('input', { type: 'number', id: 'r-min-ani', min: '0', max: '100', step: '0.1', value: String(DEFAULT_MIN_ANI), inputmode: 'decimal' });
   ui.minKmers = el('input', { type: 'number', id: 'r-min-kmers', min: '0', step: '1', value: String(DEFAULT_MIN_KMERS), inputmode: 'numeric' });
+  // On by default: without it sylph shares the sample out over the genomes it found, so the
+  // reads of organisms missing from every database (the "dark matter") are not shown at all.
   ui.unknown = el('input', { type: 'checkbox', id: 'r-unknown' });
+  ui.unknown.checked = true;
   ui.unknownImplied = el('span', { class: 'implied-note', hidden: true, text: ' implied by “Estimate read counts”' });
   ui.readCounts = el('input', { type: 'checkbox', id: 'r-read-counts' });
   ui.readCountsRow = el('label', { class: 'check' }, ui.readCounts,
@@ -123,7 +137,7 @@
         el('label', { class: 'field', for: 'r-min-kmers' }, el('span', { text: 'Minimum k-mers per genome' }), ui.minKmers)),
       el('label', { class: 'check' }, ui.unknown,
         el('span', null, el('strong', { text: 'Estimate unknown fraction' }), ' (sylph ', el('code', { text: '--estimate-unknown' }),
-          '): also reports how much of the sample the database does not cover.', ui.unknownImplied)),
+          '): also shows how much of the sample no database covers (the dark matter). Turn it off for sylph’s plain shares of the genomes found.', ui.unknownImplied)),
       ui.readCountsRow,
       el('label', { class: 'check' }, ui.sketchOnly,
         el('span', null, el('strong', { text: 'Only sketch' }), ': do not upload; keep the sketch to download or to upload later.'))),
@@ -333,7 +347,7 @@
 
   // Keep the implied "Estimate unknown fraction" in step with "Estimate read counts";
   // the box is disabled in refresh() so it cannot be turned off while read counts are on.
-  let unknownBeforeImplied = false;
+  let unknownBeforeImplied = true;
   function syncImpliedOptions() {
     const on = ui.readCounts.checked;
     if (on) {
@@ -352,12 +366,18 @@
   }
 
   // The taxonomies this server can aggregate: the columns its metadata file
-  // has, plus its sylph-tax sources.
+  // has, plus its sylph-tax sources. A server that lists them (`taxonomies`)
+  // also gets one profile per source, except the metadata file's own source,
+  // which is the GTDB/NCBI view; an older one only knows gtdb, ncbi and tax.
   function requestedTaxonomies() {
     const info = S.info();
     if (!info) return [];
     const meta = info.metadata;
     if (!meta) return [];
+    if (Array.isArray(meta.taxonomies)) {
+      const own = new Set((meta.taxonomy_sources || []).filter((src) => src && src.kind === 'metadata').map((src) => src.name));
+      return meta.taxonomies.filter((t) => !own.has(sourceOf(t)));
+    }
     const columns = Array.isArray(meta.columns) ? meta.columns : [];
     const out = [];
     if (columns.includes('gtdb_taxonomy')) out.push('gtdb');
@@ -771,9 +791,16 @@
     ui.results.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
   }
 
+  const UNKNOWN_LABEL = 'Unknown: in no database (estimated)';
+
+  // null when sylph could not estimate it: a sketch without read statistics (made from
+  // contigs) gets NaN sequence abundances (null in JSON) under --estimate-unknown.
   function unknownFraction(rows) {
+    if (!rows.some((r) => isNum(r.Sequence_abundance))) return null;
     return Math.max(0, 100 - rows.reduce((n, r) => n + (isNum(r.Sequence_abundance) ? r.Sequence_abundance : 0), 0));
   }
+  const hasUnknown = (result) => !!result.params.estimate_unknown && !result.params.estimate_read_counts
+    && unknownFraction(result.rows) !== null;
 
   function summaryCard(run, result) {
     const item = (label, value, small) => el('div', null, el('dt', { text: label }), el('dd', null, value, small ? el('small', { text: small }) : null));
@@ -787,8 +814,8 @@
         items.push(item('Genomes detected', fmtInt(result.rows.length)));
         items.push(item('Profiling', fmtDur(run.profileMs), 'upload and server'));
         // with estimated read counts the sum of Sequence_abundance is reads, not a share
-        if (result.params.estimate_unknown && !result.params.estimate_read_counts) {
-          items.push(item('Unknown', fmtShare(unknownFraction(result.rows)), 'not covered by the database'));
+        if (hasUnknown(result)) {
+          items.push(item('Unknown', fmtShare(unknownFraction(result.rows)), 'of the reads are in no database'));
         }
       }
       return el('section', { class: 'card', 'aria-label': 'Sample summary' },
@@ -806,8 +833,8 @@
     if (result) {
       items.splice(3, 0, item('Genomes detected', fmtInt(result.rows.length)));
       items.push(item('Profiling', fmtDur(run.profileMs), 'upload and server'));
-      if (result.params.estimate_unknown && !result.params.estimate_read_counts) {
-        items.push(item('Unknown', fmtShare(unknownFraction(result.rows)), 'not covered by the database'));
+      if (hasUnknown(result)) {
+        items.push(item('Unknown', fmtShare(unknownFraction(result.rows)), 'of the reads are in no database'));
       }
     }
     return el('section', { class: 'card', 'aria-label': 'Sample summary' },
@@ -834,11 +861,23 @@
   // only groups those clades by rank/level for the chart.
   const TOP_GROUPS = 10;
   // The chart's taxonomy, rank and measure are remembered in this browser.
-  const PREF = { taxonomy: 'sylphd.reads.taxonomy', rank: 'sylphd.reads.rank', metric: 'sylphd.reads.metric' };
+  // Sequence abundance is the default: with viral databases in the same
+  // profile, taxonomic abundance (genome copies) is dominated by phages.
+  const PREF = { taxonomy: 'sylphd.reads.taxonomy', rank: 'sylphd.reads.rank', metric: 'sylphd.reads.metric', chart: 'sylphd.reads.chart', unknown: 'sylphd.reads.unknown' };
+  // Bars (one taxonomy at one rank), or a sunburst / treemap of every taxonomy source at once.
+  const CHARTS = [
+    ['bars', 'Bars', 'Stacked bar and list: one taxonomy at one rank'],
+    ['sunburst', 'Sunburst', 'Every taxonomy source as a ring sector, subdivided by its own ranks'],
+    ['treemap', 'Treemap', 'Every taxonomy source as a box, subdivided by its own ranks'],
+  ];
   const view = {
-    taxonomy: S.readChoice(PREF.taxonomy, Object.keys(TAXONOMY_LABELS)) || 'gtdb',
+    // any remembered name (sources differ per server); finishRun falls back when
+    // this sample has no such view
+    taxonomy: (() => { try { return localStorage.getItem(PREF.taxonomy); } catch { return null; } })() || 'gtdb',
     rank: 's',
-    metric: S.readChoice(PREF.metric, ['relative', 'sequence']) || 'relative',
+    metric: S.readChoice(PREF.metric, ['relative', 'sequence']) || 'sequence',
+    chart: S.readChoice(PREF.chart, CHARTS.map(([value]) => value)) || 'bars',
+    unknown: S.readChoice(PREF.unknown, ['show', 'hide']) || 'show',
     showAll: false,
   };
   const choose = (key, value) => { view[key] = value; S.writeChoice(PREF[key], value); };
@@ -856,11 +895,27 @@
     return payload.clades.some((c) => !['unclassified', 'NO_TAXONOMY'].includes(String(c.clade_name).split('|')[0]));
   }
 
+  // The chart's taxonomies: those with classified clades. "All sources" (the merged
+  // sylph-tax tree, whose levels mean different ranks per source) is only charted
+  // when nothing else is; its .sylphmpa stays downloadable either way.
   function taxonomiesWithData(sample) {
-    return Object.keys(sample.taxprof || {}).filter((taxonomy) => hasClassifiedClades(payloadFor(sample, taxonomy)));
+    const all = Object.keys(sample.taxprof || {}).filter((taxonomy) => hasClassifiedClades(payloadFor(sample, taxonomy)));
+    const own = all.filter((taxonomy) => taxonomy !== 'tax');
+    return own.length ? own : all;
   }
 
+  const sourceRanks = (sample, taxonomy) => {
+    const ranks = (payloadFor(sample, taxonomy) || {}).ranks;
+    return Array.isArray(ranks) && ranks.length ? ranks : null;
+  };
+  const sourceRankTitle = (rank) => {
+    const name = RANK_NAMES[rank] || EXTRA_RANK_NAMES[rank];
+    return name ? name[0].toUpperCase() + name.slice(1) : rank;
+  };
+
   function defaultRank(sample, taxonomy) {
+    const ranks = sourceRanks(sample, taxonomy);
+    if (ranks) return ranks[ranks.length - 1];
     if (taxonomy !== 'tax') return 's';
     // The deepest level whose clades are not strain rows (t__), i.e. the
     // species-equivalent level of the source's own scheme.
@@ -873,6 +928,8 @@
   }
 
   function rankOptions(sample, taxonomy) {
+    const ranks = sourceRanks(sample, taxonomy);
+    if (ranks) return ranks.slice().reverse().map((r) => [r, sourceRankTitle(r)]);
     if (taxonomy === 'tax') {
       const depths = ((payloadFor(sample, taxonomy) || {}).clades || []).map((c) => cladeDepth(c.clade_name));
       const max = Math.max(1, ...depths);
@@ -891,6 +948,7 @@
   }
 
   function rankLabel(taxonomy, rank) {
+    if (sourceOf(taxonomy)) return RANK_NAMES[rank] || EXTRA_RANK_NAMES[rank] || rank;
     return taxonomy === 'tax' ? `level ${rank}` : RANK_NAMES[rank];
   }
 
@@ -898,32 +956,53 @@
 
   function rankNoun(taxonomy, rank, count) {
     if (taxonomy === 'tax') return count === 1 ? 'level' : 'levels';
-    return count === 1 ? PLURAL[rank][0] : PLURAL[rank][1];
+    if (PLURAL[rank]) return count === 1 ? PLURAL[rank][0] : PLURAL[rank][1];
+    if (rank === 'k') return count === 1 ? 'kingdom' : 'kingdoms';
+    return count === 1 ? 'taxon' : 'taxa';  // vOTU, vGENUS, …: named in the rank control
   }
 
-  // Clades of exactly this depth, summed per full path (each clade name is
-  // one path). `none` is every row that does not reach the level (including
-  // the server's "unclassified"/"NO_TAXONOMY" trees), derived from the rows
-  // because that share has no clade of its own.
+  // Clades of this rank, summed per full path (each clade name is one path):
+  // matched by depth in GTDB/NCBI, by the clade's `rank` in a one-source view
+  // (its lineages skip ranks). `sources` are the rows outside this taxonomy,
+  // summed per taxonomy source (`tax_source`): in GTDB/NCBI the rows without
+  // that lineage (a viral or fungal catalog profiled alongside GTDB), in a
+  // one-source view the other sources' rows, so neither is mistaken for
+  // unclassified reads. `none` is the rest that does not reach the rank
+  // (including the server's "unclassified"/"NO_TAXONOMY" trees), derived
+  // from the rows because that share has no clade of its own.
   function cladeGroups(sample, taxonomy, rank, metric) {
     const payload = payloadFor(sample, taxonomy) || {};
+    const byRank = !!sourceRanks(sample, taxonomy);
     const depth = rankDepth(taxonomy, rank);
     const valueOf = metric === 'sequence' ? 'sequence_abundance' : 'relative_abundance';
+    const lineageColumn = TAXONOMY_COLUMNS[taxonomy];
+    const ownSource = sourceOf(taxonomy);
+    const outside = (row) => (ownSource
+      ? has(row.tax_source) && String(row.tax_source) !== ownSource
+      : !!lineageColumn && !has(row[lineageColumn]) && has(row.tax_source));
+    const bySource = new Map();
     let total = 0;
     for (const row of sample.rows || []) {
-      total += Number((metric === 'sequence' ? row.Sequence_abundance : row.Taxonomic_abundance) || 0);
+      const value = Number((metric === 'sequence' ? row.Sequence_abundance : row.Taxonomic_abundance) || 0);
+      total += value;
+      if (outside(row)) {
+        const source = String(row.tax_source);
+        bySource.set(source, (bySource.get(source) || 0) + value);
+      }
     }
+    const sources = [...bySource].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+    const sourced = sources.reduce((n, src) => n + src.value, 0);
     const groups = [];
     let classified = 0;
     for (const clade of payload.clades || []) {
-      if (cladeDepth(clade.clade_name) !== depth) continue;
+      if (byRank ? clade.rank !== rank : cladeDepth(clade.clade_name) !== depth) continue;
       if (['unclassified', 'NO_TAXONOMY'].includes(String(clade.clade_name).split('|')[0])) continue;
       const value = Number(clade[valueOf] || 0);
       groups.push({ key: clade.clade_name, name: tokenName(lastToken(clade.clade_name)), value });
       classified += value;
     }
     groups.sort((a, b) => b.value - a.value);
-    return { groups, none: Math.max(0, total - classified), total };
+    return { groups, sources, none: Math.max(0, total - classified - sourced), total };
   }
 
   const italicRank = (rank, name) => (rank === 'g' || rank === 's') && !/^unclassified/i.test(name);
@@ -934,56 +1013,107 @@
     const card = el('section', { class: 'card', 'aria-label': 'Abundance' });
     const body = el('div', { class: 'abund' });
     const dlBtn = el('button', { type: 'button', class: 'btn' });
+    // The rank control depends on the taxonomy (GTDB ranks or the levels of "All
+    // sources"), so it is rebuilt when the taxonomy changes (not on every redraw,
+    // which would take keyboard focus off the radios).
+    const rankCtl = el('div', { class: 'ctl' });
+    const drawRank = () => rankCtl.replaceChildren(
+      el('span', { class: 'ctl-label', text: view.taxonomy === 'tax' ? 'Level' : 'Rank' }),
+      S.seg(view.taxonomy === 'tax' ? 'Level' : 'Rank', 'r-rank', rankOptions(sample, view.taxonomy), view.rank, (v) => { choose('rank', v); view.showAll = false; draw(); }));
+    const tree = () => view.chart !== 'bars' && !!treeTaxonomy(sample);
+    const shownTaxonomy = () => (tree() ? treeTaxonomy(sample) : view.taxonomy);
     const draw = () => {
       body.replaceChildren(...abundanceBody(run).filter(Boolean));
-      dlBtn.textContent = `Download sylphmpa (${TAXONOMY_LABELS[view.taxonomy] || view.taxonomy})`;
+      dlBtn.textContent = `Download sylphmpa (${taxonomyLabel(shownTaxonomy())})`;
+      allBtn.hidden = shownTaxonomy() === 'tax';
+      // the sunburst and treemap show every source at every rank
+      taxCtl.hidden = tree();
+      rankCtl.hidden = tree();
+      unknownCtl.hidden = !(hasUnknown(run.result) && view.metric === 'sequence' && unknownFraction(rows) > 0.0005);
     };
-    dlBtn.addEventListener('click', () => downloadSylphmpa(run));
+    dlBtn.addEventListener('click', () => downloadSylphmpa(run, shownTaxonomy()));
+    // sylph-tax's own merged profile of every source, as `sylph-tax taxprof` writes it
+    const allBtn = el('button', { type: 'button', class: 'btn', title: TAXONOMY_TITLES.tax, text: 'Download sylphmpa (All sources)', onclick: () => downloadSylphmpa(run, 'tax') });
+    allBtn.hidden = true;
     const taxonomies = taxonomiesWithData(sample);
-    const taxonomyOptions = (taxonomies.length ? taxonomies : [view.taxonomy]).map((t) => [t, TAXONOMY_LABELS[t] || t, TAXONOMY_TITLES[t] || '']);
+    const taxonomyOptions = (taxonomies.length ? taxonomies : [view.taxonomy]).map((t) => [t, taxonomyLabel(t), taxonomyTitle(t)]);
+    const taxCtl = el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Taxonomy' }),
+      S.seg('Taxonomy', 'r-tax', taxonomyOptions, view.taxonomy, (v) => {
+        choose('taxonomy', v);
+        view.rank = startRank(sample, v);
+        view.showAll = false;
+        drawRank();
+        draw();
+      }));
+    // the reads in no database: shown (the default), or left out with the rest rescaled
+    const unknownCtl = el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Unknown reads' }),
+      S.seg('Unknown reads', 'r-unknown-view', [
+        ['show', 'Show', 'Show the reads in no database (estimated by sylph --estimate-unknown)'],
+        ['hide', 'Hide', 'Leave them out: the rest are shares of the reads found in the databases'],
+      ], view.unknown, (v) => { choose('unknown', v); draw(); }));
+    const chartCtl = treeTaxonomy(sample) && window.SylphdTaxTree
+      ? el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Chart' }),
+        S.seg('Chart type', 'r-chart', CHARTS, view.chart, (v) => { choose('chart', v); draw(); }))
+      : null;
     const controls = el('div', { class: 'abund-controls' },
-      el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Taxonomy' }),
-        S.seg('Taxonomy', 'r-tax', taxonomyOptions, view.taxonomy, (v) => {
-          choose('taxonomy', v);
-          view.rank = startRank(sample, v);
-          view.showAll = false;
-          draw();
-        })),
-      el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: view.taxonomy === 'tax' ? 'Level' : 'Rank' }),
-        S.seg(view.taxonomy === 'tax' ? 'Level' : 'Rank', 'r-rank', rankOptions(sample, view.taxonomy), view.rank, (v) => { choose('rank', v); view.showAll = false; draw(); })),
+      chartCtl,
+      unknownCtl,
+      taxCtl,
+      (drawRank(), rankCtl),
       el('div', { class: 'ctl' }, el('span', { class: 'ctl-label', text: 'Abundance' }),
         S.seg('Abundance measure', 'r-metric', [
-          ['relative', 'Taxonomic', 'Share of the organisms, corrected for genome size'],
           ['sequence', readCounts ? 'Reads (estimated)' : 'Sequence', readCounts
             ? 'Estimated number of reads of each genome (sylph --estimate-read-counts)'
             : 'Share of the reads (k-mers) assigned to the genome'],
+          ['relative', 'Taxonomic', 'Share of the organisms, corrected for genome size'],
         ], view.metric, (v) => { choose('metric', v); draw(); })));
-    card.append(el('div', { class: 'card-head' }, el('h2', { text: 'Abundance' }), el('div', { class: 'export' }, dlBtn)), controls, body);
+    card.append(el('div', { class: 'card-head' }, el('h2', { text: 'Abundance' }), el('div', { class: 'export' }, dlBtn, payloadFor(sample, 'tax') ? allBtn : null)), controls, body);
     draw();
     // the unknown fraction is a share of the sample, which estimated read counts do not give
-    if (params.estimate_unknown && !readCounts) {
-      card.append(el('p', { class: 'detail abund-note', text: `Estimated unknown fraction: ${fmtShare(unknownFraction(rows))} of the sample is not covered by the database (shown in the sequence abundance view; taxonomic abundance is relative to the genomes found).` }));
+    if (hasUnknown(run.result)) {
+      card.append(el('p', { class: 'detail abund-note', text: `Estimated unknown fraction: ${fmtShare(unknownFraction(rows))} of the reads are in no database (the dark matter, shown in the sequence abundance view; taxonomic abundance is a share of the genomes found).` }));
     }
     return card;
   }
 
+  // The unknown share of the sequence view and the factor for the other values: hidden, the
+  // unknown is left out and the rest are rescaled to shares of the reads found in the databases
+  // (what sylph reports without --estimate-unknown).
+  function unknownView(result) {
+    const share = hasUnknown(result) && view.metric === 'sequence' ? unknownFraction(result.rows) : 0;
+    if (view.unknown === 'hide' && share > 0.0005 && share < 100) return { unknown: 0, scale: 100 / (100 - share), left: share };
+    return { unknown: share, scale: 1, left: 0 };
+  }
+  const leftOut = (uv) => (uv.left ? ` · without the ${fmtShare(uv.left)} unknown (shares of the reads found)` : '');
+
   function abundanceBody(run) {
+    if (treeHandle) treeHandle.dispose();
+    treeHandle = null;
+    if (view.chart !== 'bars' && window.SylphdTaxTree && treeTaxonomy(run.result.sample)) return treeBody(run);
     const { rows, params, sample } = run.result;
     // With estimated read counts the "sequence" measures are reads, not percentages, so
     // they are shown as integers and the unknown fraction (a share of the sample) is off.
     const readCounts = !!params.estimate_read_counts;
     const reads = readCounts && view.metric === 'sequence';
     const fmtVal = reads ? (v) => fmtInt(v) : fmtShare;
-    const { groups, none } = cladeGroups(sample, view.taxonomy, view.rank, view.metric);
+    const uv = unknownView(run.result);
+    const profile = cladeGroups(sample, view.taxonomy, view.rank, view.metric);
+    const groups = profile.groups.map((g) => ({ ...g, value: g.value * uv.scale }));
+    const sources = profile.sources.map((src) => ({ ...src, value: src.value * uv.scale }));
+    const none = profile.none * uv.scale;
+    const viewLabel = taxonomyLabel(view.taxonomy);
+    const srcs = sources.filter((src) => src.value > 0.0005)
+      .map((src, i) => ({ ...src, label: `${src.name} (not in ${viewLabel})`, cls: `src-${(i % 3) + 1}` }));
     const level = rankLabel(view.taxonomy, view.rank);
-    const unknown = params.estimate_unknown && !readCounts && view.metric === 'sequence' ? unknownFraction(rows) : 0;
+    const { unknown } = uv;
     const shown = groups.slice(0, TOP_GROUPS);
     const rest = groups.slice(TOP_GROUPS);
     const restValue = rest.reduce((n, g) => n + g.value, 0);
     const segs = shown.map((g, i) => ({ label: g.name, value: g.value, cls: `cat-${(i % 10) + 1}`, rank: view.rank }));
     if (restValue > 0) segs.push({ label: `Other (${rest.length} ${rest.length === 1 ? 'taxon' : 'taxa'})`, value: restValue, cls: 'cat-other' });
+    for (const src of srcs) segs.push({ label: src.label, value: src.value, cls: src.cls, plain: true });
     if (none > 0.0005) segs.push({ label: `Not classified at ${level} level`, value: none, cls: 'cat-none', plain: true });
-    if (unknown > 0.0005) segs.push({ label: 'Unknown (not in the database)', value: unknown, cls: 'cat-unknown', plain: true });
+    if (unknown > 0.0005) segs.push({ label: UNKNOWN_LABEL, value: unknown, cls: 'cat-unknown', plain: true });
     const sum = segs.reduce((n, s) => n + s.value, 0) || 1;
     const scale = Math.max(100, sum);
 
@@ -996,8 +1126,9 @@
     const listed = [...shown.map((g, i) => ({ g, cls: `cat-${(i % 10) + 1}` })), ...rest.map((g) => ({ g, cls: 'cat-other' }))];
     const limit = view.showAll ? listed.length : 15;
     for (const { g, cls } of listed.slice(0, limit)) rowsEl.push(listRow(g.name, g.value, cls, italicRank(view.rank, g.name)));
+    for (const src of srcs) rowsEl.push(listRow(src.label, src.value, src.cls));
     if (none > 0.0005) rowsEl.push(listRow(`Not classified at ${level} level`, none, 'cat-none'));
-    if (unknown > 0.0005) rowsEl.push(listRow('Unknown (not in the database)', unknown, 'cat-unknown'));
+    if (unknown > 0.0005) rowsEl.push(listRow(UNKNOWN_LABEL, unknown, 'cat-unknown'));
     const more = listed.length > 15
       ? el('button', { type: 'button', class: 'link-btn', text: view.showAll ? 'show fewer' : `show all ${listed.length}`, onclick: () => {
         view.showAll = !view.showAll;
@@ -1006,14 +1137,75 @@
       } }) : null;
     const head = el('p', { class: 'abund-head muted' },
       `${groups.length} ${rankNoun(view.taxonomy, view.rank, groups.length)}`,
-      ` · ${view.metric === 'relative' ? 'taxonomic abundance' : reads ? 'estimated reads' : 'sequence abundance'}, ${TAXONOMY_LABELS[view.taxonomy] || view.taxonomy}`);
+      ` · ${view.metric === 'relative' ? 'taxonomic abundance' : reads ? 'estimated reads' : 'sequence abundance'}, ${viewLabel}${leftOut(uv)}`);
     return [head, bar, el('ul', { class: 'alist' }, rowsEl), more ? el('p', null, more) : null];
   }
 
-  function downloadSylphmpa(run) {
-    const payload = payloadFor(run.result.sample, view.taxonomy);
+  /* ------------------------------------------------ sunburst / treemap */
+  let treeHandle = null;
+
+  // The profile the sunburst and treemap draw: sylph-tax's "All sources" tree, which holds
+  // every source's own lineages; without it (a server without taxonomy sources) the first
+  // charted taxonomy, as one bin.
+  function treeTaxonomy(sample) {
+    if (hasClassifiedClades(payloadFor(sample, 'tax'))) return 'tax';
+    return taxonomiesWithData(sample)[0] || null;
+  }
+
+  // The taxonomy source of each top-level clade of the "All sources" tree, from the rows
+  // (the first token of a row's tax_lineage is its top-level clade). A token two sources
+  // share is one merged clade in sylph-tax's tree, so its bin names both.
+  function topSources(rows) {
+    const map = new Map();
+    for (const row of rows) {
+      if (!has(row.tax_lineage) || !has(row.tax_source)) continue;
+      const top = String(row.tax_lineage).split(';')[0];
+      if (!map.has(top)) map.set(top, new Set());
+      map.get(top).add(String(row.tax_source));
+    }
+    return (top) => (map.has(top) ? [...map.get(top)].sort().join(' + ') : null);
+  }
+
+  const rankName = (rank) => RANK_NAMES[rank] || EXTRA_RANK_NAMES[rank] || rank;
+
+  function treeBody(run) {
+    const { rows, params, sample } = run.result;
+    const reads = !!params.estimate_read_counts && view.metric === 'sequence';
+    const fmtVal = reads ? (v) => fmtInt(v) : fmtShare;
+    const taxonomy = treeTaxonomy(sample);
+    const payload = payloadFor(sample, taxonomy) || {};
+    const uv = unknownView(run.result);
+    const { unknown } = uv;
+    const clades = uv.scale === 1 ? payload.clades
+      : (payload.clades || []).map((c) => ({ ...c, sequence_abundance: Number(c.sequence_abundance || 0) * uv.scale }));
+    const tree = window.SylphdTaxTree.buildTree({
+      clades,
+      valueKey: view.metric === 'sequence' ? 'sequence_abundance' : 'relative_abundance',
+      sourceOfTop: taxonomy === 'tax' ? topSources(rows) : () => null,
+      fallbackBin: taxonomyLabel(taxonomy),
+      extras: [{ name: UNKNOWN_LABEL, value: unknown, kind: 'unknown' }],
+    });
+    const measure = view.metric === 'relative' ? 'taxonomic abundance' : reads ? 'estimated reads' : 'sequence abundance';
+    const bins = tree.filter((node) => node.kind === 'source');
+    const description = `${view.chart === 'sunburst' ? 'Sunburst' : 'Treemap'} of the ${measure}: `
+      + tree.map((node) => `${node.name} ${fmtVal(node.value)}`).join(', ');
+    const host = el('div', { class: 'taxtree-host' });
+    treeHandle = window.SylphdTaxTree.render(host, view.chart, { tree, fmtVal, rankName, description });
+    // the top level as a list: the chart's legend and its text alternative
+    const maxV = Math.max(...tree.map((node) => node.value), 1e-9);
+    const cls = (node, i) => (node.kind === 'unknown' ? 'cat-unknown' : node.kind === 'none' ? 'cat-none' : `src-solid-${(i % 3) + 1}`);
+    const list = el('ul', { class: 'alist' }, tree.map((node, i) => S.barRow({ swatch: `seg-${cls(node, i)}`, name: node.source || node.name, value: node.value, max: maxV, text: fmtVal(node.value) })));
+    const head = el('p', { class: 'abund-head muted' },
+      `${bins.length} ${bins.length === 1 ? 'taxonomy source' : 'taxonomy sources'} · ${measure}${leftOut(uv)} · `,
+      view.chart === 'sunburst' ? 'click a sector to zoom in, the centre to zoom out' : 'click a box to zoom in, drag to move, scroll to zoom');
+    return [head, host, list];
+  }
+
+  // `tax:UHGV_default` is written `tax.UHGV_default`, as the CLI names its files.
+  function downloadSylphmpa(run, taxonomy) {
+    const payload = payloadFor(run.result.sample, taxonomy);
     if (!payload || typeof payload.sylphmpa !== 'string') return;
-    download(exportAs(run, `${view.taxonomy}.sylphmpa`), payload.sylphmpa, 'text/tab-separated-values');
+    download(exportAs(run, `${String(taxonomy).replace(':', '.')}.sylphmpa`), payload.sylphmpa, 'text/tab-separated-values');
   }
 
   /* ------------------------------------------------------- genome table */

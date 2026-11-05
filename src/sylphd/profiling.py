@@ -42,10 +42,10 @@ from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
 from .protocol import ProfileParams, result_row
 from .sketchcheck import SketchFormatError, SketchHeader, parse_sketch_header
 from .taxonomy import (
-    SYLPHTAX,
     SYLPHTAX_PROFILE_COLUMNS,
     TAXONOMY_COLUMNS,
     build_taxprof,
+    is_sylphtax,
 )
 
 log = logging.getLogger("sylphd")
@@ -737,9 +737,25 @@ def run_sample(
             else (metadata.source_names() if metadata is not None else [])
         )
         sample["taxprof"] = build_taxprof(
-            name, taxprof, rows, tax_sources=sources
+            name, taxprof, rows, tax_sources=sources,
+            resolve_source=_source_resolver(metadata),
         )
     return sample
+
+
+def _source_resolver(metadata: MetadataDB | None) -> Any:
+    """Re-resolve rows against one taxonomy source (a ``tax:<source>`` profile)."""
+    if metadata is None:
+        return None
+
+    def resolve(rows: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
+        resolved = metadata.resolve(
+            [(row.get("Genome_file"), row.get("Contig_name")) for row in rows],
+            sources=[source],
+        )
+        return [{**row, **taxonomy.columns()} for row, taxonomy in zip(rows, resolved)]
+
+    return resolve
 
 
 def _taxprof_fields(
@@ -755,7 +771,7 @@ def _taxprof_fields(
     for taxonomy in taxprof:
         needed: Sequence[str] = (
             SYLPHTAX_PROFILE_COLUMNS
-            if taxonomy == SYLPHTAX
+            if is_sylphtax(taxonomy)
             else (TAXONOMY_COLUMNS[taxonomy],)
         )
         for column in needed:

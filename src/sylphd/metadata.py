@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Self
 
+from .taxonomy import available_taxonomies
+
 #: Schema version of the generated SQLite file.  Bump when the column layout
 #: or the meaning of the ``info`` table changes.
 METADATA_FORMAT_VERSION = "3"
@@ -756,6 +758,9 @@ class MetadataDB:
             summary["sources"] = []
         summary["taxonomy_sources"] = self.taxonomy_sources()
         summary["taxonomy_overlaps"] = self.taxonomy_overlaps()
+        # The taxonomies /profile can aggregate (params.taxprof), so a client
+        # need not guess them from the columns and sources.
+        summary["taxonomies"] = available_taxonomies(summary)
         summary["sylphtax_rules"] = self.info.get("sylphtax_rules") or None
         return summary
 

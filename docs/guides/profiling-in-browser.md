@@ -28,8 +28,8 @@ sketch leaves your computer.
    profile**.
 
 Under **Options** you can change the minimum ANI (default 95 %, as `sylph profile`) and the minimum
-number of k-mers per genome (10), turn on *Estimate unknown fraction* (`--estimate-unknown`) or
-*Estimate read counts* (`--estimate-read-counts`, experimental: reads per genome instead of a share
+number of k-mers per genome (10), turn off *Estimate unknown fraction* (`--estimate-unknown`, on by
+default) or turn on *Estimate read counts* (`--estimate-read-counts`, experimental: reads per genome instead of a share
 of the sample; it implies *Estimate unknown fraction*), or choose *Only sketch* to keep the sketch without uploading it.
 
 While it works the page shows the stages (reading and decompressing, sketching, uploading,
@@ -39,21 +39,45 @@ speed. **Cancel** stops the workers immediately.
 ## Results
 
 - **Summary:** sample, reads (or read pairs) and bases, sketch size, genomes detected, timings and,
-  with *Estimate unknown fraction*, the share of the sample the database does not cover.
-- **Abundance:** a stacked bar and a sorted list per taxon. Choose the **rank** (domain to
-  species), the **taxonomy** (GTDB, NCBI, or *All sources* for the server's sylph-tax profile of
-  UHGV, fungi and other sources) and the **abundance** (taxonomic or sequence). The clades come
-  from the server's `/profile` `taxprof` response (the same aggregation as
+  the estimated share of the reads that are in no database (the "dark matter"; *Estimate unknown
+  fraction*, on by default).
+- **Abundance:** three charts, switched with **Chart** (the choice is kept in this browser).
+  *Bars* (the default) is described below. *Sunburst* and *Treemap* show every taxonomy source in
+  one chart: one bin per source (e.g. `GTDB_r232`, `UHGV_default`), subdivided by that source's own
+  ranks down to species (or vOTU), from the server's *All sources* profile (sylph-tax's merged
+  tree, the `.sylphmpa` of the download button); a chain of single children is one node, e.g.
+  *GTDB_r232 › Bacteria*. In the sequence view the reads in no database are their own bin, so a
+  poorly covered sample shows its dark matter at a glance. Click a sector or box to zoom in; the
+  sunburst zooms out with its centre (its rings widen as you zoom in, labels that do not fit are
+  hidden); the treemap zooms out with the path below it, pans by dragging and zooms with the mouse wheel
+  (*Reset view* lays it out again). **Unknown reads: Hide** (in every chart) leaves the unknown
+  share out and rescales the rest to shares of the reads found in the databases, as `sylph
+  profile` reports them without `--estimate-unknown`. Hover for the full lineage and value. The chart library (Apache
+  ECharts, 369 kB gzipped, vendored) is loaded the first time one of these charts is chosen.
+- **Bars:** a stacked bar and a sorted list per taxon. Choose the **taxonomy** (GTDB, NCBI,
+  and one per taxonomy source of the server with hits in the sample, such as `UHGV_default` or
+  `FungiRefSeq-latest`), the **rank** (domain to species, or the source's own ranks, e.g. vOTU to
+  vFAM) and the **abundance** (sequence, the default, or taxonomic). The clades come from the
+  server's `/profile` `taxprof` response (the same aggregation as
   [Taxonomic profiles](taxonomic-profiles.md#lineage-rules)); the page only groups them by rank.
-  For *All sources* each level is one level of the source's own scheme, so the selector says
-  *Level 1…N* instead of domain/species. Genomes without a name at the chosen level are shown as
-  *not classified at that level*.
+  Hits outside the chosen taxonomy are one segment per taxonomy source (horizontal lines), e.g.
+  *UHGV_default (not in GTDB)*; the taxa past the top ten are *Other* (vertical lines); only
+  genomes of the taxonomy without a name at the chosen rank are *not classified at that level*
+  (diagonal hatch). In the sequence view the reads in no database are the last segment,
+  *Unknown: in no database (estimated)* (hatched the other way): sylph's `--estimate-unknown`
+  makes sequence abundance a share of all reads, so for a poorly covered sample (a marine
+  metagenome, say) most of the bar can be unknown. Taxonomic abundance is a share of the genomes
+  found, so it has no unknown segment. A sketch made from contigs has no read statistics, so sylph
+  cannot estimate the unknown share and the segment is left out. Sequence abundance is the default because taxonomic abundance counts genome
+  copies, which small, abundant phages dominate when viral catalogs are profiled with GTDB.
 - **Detected genomes:** a sortable table with both abundances, the adjusted ANI (and its 5–95 %
   interval), the effective coverage, the GTDB species and lineage, the NCBI organism and taxid, and
   links to NCBI plus, for a GTDB hit, GTDB (otherwise a badge naming the hit's taxonomy source).
 - **Downloads:** the table as TSV (the same columns as `sylphd profile`), the response as JSON, the
   taxonomic profile as `.sylphmpa` (the same file as `sylphd profile --taxprof`, for the selected
-  taxonomy) and the **sketch** itself as `<sample>.sylsp`.
+  taxonomy; a source's file is `sylph-tax taxprof -t <source>`), the merged sylph-tax profile of
+  all sources (*All sources*, `sylph-tax taxprof` over every source) and the **sketch** itself as
+  `<sample>.sylsp`.
 
 The downloaded sketch works with the command line: `sylphd profile sample.sylsp` uploads it as it
 is. The sketches are byte-identical to the ones `sylphd` makes with pysylph, apart from the order

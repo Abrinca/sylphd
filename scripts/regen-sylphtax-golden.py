@@ -15,7 +15,9 @@ them:
 * ``<sample>.annotated.sylphmpa`` — the same run with ``-a`` (virus hosts), used
   as the reference for the resolved hosts (sylphd does not emit the column yet);
 * ``samples.matrix.<value>.tsv`` — both samples through ``sylph-tax merge``;
-* ``sample-a.matrix.<value>.tsv`` — one sample, which keeps the profile order.
+* ``sample-a.matrix.<value>.tsv`` — one sample, which keeps the profile order;
+* ``<sample>.only-<source>.sylphmpa`` — ``sylph-tax taxprof -t <source>`` with
+  one source, the reference for ``--taxonomy tax:<source>``.
 
 Usage::
 
@@ -125,6 +127,8 @@ def main() -> int:
         try:
             run_taxprof(names, annotate_hosts=False, prefix="")
             run_taxprof(names, annotate_hosts=True, prefix="annotated-")
+            for name in names:
+                run_taxprof([name], annotate_hosts=False, prefix=f"only-{name}-")
         finally:
             os.chdir(previous)
 
@@ -139,6 +143,11 @@ def main() -> int:
                 target.write_bytes(path.read_bytes())
                 print(f"wrote {target.relative_to(ROOT)}")
             written.append(DATA / f"{sample['name']}.sylphmpa")
+            for name in names:
+                path = directory / f"only-{name}-{sample['name']}.sylphmpa"
+                target = DATA / f"{sample['name']}.only-{name}.sylphmpa"
+                target.write_bytes(path.read_bytes())
+                print(f"wrote {target.relative_to(ROOT)}")
 
         # Two samples: pandas sorts the clade names; one sample keeps the order.
         for prefix, files in (

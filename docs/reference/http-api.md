@@ -75,7 +75,9 @@ Reports:
   local path), `md5`, `keys`, `has_host` — `taxonomy_overlaps` — the pairs of sources that share keys, each
   pair once, in setup order: `{"sources": [a, b], "keys": n, "examples": [...]}`, where `b` is
   the later-imported source and wins for those keys — and `sylphtax_rules` (the sylph-tax version
-  whose rules apply). `examples` holds up to five shared keys.
+  whose rules apply). `examples` holds up to five shared keys. `taxonomies` lists every
+  taxonomy `/profile` `taxprof` accepts with this file: `gtdb`/`ncbi` when their column exists,
+  then `tax` and one `tax:<source>` per taxonomy source (see [`taxprof`](#taxprof)).
   Its `columns` also list the four `tax_*` columns, which `fields` can then select;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
   `name` is the string of `--name` (at most 80 characters, one line); `about` is
@@ -178,7 +180,7 @@ At most 4096 sketches fit in one request. Non-file form fields such as `params` 
 |---|---|
 | `minimum_ani` | minimum adjusted ANI, 0-100; `null` or omitted uses sylph's default |
 | `seq_id` | read sequence identity in percent, 0-100 |
-| `estimate_unknown` | boolean |
+| `estimate_unknown` | boolean; `Sequence_abundance` is then a share of all reads, so 100 minus its sum is the estimated share in no database. A sketch without read statistics (made from contigs) gets `null` for `Eff_cov` and both abundances (sylph's inf/NaN) |
 | `estimate_read_counts` | boolean, `profile` only; `Sequence_abundance` then holds estimated read counts (sylph's experimental option) and implies `estimate_unknown` |
 | `min_number_kmers` | integer >= 0 (default `10`) |
 | `min_contain` | integer >= 0 (default `7`) |
@@ -187,7 +189,7 @@ At most 4096 sketches fit in one request. Non-file form fields such as `params` 
 | `names` | list with one name per sketch (defaults to the part file names, else `sample-N`) |
 | `fields` | list of metadata columns; omitted means all, `[]` means none; needs a metadata database |
 | `tax_sources` | list of taxonomy source names: resolve hits against these sources only (default: all of them; an empty list is the same). Unknown names, or a server without sylph-tax sources, are a 400 |
-| `taxprof` | `profile` only: taxonomies to aggregate on the server, from `gtdb`, `ncbi` and `tax`. Validated against the metadata file's columns and sylph-tax sources (a 400 names what is missing). Each returned sample then carries `taxprof[taxonomy]` (see below) |
+| `taxprof` | `profile` only: taxonomies to aggregate on the server, from `gtdb`, `ncbi`, `tax` and `tax:<source>` (listed in `/info` `metadata.taxonomies`). Validated against the metadata file's columns and sylph-tax sources (a 400 names what is missing). Each returned sample then carries `taxprof[taxonomy]` (see below) |
 | `mode` | optional, must match the endpoint (`query` or `profile`) |
 
 Unknown keys are rejected with a 400. The client sketches with `database.c` and `database.k` from
@@ -271,6 +273,24 @@ metadata columns of the same name; `tax` needs a metadata file with sylph-tax so
 server adds the taxonomy columns the requested taxonomies need to `rows` even when `fields` hides
 them. `taxprof` is `/profile` only (`/query` rejects it), and one requested taxonomy the metadata
 file cannot provide is a 400.
+
+`tax:<source>` (for example `tax:UHGV_default`) is one taxonomy source alone, bit-exact
+`sylph-tax taxprof -t <source>`: the hits are resolved against that source only, so the hits of
+other sources are `NO_TAXONOMY`, and a key that a later source overrides in `tax` keeps this
+source's lineage. `taxonomies_used` is `[source]`. Its payload adds the source's `ranks`, read
+from the lineage tokens (`s__Name` is rank `s`, `vOTU-052719` is rank `vOTU`) and ordered from the
+root as the lineages order them, and every clade a `rank` (that of its last token; `null` for
+strains, `NO_TAXONOMY` and `UNKNOWN`). Lineages may skip ranks (a vOTU without a vGENUS), so a
+client picks a rank's clades by `rank`, not by depth:
+
+```json
+"tax:UHGV_default": {
+  "taxonomies_used": ["UHGV_default"],
+  "ranks": ["vFAM", "vSUBFAM", "vGENUS", "vSUBGEN", "vOTU"],
+  "clades": [{"clade_name": "vFAM-00009|vSUBFAM-00023|vOTU-166116", "rank": "vOTU", ...}, ...],
+  ...
+}
+```
 
 ## `POST /assembly` { #post-assembly }
 

@@ -722,3 +722,64 @@ class TestSylphTaxFlags:
         }
         header = (tmp_path / "m-tax.tsv").read_text().splitlines()[0]
         assert header == "clade_name\tone"
+
+
+class TestOneSource:
+    """``tax:<source>``: one sylph-tax source, charted by its own ranks."""
+
+    def test_parse_keeps_the_source_case(self) -> None:
+        from sylphd.taxonomy import taxonomy_file_label
+
+        assert parse_taxonomies("gtdb, TAX:UHGV_default") == ("gtdb", "tax:UHGV_default")
+        assert taxonomy_file_label("tax:UHGV_default") == "tax.UHGV_default"
+        with pytest.raises(TaxonomyError, match="names no taxonomy source"):
+            parse_taxonomies("tax:")
+
+    def test_unknown_source_is_refused(self) -> None:
+        metadata = {
+            "columns": ["tax_source", "tax_key", "tax_lineage"],
+            "taxonomy_sources": [{"name": "UHGV_default"}],
+        }
+        assert resolve_taxonomy_columns(["tax:UHGV_default"], metadata)
+        with pytest.raises(TaxonomyError, match="no taxonomy source 'Fungi'"):
+            resolve_taxonomy_columns(["tax:Fungi"], metadata)
+
+    def test_available_taxonomies(self) -> None:
+        from sylphd.taxonomy import available_taxonomies
+
+        metadata = {
+            "columns": ["gtdb_taxonomy", "tax_source", "tax_key", "tax_lineage"],
+            "taxonomy_sources": [{"name": "GTDB_r232"}, {"name": "UHGV_default"}],
+        }
+        assert available_taxonomies(metadata) == ["gtdb", "tax", "tax:GTDB_r232", "tax:UHGV_default"]
+        assert available_taxonomies(None) == []
+
+    def test_token_ranks(self) -> None:
+        from sylphd.taxonomy import token_rank
+
+        assert token_rank("s__Pyricularia oryzae") == "s"
+        assert token_rank("vOTU-052719") == "vOTU"
+        assert token_rank("g__CAG-492") == "g"
+        assert token_rank("t__GCA_1") is None  # strains are not a rank
+        assert token_rank("UNKNOWN") is None
+        assert token_rank("NO_TAXONOMY") is None
+        assert token_rank("CAG-492x") is None
+
+    def test_ranks_merge_lineages_that_skip_ranks(self) -> None:
+        """A vOTU without a vGENUS still sorts below vGENUS, and other sources are NO_TAXONOMY."""
+        rows = [
+            {"tax_source": "UHGV", "tax_key": "U1", "tax_lineage": "vFAM-1;vOTU-1",
+             "Taxonomic_abundance": 50.0, "Sequence_abundance": 5.0},
+            {"tax_source": "UHGV", "tax_key": "U2", "tax_lineage": "vFAM-1;vSUBFAM-2;vGENUS-3;vOTU-2",
+             "Taxonomic_abundance": 30.0, "Sequence_abundance": 5.0},
+            {"tax_source": "GTDB_r232", "tax_key": "G1", "tax_lineage": GTDB_SPECIES,
+             "Genome_file": "G1.fna.gz", "Contig_name": "c1",
+             "Taxonomic_abundance": 20.0, "Sequence_abundance": 90.0},
+        ]
+        payload = build_taxprof("s", ["tax:UHGV"], rows)["tax:UHGV"]
+        assert payload["ranks"] == ["vFAM", "vSUBFAM", "vGENUS", "vOTU"]
+        assert payload["taxonomies_used"] == ["UHGV"]
+        by_name = {clade["clade_name"]: clade for clade in payload["clades"]}
+        assert by_name["vFAM-1|vOTU-1"]["rank"] == "vOTU"
+        assert by_name["NO_TAXONOMY"]["relative_abundance"] == 20.0
+        assert sum(c["sequence_abundance"] for c in payload["clades"] if c["rank"] == "vOTU") == 10.0

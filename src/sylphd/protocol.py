@@ -403,7 +403,7 @@ def result_row(
         "Sample_file": sample_name,
         "Genome_file": genome_file,
         "Adjusted_ANI": float(result.ani),
-        "Eff_cov": float(result.coverage),
+        "Eff_cov": _finite(result.coverage),
         "ANI_5-95_percentile": None if hide_ani_ci else _pair(result.ani_ci),
         "Eff_lambda": None if result.effective_lambda is None else float(result.effective_lambda),
         "Lambda_status": result.lambda_status,
@@ -415,8 +415,8 @@ def result_row(
         "Contig_name": genome.description,
     }
     if mode == "profile":
-        row["Taxonomic_abundance"] = float(result.taxonomic_abundance)
-        row["Sequence_abundance"] = float(result.sequence_abundance)
+        row["Taxonomic_abundance"] = _finite(result.taxonomic_abundance)
+        row["Sequence_abundance"] = _finite(result.sequence_abundance)
         row["kmers_reassigned"] = int(result.kmers_reassigned)
     elif mode != "query":
         raise ValueError(f"unknown mode {mode!r}")
@@ -427,6 +427,17 @@ def result_row(
         for column in selected:
             row[column] = metadata.get(column)
     return row
+
+
+def _finite(value: object) -> float | None:
+    """``value`` as a float, or ``None`` for sylph's ``inf``/``NaN``.
+
+    With ``estimate_unknown`` a sketch without read statistics (one made from
+    contigs) gets ``True_cov`` = inf and NaN abundances, as in ``sylph profile
+    -u``; JSON has no such numbers, so they become ``null`` (an empty TSV cell).
+    """
+    number = float(value)  # type: ignore[arg-type]
+    return number if math.isfinite(number) else None
 
 
 def _pair(value: object) -> list[float] | None:

@@ -12,12 +12,15 @@ licensed.
 
 ## Third-party code
 
-The web page vendors two small libraries, unmodified, in `web/vendor/` (with their licenses and
+The web page vendors three libraries, unmodified, in `web/vendor/` (with their licenses and
 exact versions in the [README there](https://github.com/Abrinca/sylphd/tree/main/web/vendor)):
 
 - [marked](https://github.com/markedjs/marked) 18.1.2, MIT License, Copyright (c) 2018+ MarkedJS and
   2011-2018 Christopher Jeffrey. Renders the Markdown text an operator publishes about a server.
 - [DOMPurify](https://github.com/cure53/DOMPurify) 3.4.17, by Cure53 and contributors, used under
   the Apache License 2.0 (it is dual-licensed with the MPL 2.0). Sanitizes that rendered text.
+- [Apache ECharts](https://echarts.apache.org/) 6.1.0, Apache License 2.0, Copyright 2017-2026 The
+  Apache Software Foundation (its `NOTICE` is kept next to it). Draws the sunburst and treemap of a
+  reads profile; it is loaded only when one of those charts is chosen.
 
 The *use* of the public web service is covered separately by its [terms](terms.md).

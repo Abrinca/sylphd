@@ -4,6 +4,62 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Web: sunburst and treemap charts of every taxonomy source at once.** A *Chart* switch next to
+  the abundance controls offers *Bars* (the default, unchanged), *Sunburst* and *Treemap*. The new
+  two show one bin per taxonomy source (GTDB, UHGV, fungi, ...), each subdivided by its own ranks,
+  from the server's *All sources* (sylph-tax) profile, plus the reads in no database in the
+  sequence view. Click to zoom in; hover for the lineage; the treemap also pans by dragging and
+  zooms with the mouse wheel. An *Unknown reads: Show / Hide* switch (all three charts) leaves the
+  unknown share out and rescales the rest to the reads found. Drawn with Apache ECharts 6.1.0
+  (Apache-2.0, vendored unmodified in `web/vendor/`, loaded only when one of these charts is chosen).
+- **One taxonomic profile per taxonomy source: `tax:<source>`.** `/profile` `taxprof` (and
+  `sylphd profile --taxonomy`) accept e.g. `tax:UHGV_default`, bit-exact
+  `sylph-tax taxprof -t UHGV_default`: the hits are re-resolved against that source alone, so the
+  other sources' hits are `NO_TAXONOMY` and a key a later source overrides keeps this source's
+  lineage (new goldens from the real sylph-tax 1.9.2). The payload adds the source's `ranks`, read
+  from the lineage tokens (`s__…`, `vOTU-…`) and merged across lineages that skip ranks, and each
+  clade's `rank`. `/info` `metadata.taxonomies` lists every accepted taxonomy. The CLI writes
+  `<sample>.tax.<source>.sylphmpa`.
+- **Web: a chart per taxonomy source.** The taxonomy control lists GTDB, NCBI and every source with
+  hits (e.g. `UHGV_default`, charted vOTU … vFAM), from the server's list, so nothing is
+  hard-coded. *All sources* (the merged sylph-tax tree, whose levels mean different ranks per
+  source) is no longer charted next to them; its `.sylphmpa` has its own download button.
+
+### Changed
+
+- **Web: the reads in no database (the "dark matter") are shown by default.** *Estimate unknown
+  fraction* (sylph `--estimate-unknown`) is now on, so sequence abundance is a share of all reads
+  and the bar ends in an "Unknown: in no database (estimated)" segment. Without it sylph shares
+  the sample out over the genomes it found, and a marine metagenome with 80 % unknown reads looked
+  fully identified. The option can still be turned off; the API default is unchanged (as sylph).
+- **Web: the abundance chart opens on sequence abundance.** With viral databases profiled
+  alongside GTDB, taxonomic abundance counts genome copies, so small, abundant phages can take
+  most of the share and leave the prokaryotes as a sliver beside a large "not classified" block.
+  Taxonomic abundance stays one click away (and a choice made earlier in the browser is kept); the
+  `.sylphmpa` download is unchanged.
+- **Web: "Other" is shaded with vertical lines** instead of a solid gray fill, in the bar, its
+  list rows and swatches, so the aggregate of many small taxa no longer reads as one large taxon.
+  The same applies to the other "Other" groups (contig chart, usage statistics).
+- **Web: other taxonomy sources get their own segments** in every view. Genomes without a lineage
+  in that taxonomy (a viral or fungal catalog profiled alongside GTDB, or GTDB hits in the UHGV view)
+  are summed per `tax_source` and shown as e.g. "UHGV_default (not in GTDB)", with horizontal lines in
+  a muted tone per source, instead of falling into the hatched "not classified" share, which now
+  holds only the true remainder. The sources come from the rows, so nothing is hard-coded.
+
+### Fixed
+
+- **`estimate_unknown` on a sketch made from contigs no longer fails with 500.** sylph reports
+  `True_cov` inf and NaN abundances for a sketch without read statistics (as `sylph profile -u`
+  does); JSON has no such numbers, so the encoding failed and the page said it could not reach the
+  server. They are now `null` in JSON and empty cells in TSV, and the page leaves out the unknown
+  share it cannot compute.
+- **Web: the rank control follows the taxonomy.** Switching to *All sources* kept the GTDB rank
+  buttons (Species … Domain) while the chart had moved to the source levels.
+
 ## [0.3.3] - 2026-10-31
 
 ### Changed

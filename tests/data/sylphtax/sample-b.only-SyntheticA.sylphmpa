@@ -1,0 +1,12 @@
+#SampleID	sample-b	Taxonomies_used:['SyntheticA']
+clade_name	relative_abundance	sequence_abundance	ANI (if strain-level)	Coverage (if strain-level)
+d__Bacteria	60.0	55.0	NA	NA
+NO_TAXONOMY	40.0	45.0	NA	NA
+d__Bacteria|p__Pseudomonadota	60.0	55.0	NA	NA
+NO_TAXONOMY|t__nothing_here.fna.gz:ctg9	40.0	45.0	88.5	0.25
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria	60.0	55.0	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales	60.0	55.0	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales|f__Enterobacteriaceae	60.0	55.0	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales|f__Enterobacteriaceae|g__Escherichia	60.0	55.0	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales|f__Enterobacteriaceae|g__Escherichia|s__Escherichia coli	60.0	55.0	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Enterobacterales|f__Enterobacteriaceae|g__Escherichia|s__Escherichia coli|t__GCA_000005845.2	60.0	55.0	99.75	6.0

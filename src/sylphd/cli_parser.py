@@ -682,7 +682,8 @@ def _add_profile_options(parser: argparse.ArgumentParser) -> None:
         metavar="LIST",
         help=(
             "taxonomies to aggregate, comma-separated from "
-            f"{', '.join(TAXONOMIES)} [default: "
+            f"{', '.join(TAXONOMIES)}, or tax:SOURCE for one taxonomy source "
+            "(sylph-tax taxprof -t SOURCE) [default: "
             + ", ".join(TAXONOMIES[:2])
             + f", plus {TAXONOMIES[-1]} when the server has taxonomy sources]"
         ),

@@ -1,0 +1,31 @@
+#SampleID	sample-a	Taxonomies_used:['SyntheticB']
+clade_name	relative_abundance	sequence_abundance	ANI (if strain-level)	Coverage (if strain-level)
+NO_TAXONOMY	66.55	53.35	NA	NA
+d__Bacteria	40.0	40.0	NA	NA
+later	0.9	0.8	NA	NA
+vFAM-2	0.5	0.5	NA	NA
+d__Bacteria|p__SecondFile	40.0	40.0	NA	NA
+NO_TAXONOMY|t__votus_full.fna.gz:UHGV-0000001	30.0	25.0	98.0	2.5
+NO_TAXONOMY|t__GCF_003697165.2_genomic.fna.gz:ctg1	10.0	8.0	97.25	1.5
+NO_TAXONOMY|t__GCF_010093815.1_Psehy1_genomic.fna:NW_024067585.1	5.0	4.0	99.0	3.0
+NO_TAXONOMY|t__GCF_999999999.1_ASM123v1_genomic.fna.gz:c	4.0	3.0	96.0	1.0
+NO_TAXONOMY|t__legacy.fa:c	3.0	2.0	95.0	0.75
+NO_TAXONOMY|t__P_ASM9_genomic.fna.gz:c	2.5	2.0	93.5	0.5
+NO_TAXONOMY|t__unknown.fna.gz:ctg	2.0	1.0	90.0	0.5
+NO_TAXONOMY|t__split.v1.fna:c	1.5	1.0	94.0	0.25
+later|lineage	0.9	0.8	NA	NA
+NO_TAXONOMY|t__fungi_genomic.fna:c	0.8	0.7	89.5	0.15
+vFAM-2|vOTU-2	0.5	0.5	NA	NA
+d__Bacteria|p__SecondFile|s__Second file	40.0	40.0	NA	NA
+NO_TAXONOMY|t__IMGVR_UViG_1.fna:IMGVR_UViG_1|Ga1	1.25	1.0	93.0	0.5
+NO_TAXONOMY|t__unknown2.fna:EMPTY-1|c	1.2	1.0	91.5	0.3
+NO_TAXONOMY|t__unknown.fna:|extra	1.1	0.9	90.5	0.2
+NO_TAXONOMY|t__tie1.fna:TIE-1|x	1.1	1.1	93.0	0.4
+NO_TAXONOMY|t__tie2.fna:TIE-2|x	1.1	1.1	93.0	0.4
+NO_TAXONOMY|t__weird_genomic.fna.gz:WEIRD-1|x	1.0	0.75	92.0	0.25
+later|lineage|ms	0.9	0.8	NA	NA
+NO_TAXONOMY|t__repeat2.fna:REPEAT-1|y	0.6	0.5	92.5	0.3
+vFAM-2|vOTU-2|t__UHGV-0000002	0.5	0.5	91.0	0.1
+NO_TAXONOMY|t__repeat.fna:REPEAT-1|x	0.4	0.3	91.0	0.2
+d__Bacteria|p__SecondFile|s__Second file|t__GCA_000005845.2	40.0	40.0	99.5	4.0
+later|lineage|ms|t__MS-1	0.9	0.8	90.0	0.2

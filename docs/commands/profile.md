@@ -52,7 +52,7 @@ the sketches to the server. For the ANI hits without abundances see [`query`](qu
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--taxonomy LIST` | `gtdb,ncbi` (+ `tax`) | taxonomies to aggregate, comma-separated from `gtdb`, `ncbi`, `tax`; `tax` is added to the default when the server's metadata file has sylph-tax sources |
+| `--taxonomy LIST` | `gtdb,ncbi` (+ `tax`) | taxonomies to aggregate, comma-separated from `gtdb`, `ncbi`, `tax` and `tax:SOURCE`; `tax` is added to the default when the server's metadata file has sylph-tax sources |
 | `--tax-source NAME` | all sources | with `--taxonomy tax`: resolve against these taxonomy sources only (repeatable, in `setup` order) |
 | `--taxprof PREFIX` | none | write one sylph-tax-style `.sylphmpa` per sample and taxonomy as `PREFIX<sample>.<taxonomy>.sylphmpa` |
 | `--taxmatrix PREFIX` | none | write one clade × sample matrix per taxonomy as `PREFIX<taxonomy>.tsv` |
@@ -63,7 +63,9 @@ sources. The aggregation happens on the server (`/profile` `taxprof`): the comma
 returned `.sylphmpa` text and only lays out the matrix across samples. `tax` needs a metadata file
 with sylph-tax sources, where the **default `--taxprof` writes three files per sample** (`.gtdb`, `.ncbi`, `.tax`)
 instead of two — pass `--taxonomy gtdb,ncbi` for the old set. `tax` is bit-exact `sylph-tax taxprof` over all sources (opaque lineages, `UNKNOWN`,
-`NO_TAXONOMY`, level-based ordering); `gtdb` and `ncbi` keep sylphd's own normalisation. With two
+`NO_TAXONOMY`, level-based ordering); `tax:SOURCE` (e.g. `tax:UHGV_default`) is bit-exact
+`sylph-tax taxprof -t SOURCE`, one source alone, written as `PREFIX<sample>.tax.SOURCE.sylphmpa`;
+`gtdb` and `ncbi` keep sylphd's own normalisation. With two
 or more samples the matrix rows are sorted lexicographically, like `sylph-tax merge`. See
 [Taxonomic profiles](../guides/taxonomic-profiles.md).
 
