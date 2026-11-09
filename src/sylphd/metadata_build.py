@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
-from . import __version__
+from . import __version__, ncbi_taxonomy
 from .catalog import SYLPHTAX_VERSION
 from .metadata import (
     _DICT_POSITIONS,
@@ -348,6 +348,101 @@ def _import_taxonomy(
     return skipped, overlaps
 
 
+#: Rows that only the NCBI enrichment writes (GTDB rows have a ``gtdb_taxonomy``).
+_NCBI_ONLY = "gtdb_taxonomy IS NULL AND ncbi_taxonomy IS NOT NULL"
+
+
+def _use_accessions(connection: sqlite3.Connection) -> None:
+    """Make ``assembly_accession(key)`` available to SQL."""
+    connection.create_function(
+        "assembly_accession",
+        1,
+        ncbi_taxonomy.assembly_accession,
+        deterministic=True,
+    )
+
+
+def _prune_ncbi_rows(connection: sqlite3.Connection) -> None:
+    """Delete enrichment rows that no source key refers to any more."""
+    _use_accessions(connection)
+    connection.execute(
+        f"DELETE FROM metadata_data WHERE {_NCBI_ONLY} AND accession NOT IN "
+        "(SELECT assembly_accession(key) FROM taxonomy_entry "
+        "WHERE assembly_accession(key) IS NOT NULL)"
+    )
+
+
+def _enrich_ncbi(
+    connection: sqlite3.Connection,
+    cache_dir: Path,
+    *,
+    progress: object = None,
+) -> dict[str, dict[str, int]]:
+    """Give the sylph-tax keys GTDB does not cover an NCBI lineage.
+
+    Each such key's assembly accession and taxid come from NCBI's assembly
+    summaries, and its lineage from ``rankedlineage.dmp``.  The result is
+    stored as ordinary metadata rows (same accession, GTDB columns NULL,
+    ``ncbi_taxid``/``ncbi_taxonomy``/``ncbi_organism_name`` filled), so the
+    metadata lookup, the NCBI profile view and the NCBI links need no change.
+    A key is covered when GTDB has a row for its *extracted* accession, and a
+    GTDB row is never replaced.  Every run deletes the earlier enrichment rows
+    and rebuilds them, so a rerun is idempotent and values are refreshed.
+    Returns per-source counts.
+    """
+    _use_accessions(connection)
+    connection.execute(f"DELETE FROM metadata_data WHERE {_NCBI_ONLY}")
+    query = (
+        "SELECT s.name, assembly_accession(e.key) FROM taxonomy_entry AS e "
+        "JOIN taxonomy_source AS s ON s.id = e.source_id "
+        "WHERE NOT EXISTS (SELECT 1 FROM metadata_data AS m "
+        "WHERE m.accession = COALESCE(assembly_accession(e.key), e.key) "
+        "AND m.gtdb_taxonomy IS NOT NULL) ORDER BY s.ord"
+    )
+    accessions = {
+        accession
+        for _, accession in connection.execute(query)
+        if accession is not None
+    }
+    found = ncbi_taxonomy.lookup(sorted(accessions), cache_dir, progress=progress)
+    counts: dict[str, dict[str, int]] = {}
+    for name, accession in connection.execute(query):
+        count = counts.setdefault(
+            str(name),
+            {"mapped": 0, "no_accession": 0, "not_in_summary": 0, "no_lineage": 0},
+        )
+        genome = found.get(accession)
+        if accession is None:
+            count["no_accession"] += 1
+        elif genome is None:
+            count["not_in_summary"] += 1
+        elif genome.lineage is None:
+            count["no_lineage"] += 1
+        else:
+            count["mapped"] += 1
+    mapped = {
+        accession: genome
+        for accession, genome in found.items()
+        if genome.lineage is not None
+    }
+    if mapped:
+        taxonomies = _load_dictionary(connection, "dict_ncbi_taxonomy")
+        organisms = _load_dictionary(connection, "dict_ncbi_organism_name")
+        connection.executemany(
+            "INSERT OR IGNORE INTO metadata_data "
+            "(accession, ncbi_taxid, ncbi_taxonomy, ncbi_organism_name) "
+            "VALUES (?, ?, ?, ?)",
+            [
+                (accession, genome.taxid, taxonomies.encode(genome.lineage),
+                 organisms.encode(genome.organism))
+                for accession, genome in mapped.items()
+            ],
+        )
+        taxonomies.flush(connection, "dict_ncbi_taxonomy")
+        organisms.flush(connection, "dict_ncbi_organism_name")
+    return counts
+
+
 def _finish(connection: sqlite3.Connection, info: dict[str, str]) -> None:
     _write_info(connection, info)
     connection.commit()
@@ -364,9 +459,13 @@ def _summary(
     skipped: list[str],
     overlaps: list[TaxonomyOverlap],
     release: str | None,
+    ncbi: dict[str, dict[str, int]] | None = None,
 ) -> dict[str, object]:
     """What ``build_metadata_db`` and ``update_metadata_db`` return."""
     _report_taxonomy_overlaps(overlaps)
+    for source in taxonomy_sources:
+        if ncbi and str(source["name"]) in ncbi:
+            source["ncbi"] = ncbi[str(source["name"])]
     return {
         "path": str(output),
         "rows": rows,
@@ -389,6 +488,8 @@ def build_metadata_db(
     reps_only: bool = False,
     progress: object = None,
     taxonomy: Sequence[TaxonomySource] = (),
+    ncbi_cache: str | os.PathLike[str] | None = None,
+    download_progress: object = None,
 ) -> dict[str, object]:
     """Build a SQLite metadata database from GTDB metadata TSV files.
 
@@ -403,6 +504,11 @@ def build_metadata_db(
     release (``GTDB_r232`` with r232 metadata) is skipped and reported in
     ``skipped_taxonomy`` instead of being stored twice, while a local file or a
     different release is imported (``is_redundant_gtdb_source``).
+
+    ``ncbi_cache`` (``setup --ncbi-taxonomy``) gives the sylph-tax keys that
+    GTDB does not cover an NCBI lineage; NCBI's taxdump is downloaded into a
+    temporary directory there and removed again, the assembly summaries are
+    streamed; ``download_progress`` reports those transfers.
     """
     if not files and not taxonomy:
         raise ValueError("at least one metadata file or taxonomy source is required")
@@ -494,7 +600,12 @@ def build_metadata_db(
         )
         taxonomy_source_rows = _taxonomy_source_list(connection)
 
-        _finish(connection, {
+        counts = (
+            _enrich_ncbi(connection, Path(ncbi_cache), progress=download_progress)
+            if ncbi_cache is not None
+            else {}
+        )
+        info = {
             "format_version": METADATA_FORMAT_VERSION,
             "sylphd_version": __version__,
             "release": "" if release is None else str(release),
@@ -505,7 +616,10 @@ def build_metadata_db(
             "reps_only": "true" if reps_only else "false",
             "sylphtax_rules": SYLPHTAX_VERSION,
             "taxonomy_sources": json.dumps(taxonomy_source_rows),
-        })
+        }
+        if ncbi_cache is not None:
+            info["ncbi_taxonomy"] = json.dumps(counts)
+        _finish(connection, info)
 
     return _summary(
         output,
@@ -515,6 +629,7 @@ def build_metadata_db(
         skipped=skipped_taxonomy,
         overlaps=overlaps,
         release=release_text,
+        ncbi=counts,
     )
 
 
@@ -561,6 +676,8 @@ def update_metadata_db(
     taxonomy: Sequence[TaxonomySource] = (),
     force: bool = False,
     progress: object = None,
+    ncbi_cache: str | os.PathLike[str] | None = None,
+    download_progress: object = None,
 ) -> dict[str, object]:
     """Copy an existing metadata database, add taxonomy sources, write ``output``.
 
@@ -629,11 +746,22 @@ def update_metadata_db(
             progress=progress,
         )
         sources = _taxonomy_source_list(connection)
-        _finish(connection, {
+        # Without the flag the enrichment rows are kept, minus those no source
+        # refers to any more, and the counts of replaced sources are dropped.
+        counts = json.loads(info.get("ncbi_taxonomy") or "{}")
+        if ncbi_cache is not None:
+            counts = _enrich_ncbi(connection, Path(ncbi_cache), progress=download_progress)
+        else:
+            _prune_ncbi_rows(connection)
+            for replaced in taxonomy:
+                counts.pop(replaced.name, None)
+        info_update = {
             "taxonomy_sources": json.dumps(sources),
             "sylphtax_rules": info.get("sylphtax_rules", SYLPHTAX_VERSION),
-        })
-        rows = connection.execute("SELECT COUNT(*) FROM metadata_data").fetchone()[0]
+            "ncbi_taxonomy": json.dumps(counts),
+        }
+        _finish(connection, info_update)
+        rows = _gtdb_row_count(connection)
 
     return _summary(
         output_path,
@@ -643,4 +771,5 @@ def update_metadata_db(
         skipped=skipped_taxonomy,
         overlaps=overlaps,
         release=info.get("release") or None,
+        ncbi=counts,
     )

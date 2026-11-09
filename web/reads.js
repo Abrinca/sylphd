@@ -1109,7 +1109,7 @@
     const none = profile.none * uv.scale;
     const viewLabel = taxonomyLabel(view.taxonomy);
     const srcs = sources.filter((src) => src.value > 0.0005)
-      .map((src, i) => ({ ...src, label: `${src.name} (not in ${viewLabel})`, cls: `src-${(i % 3) + 1}` }));
+      .map((src, i) => ({ ...src, label: `${src.name} (no ${viewLabel} lineage)`, cls: `src-${(i % 3) + 1}` }));
     const level = rankLabel(view.taxonomy, view.rank);
     const { unknown } = uv;
     const shown = groups.slice(0, TOP_GROUPS);

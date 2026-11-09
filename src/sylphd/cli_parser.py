@@ -474,6 +474,15 @@ def add_setup_parser(subparsers: argparse._SubParsersAction) -> None:
         help="where downloaded taxonomy files are kept [default: <output dir>/taxonomy]",
     )
     setup_parser.add_argument(
+        "--ncbi-taxonomy",
+        action="store_true",
+        help=(
+            "give the sylph-tax keys that GTDB does not cover an NCBI lineage "
+            "(streams the assembly summaries and downloads NCBI's taxdump each run; "
+            "nothing is kept in --cache-dir afterwards)"
+        ),
+    )
+    setup_parser.add_argument(
         "-o", "--output", required=True, metavar="PATH", help="SQLite file to write"
     )
     setup_parser.add_argument(

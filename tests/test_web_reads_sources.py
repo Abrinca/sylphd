@@ -257,18 +257,18 @@ def test_other_sources_get_their_own_segments(web_origin: str, sketch_file: Path
     # GTDB: both catalogs are named segments (largest first), nothing is hatched
     for view in ("gtdbSeq", "gtdbTax"):
         rows = dict(result[view]["rows"])
-        assert rows["UHGV_default (not in GTDB)"] == "sw seg-src-1", (view, rows)
-        assert "FungiRefSeq-latest (not in GTDB)" in rows
+        assert rows["UHGV_default (no GTDB lineage)"] == "sw seg-src-1", (view, rows)
+        assert "FungiRefSeq-latest (no GTDB lineage)" in rows
         assert not any(name.startswith("Not classified") for name in rows), rows
         assert "seg-cat-none" not in result[view]["segs"]
         assert sum(cls.startswith("seg-src-") for cls in result[view]["segs"]) == 2
     # sequence abundance is the default, so the bacteria lead there; by genome copies the phage does
     assert result["gtdbSeq"]["rows"][0][0] == "Lactobacillus alpha"
-    assert [name for name, _ in result["gtdbTax"]["rows"]][-2:] == ["UHGV_default (not in GTDB)", "FungiRefSeq-latest (not in GTDB)"]
+    assert [name for name, _ in result["gtdbTax"]["rows"]][-2:] == ["UHGV_default (no GTDB lineage)", "FungiRefSeq-latest (no GTDB lineage)"]
 
     # NCBI: the GTDB genome without an NCBI lineage is its source's segment too
     ncbi = dict(result["ncbiTax"]["rows"])
-    assert {"UHGV_default (not in NCBI)", "GTDB_r232 (not in NCBI)", "FungiRefSeq-latest (not in NCBI)"} <= set(ncbi)
+    assert {"UHGV_default (no NCBI lineage)", "GTDB_r232 (no NCBI lineage)", "FungiRefSeq-latest (no NCBI lineage)"} <= set(ncbi)
 
     # the page asks for one profile per source, but not for the metadata file's
     # own source (that is the GTDB/NCBI view); "All sources" is downloadable, not charted
@@ -285,7 +285,7 @@ def test_other_sources_get_their_own_segments(web_origin: str, sketch_file: Path
     uhgv = dict(result["uhgv"]["rows"])
     assert result["uhgv"]["ranks"] == ["vOTU", "vSUBFAM", "vFAM"]
     assert "vOTU-1" in uhgv
-    assert {"GTDB_r232 (not in UHGV_default)", "FungiRefSeq-latest (not in UHGV_default)"} <= set(uhgv)
+    assert {"GTDB_r232 (no UHGV_default lineage)", "FungiRefSeq-latest (no UHGV_default lineage)"} <= set(uhgv)
     assert not any(name.startswith("Not classified") for name in uhgv)
     assert result["uhgv"]["downloads"][0] == "Download sylphmpa (UHGV_default)"
     assert "vSUBFAM-1" in dict(result["uhgvSubfam"]["rows"])
@@ -338,7 +338,7 @@ def test_reads_in_no_database_are_shown(web_origin: str, sketch_file: Path) -> N
     assert result["unknownCtl"] is True
     hidden = result["hidden"]
     assert label not in dict(hidden["bars"]["rows"])
-    assert "90" in hidden["bars"]["values"]["GTDB_r232 (not in UHGV_default)"]  # the bars are on the UHGV view here
+    assert "90" in hidden["bars"]["values"]["GTDB_r232 (no UHGV_default lineage)"]  # the bars are on the UHGV view here
     assert "without the 80.0 % unknown" in hidden["head"]
     assert [name for name, _ in hidden["tree"]] == ["GTDB_r232 › Bacteria", "UHGV_default › vFAM-1 › vSUBFAM-1 › vOTU-1", "FungiRefSeq-latest › Fungi › Ascomycota › Candida gamma"]
     assert hidden["tree"][0][1] == pytest.approx(90.0)

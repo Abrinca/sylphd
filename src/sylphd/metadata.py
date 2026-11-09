@@ -16,6 +16,14 @@ file is one ``taxonomy_source`` with its ``key -> lineage [-> host]`` rows in
 many keys both have: importing overlapping sources is allowed (the one
 imported later wins, as in sylph-tax) but never silent.
 
+``setup --ncbi-taxonomy`` adds rows for the sylph-tax keys that GTDB does not
+cover: same accession key, ``gtdb_taxonomy`` NULL, ``ncbi_taxid``,
+``ncbi_taxonomy`` and ``ncbi_organism_name`` filled (see
+``sylphd.ncbi_taxonomy``).  The lookup, the NCBI taxonomy view and the NCBI
+links then work for those genomes without knowing about the enrichment.
+Each ``--ncbi-taxonomy`` run rebuilds those rows from scratch; ``--update``
+without it drops those no remaining source key refers to.
+
 The writers live in :mod:`sylphd.metadata_build` and the sylph-tax import in
 :mod:`sylphd.taxonomy_sources`.
 """
@@ -540,9 +548,13 @@ class MetadataDB:
 
         ``keys`` is the number of stored keys of the source.  Keys shared with
         another source are reported once per pair at the metadata level
-        (:meth:`taxonomy_overlaps`), not per source.
+        (:meth:`taxonomy_overlaps`), not per source.  A source enriched by
+        ``setup --ncbi-taxonomy`` carries its ``ncbi`` counts (mapped keys,
+        keys without an assembly accession, keys NCBI's summaries do not have
+        and keys whose taxid has no lineage).
         """
-        return [
+        counts = json.loads(self.info.get("ncbi_taxonomy") or "{}")
+        sources = [
             {
                 "name": source.name,
                 "kind": source.kind,
@@ -553,6 +565,10 @@ class MetadataDB:
             }
             for source in self._sources
         ]
+        for source in sources:
+            if source["name"] in counts:
+                source["ncbi"] = counts[source["name"]]
+        return sources
 
     def taxonomy_overlaps(self) -> list[dict[str, object]]:
         """The pairs of sources that share keys, each pair once, in ord order."""
@@ -581,12 +597,13 @@ class MetadataDB:
         return self._chunked_lookup(list(accessions))
 
     def contains_accessions(self, accessions: Iterable[str]) -> bool:
-        """Whether any of ``accessions`` is a genome of this metadata file.
+        """Whether any of ``accessions`` is a GTDB genome of this metadata file.
 
         Used to tell a GTDB database from one whose genome names merely look
         like accessions (fungal RefSeq genomes are ``GCF_`` too, but they are
-        not in GTDB's metadata).  Stopping at the first match keeps the query
-        small even for a batch of sampled names.
+        not in GTDB's metadata; with ``--ncbi-taxonomy`` they do have a row,
+        with a NULL ``gtdb_taxonomy``).  Stopping at the first match keeps the
+        query small even for a batch of sampled names.
         """
         unique = list(dict.fromkeys(value for value in accessions if value))
         for start in range(0, len(unique), 500):
@@ -594,8 +611,8 @@ class MetadataDB:
             placeholders = ", ".join("?" * len(chunk))
             with self._lock:
                 row = self._connection.execute(
-                    f"SELECT 1 FROM metadata_data WHERE accession IN ({placeholders}) "
-                    "LIMIT 1",
+                    f"SELECT 1 FROM metadata_data WHERE gtdb_taxonomy IS NOT NULL "
+                    f"AND accession IN ({placeholders}) LIMIT 1",
                     chunk,
                 ).fetchone()
             if row is not None:
@@ -750,7 +767,9 @@ class MetadataDB:
             summary["rows"] = int(self.info.get("rows", ""))
         except ValueError:
             with self._lock:
-                row = self._connection.execute("SELECT COUNT(*) FROM metadata").fetchone()
+                row = self._connection.execute(
+                    "SELECT COUNT(*) FROM metadata_data WHERE gtdb_taxonomy IS NOT NULL"
+                ).fetchone()
             summary["rows"] = int(row[0])
         try:
             summary["sources"] = json.loads(self.info.get("sources", "[]"))

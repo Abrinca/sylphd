@@ -4,6 +4,33 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`sylphd setup --ncbi-taxonomy`: an NCBI lineage for the genomes of sylph-tax sources.** GTDB's
+  metadata has no row for a `FungiRefSeq-latest` genome (key `GCF_000002495.2_MG8`), so the NCBI
+  taxonomy view, the NCBI Taxonomy links and the `ncbi_*` TSV columns were empty for it. The new
+  flag, for `-m` builds and `--update`, downloads NCBI's `new_taxdump.tar.gz` on every run (extracting
+  `rankedlineage.dmp`, `nodes.dmp` and `merged.dmp`, then deleting everything, so nothing NCBI stays in
+  `--cache-dir`) and streams the one assembly summary a key needs (RefSeq for `GCF_`, GenBank for
+  `GCA_`; filtered, never stored), maps each such key's exact assembly accession (version included)
+  to its taxid (merged taxids are followed) and the taxid to its lineage,
+  with `nodes.dmp` filling the node's own rank — no name matching — and stores
+  `ncbi_taxid`, `ncbi_organism_name` and `ncbi_taxonomy` as ordinary metadata rows with the GTDB
+  columns `NULL`, so no reader changed and GTDB rows keep their own NCBI data. The lineage keeps
+  GTDB's seven ranks with the superkingdom as `d__`; NCBI's kingdom is not one of them and is
+  omitted. `setup` and `sylphd info`/`GET /info` report the per-source counts (mapped, no assembly
+  accession, not in the summaries, no lineage). GTDB rows are never replaced, and every run
+  rebuilds the enrichment rows, so reruns are idempotent; `--update` without the flag deletes the
+  ones no source key refers to any more and drops the counts of replaced sources. The metadata format version is unchanged (3): the enrichment
+  adds rows, not tables or columns. Downloads happen only at `setup` time.
+
+### Changed
+
+- **Web: a source without a lineage in the chosen taxonomy is labelled `<source> (no <Taxonomy>
+  lineage)`** instead of `(not in <Taxonomy>)`, e.g. `GTDB_r232 (no NCBI lineage)`.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

@@ -343,6 +343,14 @@ def _print_metadata(metadata: dict[str, Any] | None) -> None:
                 details.append("with hosts")
             if source.get("md5"):
                 details.append(f"md5 {source['md5']}")
+            ncbi = source.get("ncbi")
+            if ncbi:
+                details.append(
+                    f"NCBI: {ncbi['mapped']:,} mapped, "
+                    f"{ncbi['no_accession']:,} without an assembly accession, "
+                    f"{ncbi['not_in_summary']:,} not in the summaries, "
+                    f"{ncbi['no_lineage']:,} without a lineage"
+                )
             print(f"    {source.get('name')}: " + ", ".join(details))
     overlaps = metadata.get("taxonomy_overlaps") or []
     if overlaps:
@@ -1033,11 +1041,15 @@ def cmd_download(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cache_directory(args: argparse.Namespace) -> Path:
+    """Where ``setup`` keeps downloads: ``--cache-dir`` or next to the output."""
+    return Path(args.cache_dir) if args.cache_dir else Path(args.output).parent / "taxonomy"
+
+
 def _resolve_taxonomy_specs(
     values: Sequence[str],
     *,
-    cache_dir: str | None,
-    output: str,
+    cache_dir: Path,
     quiet: bool,
 ) -> list[TaxonomySource]:
     """Turn ``--taxonomy`` values into sources, downloading bare names."""
@@ -1052,7 +1064,6 @@ def _resolve_taxonomy_specs(
         seen[spec.name] = spec.text
 
     sources: list[TaxonomySource] = []
-    directory = Path(cache_dir) if cache_dir else Path(output).parent / "taxonomy"
     for spec in specs:
         if spec.path is not None:
             sources.append(
@@ -1062,7 +1073,7 @@ def _resolve_taxonomy_specs(
         entry = lookup_taxonomy(spec.name)
         path = download_taxonomy(
             entry,
-            directory,
+            cache_dir,
             progress=None if quiet else ProgressPrinter(sys.stderr),
         )
         sources.append(
@@ -1085,6 +1096,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
     callback = None if args.quiet else progress
     taxonomy_values = list(getattr(args, "taxonomy", None) or [])
     update = getattr(args, "update", False)
+    cache_directory = _cache_directory(args)
+    ncbi_cache = cache_directory / "ncbi" if args.ncbi_taxonomy else None
+    download_progress = None if args.quiet else ProgressPrinter(sys.stderr)
     try:
         if update:
             if args.reps_only:
@@ -1096,8 +1110,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
             source = args.metadata[0] if args.metadata else args.output
             sources = _resolve_taxonomy_specs(
                 taxonomy_values,
-                cache_dir=args.cache_dir,
-                output=args.output,
+                cache_dir=cache_directory,
                 quiet=args.quiet,
             )
             stats = update_metadata_db(
@@ -1106,14 +1119,15 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 taxonomy=sources,
                 force=args.force,
                 progress=callback,
+                ncbi_cache=ncbi_cache,
+                download_progress=download_progress,
             )
         else:
             if not args.metadata and not taxonomy_values:
                 raise ValueError("at least one of -m/--metadata and --taxonomy is required")
             sources = _resolve_taxonomy_specs(
                 taxonomy_values,
-                cache_dir=args.cache_dir,
-                output=args.output,
+                cache_dir=cache_directory,
                 quiet=args.quiet,
             )
             stats = build_metadata_db(
@@ -1124,6 +1138,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 reps_only=args.reps_only,
                 progress=callback,
                 taxonomy=sources,
+                ncbi_cache=ncbi_cache,
+                download_progress=download_progress,
             )
     except (DownloadError, OSError, ValueError, httpx.HTTPError) as error:
         _print_error(str(error))
@@ -1158,6 +1174,15 @@ def cmd_setup(args: argparse.Namespace) -> int:
             f"  {source['name']}: {source['rows']:,} keys{host} ({source['kind']})",
             file=sys.stderr,
         )
+        ncbi = source.get("ncbi")
+        if ncbi:
+            print(
+                f"    NCBI lineage: {ncbi['mapped']:,} mapped, "
+                f"{ncbi['no_accession']:,} without an assembly accession, "
+                f"{ncbi['not_in_summary']:,} not in the summaries, "
+                f"{ncbi['no_lineage']:,} without a lineage",
+                file=sys.stderr,
+            )
     return 0
 
 

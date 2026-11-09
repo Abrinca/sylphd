@@ -64,7 +64,7 @@ speed. **Cancel** stops the workers immediately.
   server's `/profile` `taxprof` response (the same aggregation as
   [Taxonomic profiles](taxonomic-profiles.md#lineage-rules)); the page only groups them by rank.
   Hits outside the chosen taxonomy are one segment per taxonomy source (horizontal lines), e.g.
-  *UHGV_default (not in GTDB)*; the taxa past the top ten are *Other* (vertical lines); only
+  *UHGV_default (no GTDB lineage)*; the taxa past the top ten are *Other* (vertical lines); only
   genomes of the taxonomy without a name at the chosen rank are *not classified at that level*
   (diagonal hatch). In the sequence view the reads in no database are the last segment,
   *Unknown: in no database (estimated)* (hatched the other way): sylph's `--estimate-unknown`

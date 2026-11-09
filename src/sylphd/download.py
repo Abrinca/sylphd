@@ -628,6 +628,22 @@ def download_urls(
     return destination
 
 
+def remote_size(url: str) -> int | None:
+    """The ``Content-Length`` of ``url``, or ``None`` when the server omits it."""
+    try:
+        response = httpx.head(
+            url,
+            follow_redirects=True,
+            timeout=30.0,
+            headers={"Accept-Encoding": "identity"},
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise DownloadError(f"{url}: {error}") from error
+    value = response.headers.get("Content-Length")
+    return int(value) if value and value.isdigit() else None
+
+
 def download_file(
     url: str,
     destination: Path,

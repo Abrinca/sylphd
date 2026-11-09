@@ -21,7 +21,15 @@ accession get no metadata, and the lookup returns `null` for each column.
 
 `--fields` of `query` and `profile` selects from these names. Taxonomy strings stay as one column
 each (no per-rank split), for example `gtdb_taxonomy` is `d__Bacteria;p__...;s__Escherichia coli`.
-There is no NCBI lineage of taxids and no taxdump.
+
+The NCBI columns of a GTDB genome come from GTDB's metadata. `setup --ncbi-taxonomy` also fills
+`ncbi_taxid`, `ncbi_taxonomy` and `ncbi_organism_name` for the genomes of the sylph-tax sources
+that GTDB does not cover (fungi, ...): the assembly accession in the key is looked up in NCBI's
+assembly summaries and its taxid in the taxdump's `rankedlineage.dmp` (see
+[NCBI lineages](#ncbi-lineages)). Its `ncbi_taxonomy` keeps GTDB's seven ranks,
+`d__…;p__…;c__…;o__…;f__…;g__…;s__…`, with the superkingdom (or domain) as `d__`; NCBI's kingdom is
+not one of them, so it is left out. No taxid is stored for the other genomes and no taxdump is
+kept in the file.
 
 Value conversions while building:
 
@@ -36,7 +44,8 @@ The file contains:
 - a view **`metadata`** with `accession` plus the columns above. It is the only thing readers
   need to know about;
 - the base table **`metadata_data`**, keyed by `accession` as `WITHOUT ROWID`, which stores values
-  and, for repetitive text columns, integer ids;
+  and, for repetitive text columns, integer ids; it holds the GTDB genomes and, after
+  `--ncbi-taxonomy`, one row per enriched accession with the GTDB columns `NULL`;
 - **`dict_<column>`** tables (`id`, `value`) for the repetitive text columns: both taxonomies,
   `gtdb_genome_representative`, organism names, genome category, assembly level, RefSeq category,
   type material designation and BioProject. The view joins them back to the original values;
@@ -172,6 +181,32 @@ Keys are not tied to a database: the probe list is what makes UHGV (`UHGV-032075
 name) and GlobDB (`GCF_003697165` without the version) resolve from the same table. The rules are
 in one function, `sylphd.metadata.sylphtax_probes`, and `tests/test_sylphtax_parity.py` compares
 the whole path with the real sylph-tax.
+
+### NCBI lineages { #ncbi-lineages }
+
+`setup --ncbi-taxonomy` fills the NCBI columns of the sylph-tax genomes that GTDB's metadata does
+not cover, so the NCBI taxonomy view, the NCBI Taxonomy links and the `ncbi_*` TSV columns work for
+them too (e.g. a `FungiRefSeq-latest` genome keyed `GCF_000002495.2_MG8`):
+
+1. the assembly accession is extracted from the key (`GC[AF]_\d+\.\d+`, so the `_MG8` suffix does
+   not matter);
+2. the accession is matched **exactly** (version included) against NCBI's RefSeq and GenBank
+   assembly summaries; when the version is not in the summaries, the same accession base is taken
+   only if the sources request a single version of it, otherwise the key is skipped;
+3. the summary's taxid is looked up in the taxdump's `rankedlineage.dmp`; `nodes.dmp` fills the
+   rank the node itself has (species, genus, ..., superkingdom/domain), since `rankedlineage.dmp`
+   only lists its ancestors. Nothing is matched by organism name.
+
+The data is stored as ordinary rows of `metadata_data` keyed by the accession, with GTDB columns
+`NULL` and `ncbi_taxid`, `ncbi_taxonomy` and `ncbi_organism_name` filled, so the metadata lookup,
+`/assembly`, `/profile` and the web tables need no special case and GTDB rows keep their own NCBI
+data. `ncbi_taxonomy` uses the seven ranks above; NCBI's kingdom is not one of them and is omitted.
+The `info` key `ncbi_taxonomy` keeps the per-source counts (`mapped`, `no_accession`,
+`not_in_summary`, `no_lineage`), which `GET /info` reports as each source's `ncbi` object, and the same counts
+are printed by `setup` and `sylphd info`. The taxdump (downloaded per run into a temporary directory and removed afterwards;
+`merged.dmp` resolves merged taxids) and the summary a prefix needs (RefSeq for `GCF_`, GenBank for
+`GCA_`; streamed and filtered, never stored) are only read at `setup` time, so serving and requests
+do no extra work. GTDB rows are never replaced, and each run rebuilds the enrichment rows.
 
 ### Format version and `--update`
 

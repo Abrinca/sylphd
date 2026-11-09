@@ -1,0 +1,6 @@
+# assembly_accession	bioproject	biosample	wgs_master	refseq_category	taxid	species_taxid	organism_name	infraspecific_name	isolate	version_status	assembly_level
+GCF_000002515.1	PRJNA13836	SAMN00000001		representative genome	4932	4932	Saccharomyces cerevisiae		Laboratory strain	latest	Complete Genome
+GCF_000002655.2	PRJNA13836	SAMN00000002		representative genome	559292	559292	Saccharomyces cerevisiae S288C		Laboratory strain	latest	Complete Genome
+GCF_000005845.2	PRJ	SAMN		na	562	562	Escherichia coli K-12 NCBI			latest	Complete Genome
+GCF_000000003.1	PRJ	SAMN		na	77777	77777	Merged yeast			latest	Complete Genome
+GCF_000000004.1	PRJ	SAMN		na	99999	99999	Lost taxon			latest	Complete Genome

@@ -1,0 +1,2 @@
+# assembly_accession	bioproject	biosample	wgs_master	refseq_category	taxid	species_taxid	organism_name	infraspecific_name	isolate	version_status	assembly_level
+GCA_000002495.2	PRJNA13839	SAMN00000003		na	5141	5141	Neurospora crassa OR74A		Laboratory strain	latest	Scaffold
