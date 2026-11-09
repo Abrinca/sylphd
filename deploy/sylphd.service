@@ -1,26 +1,5 @@
-# sylphd.service — a public sylphd server behind a reverse proxy.
-#
-# Installed to /etc/systemd/system/sylphd.service by setup-server.sh.
-# /srv/sylphd/current is a symlink switched by sylphd-update; the unit always
-# starts whatever release it points at.
-#
-# The Unix socket is created with mode 0660 (sylphd:sylphd) by sylphd itself;
-# Caddy runs as user caddy, which is a member of group sylphd, and proxies to
-# unix//srv/sylphd/run/sylphd.sock.
-#
-# Site policy lives in SYLPH_SERVE_ARGS below (and in SYLPH_DB / SYLPH_META):
-# those are the switches a "public instance" adds on top of the local defaults.
-# setup-server.sh overrides them from deploy/site.env when that file exists
-# (it is not in this repository — keep your own copy out of version control if
-# it names a real host).  SYLPH_DB may list several databases (see below);
-# setup-server.sh renders the `--db` arguments into SYLPH_DB_ARGS.  Override by
-# hand with a drop-in:
-#
-#   /etc/systemd/system/sylphd.service.d/10-site.conf
-#   [Service]
-#   Environment="SYLPH_SERVE_ARGS=--max-jobs 4 ..."  (quotes required: Environment= splits on spaces)
-#
-# Values are split on whitespace, so no quoting inside them.
+# sylphd behind a reverse proxy; installed by setup-server.sh, which sets the
+# site's databases, metadata and flags in sylphd.service.d/10-site.conf.
 [Unit]
 Description=sylphd — long-running sylph server
 Documentation=https://abrinca.github.io/sylphd/docs/guides/public-server.html
@@ -28,53 +7,16 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
 User=sylphd
 Group=sylphd
 WorkingDirectory=/srv/sylphd
-Environment=HOME=/srv/sylphd
-Environment=PYTHONUNBUFFERED=1
-Environment=PATH=/srv/sylphd/current/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/srv/sylphd PYTHONUNBUFFERED=1
 
-# Database files (in /srv/sylphd/db, installed by hand — never by this unit).
-#
-# SYLPH_DB_ARGS is the whole `--db` list, rendered by setup-server.sh from
-# SYLPH_DB in site.env (one `--db FILE` or `--db NAME=FILE` per entry).  It is
-# expanded *unquoted* below, so systemd splits it into separate arguments; that
-# is why it lives in its own variable instead of `${SYLPH_DB}` (which is always
-# exactly one word).  The value here is the single-database default.
+# Defaults; setup-server.sh overrides them from site.env.  SYLPH_DB_ARGS is
+# expanded unquoted so systemd splits it into one argument per --db.
 Environment="SYLPH_DB_ARGS=--db /srv/sylphd/db/gtdb-r232-c200-dbv2.syl2db"
-Environment=SYLPH_META=meta-r232-reps.sqlite
-
-# Example public-instance policy (the one the public instance runs), not a
-# requirement.
-#   --allow-sequences        also accept raw FASTA/FASTQ on POST /assembly
-#                            (optional; the server then sketches it itself,
-#                            which costs CPU and RAM, see --max-sequence-mb)
-#   --max-jobs 2             profiling jobs running at once
-#   --max-contigs 100        contigs in one POST /contigs request.  A whole
-#                            request is one job, and on a server with plain
-#                            databases a contig costs ~0.6 s, so 100 keeps one
-#                            client's request near a minute (the 4096 default
-#                            allows ~40 minutes from one small upload)
-#   --max-queue 16           jobs (samples) allowed to wait for a job slot
-#   --rate-limit 10/min      per-client limit on the four POST endpoints
-#   --trusted-proxy unix     believe X-Forwarded-For from the local socket
-#   --cors-origin *          any origin may call the API from a browser
-#   --usage-db /srv/sylphd/usage/usage.sqlite
-#                            opt-in usage statistics (public at /usage); off
-#                            unless you add it.  The directory is writable for
-#                            the service (ReadWritePaths below) and created by
-#                            setup-server.sh.
-# Drop any of them, raise the limits, or narrow CORS to your own page.
-# `--cors-origin *` is written unquoted: systemd splits the value on
-# whitespace and passes the asterisk through literally.
+Environment=SYLPH_META=meta-r232-reps-v3.sqlite
 Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-contigs 100 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin *"
-
-# The display name has its own variable: SYLPH_SERVE_ARGS is split on
-# whitespace, but ${SYLPH_NAME} stays one argument even with spaces. Unset, it
-# is empty and no name is shown.  Example, normally set from site.env:
-#   Environment="SYLPH_NAME=GTDB r232"
 
 ExecStart=/srv/sylphd/current/bin/sylphd serve \
     $SYLPH_DB_ARGS \
@@ -82,42 +24,22 @@ ExecStart=/srv/sylphd/current/bin/sylphd serve \
     --socket /srv/sylphd/run/sylphd.sock \
     --name=${SYLPH_NAME} \
     $SYLPH_SERVE_ARGS
-
-# Loading a multi-GB database takes a few seconds; uvicorn then serves.
-TimeoutStartSec=180
-TimeoutStopSec=30
-Restart=on-failure
-RestartSec=5
 KillSignal=SIGINT
+TimeoutStartSec=180
+Restart=always
+RestartSec=5
 
-# The database (~2–4 GB resident, plus page cache) is the main user of memory;
-# no MemoryMax on purpose, the kernel counts page cache separately and a hard
-# cap would only produce OOM kills under profiling load.
-OOMScoreAdjust=-200
+# A request that needs more memory kills sylphd (which restarts in seconds),
+# not the host.  Page cache is reclaimed before this limit is hit.
+MemoryMax=8G
+MemorySwapMax=0
 
-# Hardening.  The server only needs its own tree (read), run/ (socket) and,
-# with --usage-db, usage/ (the SQLite file and its journal).
 NoNewPrivileges=yes
 PrivateTmp=yes
-PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
-ProtectClock=yes
-ProtectHostname=yes
-ProtectProc=invisible
-ProcSubset=pid
 ReadWritePaths=/srv/sylphd/run -/srv/sylphd/usage
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-RestrictNamespaces=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-SystemCallArchitectures=native
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
 UMask=0027
 
 [Install]

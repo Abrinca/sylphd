@@ -4,6 +4,15 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`deploy/sylphd.service` is shorter and caps memory.** `MemoryMax=8G`, `MemorySwapMax=0` and
+  `Restart=always`: a request that needs too much memory kills sylphd, which restarts in seconds,
+  instead of freezing the host (a large sketch at 85 % minimum ANI did). `OOMScoreAdjust=-200` is
+  gone, the hardening is cut to the lines that matter, and the comments live in the docs.
+
 ## [0.4.1] - 2026-11-09
 
 ### Added
