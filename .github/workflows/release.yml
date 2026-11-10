@@ -8,6 +8,8 @@ name: Release
 #     exact commit pinned in `uv.lock`, for CPython 3.14, manylinux_2_28;
 #   * a `dnaio` wheel for linux/aarch64, because PyPI has no wheel for that
 #     platform and it is a Cython extension (see `docs/install.md`).
+#   * a container image, docker.io/abrincagenomics/sylphd, with those wheels installed
+#     (linux/amd64 and linux/arm64; see the `Dockerfile`).
 #
 # `workflow_dispatch` runs the whole pipeline as a dry run and publishes
 # nothing.
@@ -34,7 +36,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Check that the tag matches the package version
@@ -49,9 +51,9 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@v10.3.2
       - run: uv build --out-dir dist
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-sdist
           path: dist/*
@@ -72,7 +74,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Read the pysylph source from uv.lock
@@ -95,7 +97,7 @@ jobs:
           print(f"label={version}+g{rev[:7]}")
           print(f"dnaio={packages['dnaio']['version']}")
           PY
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           repository: ${{ steps.pin.outputs.repo }}
           ref: ${{ steps.pin.outputs.rev }}
@@ -129,7 +131,7 @@ jobs:
       # PyO3/maturin-action builds inside a pypa/manylinux_2_28 container, which
       # ships cmake (needed by libz-ng-sys) and every CPython. `manylinux: 2_28`
       # is fine for Oracle Linux 10 (glibc 2.39).
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+      - uses: PyO3/maturin-action@v1
         with:
           working-directory: pysylph-src
           target: ${{ matrix.target }}
@@ -159,7 +161,7 @@ jobs:
           mkdir -p dist
           cp -v pysylph-src/dist/*.whl dist/
           ls -l dist
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-wheels-${{ matrix.arch }}
           path: dist/*.whl
@@ -178,15 +180,15 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: astral-sh/setup-uv@v10.3.2
+      - uses: actions/download-artifact@v8
         with:
           name: dist-sdist
           path: dist
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/download-artifact@v8
         with:
           name: dist-wheels-${{ matrix.arch }}
           path: dist
@@ -210,6 +212,42 @@ jobs:
           set -eux
           smoke/bin/python -m pytest tests/test_sketching.py tests/test_server.py -q
 
+  image:
+    name: container image
+    # The smoke-tested wheels in a bare uv/Python image, for amd64 and arm64.
+    # Nothing is compiled, so emulating arm64 only runs `uv pip install`.
+    # Pushed on tags; `workflow_dispatch` only builds.
+    needs: [sdist, smoke]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Build and push
+        env:
+          VERSION: ${{ needs.sdist.outputs.version }}
+          PUSH: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -eux
+          docker run --privileged --rm tonistiigi/binfmt --install arm64
+          docker buildx create --use
+          image=docker.io/abrincagenomics/sylphd
+          if [ "$PUSH" = true ]; then
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+            output=--push
+          else
+            output=
+          fi
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t "$image:$VERSION" -t "$image:latest" $output .
+
   publish:
     name: publish the GitHub release
     # Tags only: `workflow_dispatch` is the dry run.
@@ -219,7 +257,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           path: dist

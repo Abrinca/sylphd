@@ -6,6 +6,13 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A container image, `abrincagenomics/sylphd`.** A bare `Dockerfile` (no `CMD`, `ENTRYPOINT`,
+  `EXPOSE` or `USER`) installs the release wheels into `ghcr.io/astral-sh/uv:python3.14-trixie-slim`,
+  so nothing is compiled. The release workflow builds it for linux/amd64 and linux/arm64 and pushes
+  `X.Y.Z` and `latest` on every tag; `workflow_dispatch` builds it without pushing.
+
 ### Changed
 
 - **`deploy/sylphd.service` is shorter and caps memory.** `MemoryMax=8G`, `MemorySwapMax=0` and

@@ -75,6 +75,19 @@ Notes:
 - To prove that nothing is compiled, install with `--only-binary :all:`: `uv` then fails rather
   than falling back to a source build.
 
+## With Docker
+
+Every release also publishes a container image for linux/amd64 and linux/arm64, with the wheels
+above installed into `ghcr.io/astral-sh/uv:python3.14-trixie-slim`. The image is bare: no
+default command, no exposed port and no user, so you say what to run. Keep the databases in a
+volume:
+
+```bash
+docker run --rm -v ./data:/data -p 127.0.0.1:8080:8080 abrincagenomics/sylphd:X.Y.Z \
+    sylphd serve --tcp 0.0.0.0:8080 --db /data/gtdb-r232-c200-dbv2.syl2db \
+                 --meta /data/gtdb-r232.sqlite
+```
+
 ## From a clone
 
 ```bash
