@@ -271,3 +271,19 @@ class TestRetries:
         args = cli.build_parser().parse_args(["info"])
         with cli._client_from_args(args) as client:
             assert client.retries == 0
+
+
+def test_token_is_sent_as_bearer_header() -> None:
+    from sylphd.client import SylphClient
+
+    client = SylphClient(base_url="https://example.org", token="s" * 20)
+    assert client._client.headers["authorization"] == "Bearer " + "s" * 20
+    assert "authorization" not in SylphClient(base_url="https://example.org")._client.headers
+
+
+def test_token_is_refused_over_plain_http_to_a_remote_host() -> None:
+    from sylphd.client import SylphClient
+
+    with pytest.raises(ValueError, match="plain http"):
+        SylphClient(base_url="http://example.org", token="s" * 20)
+    SylphClient(base_url="http://localhost:8080", token="s" * 20)

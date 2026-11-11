@@ -49,6 +49,13 @@ sylph changes.
 | waiting jobs (`--max-queue`) | unlimited | slots are per sample (`/query`, `/profile`), per assembly upload, or per whole `/contigs` request (its contigs run sequentially in one slot), not per HTTP request otherwise; a request whose samples do not all fit is refused whole with `503` and `Retry-After: 1`, before its body is read when the queue is already full |
 | request rate (`--rate-limit`) | off | `429` with `Retry-After`; checked before the body is read |
 
+### Privileged tokens
+
+`--privileged-token-file` names bearer tokens that bypass `--rate-limit` (and nothing else). The
+server keeps only SHA-256 digests, compares them in constant time and never logs the header or the
+token. Keep the file `0640 root:sylphd`, send tokens only over HTTPS, and note that a reverse proxy
+must not log the `Authorization` header (the example `Caddyfile` deletes it from its access log).
+
 ### The `/contigs` work bound
 
 `POST /contigs` carries one sketch per contig and a JSON object with each contig's measurements.

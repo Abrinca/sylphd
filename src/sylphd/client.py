@@ -89,6 +89,7 @@ class SylphClient:
         base_url: str | None = None,
         timeout: httpx.Timeout | float | None = None,
         retries: int = 0,
+        token: str | None = None,
     ) -> None:
         if (socket_path is None) == (base_url is None):
             raise ValueError("exactly one of socket_path and base_url is required")
@@ -105,11 +106,20 @@ class SylphClient:
         # The trailing slash matters: httpx keeps the path prefix only when
         # request paths are relative ("info", not "/info").
         origin = f"{self.base_url}/" if self.base_url is not None else "http://sylphd.local/"
+        headers = {"user-agent": f"sylphd/{_version()}"}
+        if token:
+            # A privileged token skips the server's rate limit; never send it
+            # in the clear to a remote host.
+            if self.base_url is not None and self.base_url.startswith("http://"):
+                host = urlsplit(self.base_url).hostname or ""
+                if host not in ("localhost", "127.0.0.1", "::1"):
+                    raise ValueError("refusing to send a token over plain http")
+            headers["authorization"] = f"Bearer {token}"
         self._client = httpx.Client(
             transport=transport,
             base_url=origin,
             timeout=self.timeout,
-            headers={"user-agent": f"sylphd/{_version()}"},
+            headers=headers,
         )
 
     # -- plumbing ---------------------------------------------------------
@@ -431,6 +441,7 @@ def connect(
     url: str | None = None,
     timeout: float | None = None,
     retries: int = 0,
+    token: str | None = None,
 ) -> SylphClient:
     """Build a client for a socket path or an HTTP(S) base URL / ``host:port``.
 
@@ -439,9 +450,14 @@ def connect(
     """
     http_timeout = default_timeout() if timeout is None else httpx.Timeout(timeout, connect=30.0)
     if socket_path is not None:
-        return SylphClient(socket_path=socket_path, timeout=http_timeout, retries=retries)
+        return SylphClient(
+            socket_path=socket_path, timeout=http_timeout, retries=retries, token=token
+        )
     if url is None:
         raise ValueError("either a socket path or a URL is required")
     return SylphClient(
-        base_url=normalize_base_url(url), timeout=http_timeout, retries=retries
+        base_url=normalize_base_url(url),
+        timeout=http_timeout,
+        retries=retries,
+        token=token,
     )

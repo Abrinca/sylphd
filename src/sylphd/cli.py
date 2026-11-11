@@ -41,6 +41,7 @@ from .download import (
     parse_taxonomy_spec,
     taxonomy_table,
 )
+from .limits import load_token_digests
 from .metadata_build import build_metadata_db, update_metadata_db
 from .taxonomy_sources import TaxonomySource
 from .paths import check_socket_path, default_socket_path, parse_tcp
@@ -143,6 +144,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
     try:
         specs = parse_db_specs(args.db)
         usage = Usage(Path(args.usage_db)) if args.usage_db else None
+        tokens = (
+            load_token_digests(args.privileged_token_file)
+            if args.privileged_token_file
+            else ()
+        )
     except ValueError as error:
         _print_error(str(error))
         return 2
@@ -156,6 +162,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         allow_sequences=args.allow_sequences,
         max_sequence_mb=args.max_sequence_mb,
         rate_limit=args.rate_limit,
+        privileged_tokens=tokens,
         max_queue=args.max_queue,
         trusted_proxies=tuple(args.trusted_proxy or ()),
         cors_origins=tuple(args.cors_origin or ()),
@@ -596,8 +603,27 @@ def _note_usage(client: Any, info: dict[str, Any], *, quiet: bool = False) -> No
         )
 
 
+def _client_token(args: argparse.Namespace) -> str | None:
+    """The privileged bearer token: ``--token-file``, else ``$SYLPHD_TOKEN``."""
+    path = getattr(args, "token_file", None)
+    if path is not None:
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise SystemExit(f"{PROG}: error: cannot read token file {path}: {error}")
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
+        if not lines:
+            raise SystemExit(f"{PROG}: error: token file {path} is empty")
+        return lines[0]
+    return os.environ.get("SYLPHD_TOKEN", "").strip() or None
+
+
 def _client_from_args(args: argparse.Namespace):
-    options = {"timeout": args.timeout, "retries": args.retries}
+    options = {
+        "timeout": args.timeout,
+        "retries": args.retries,
+        "token": _client_token(args),
+    }
     if getattr(args, "url", None) is not None:
         return connect(url=args.url, **options)
     if getattr(args, "tcp", None) is not None:

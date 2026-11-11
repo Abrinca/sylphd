@@ -8,11 +8,14 @@ header is ignored entirely (a client could otherwise pick its own bucket).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import math
 import time
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 
@@ -127,8 +130,69 @@ def client_identity(scope: dict, trusted: frozenset[str] | set[str]) -> str:
     return peer
 
 
+#: Shortest accepted privileged token, in characters.
+MIN_TOKEN_LENGTH = 16
+
+
+def load_token_digests(path: str | Path) -> tuple[bytes, ...]:
+    """Read bearer tokens from ``path``: one per line, blank lines and ``#`` comments ignored.
+
+    Only the SHA-256 digests are kept in memory.  A token shorter than
+    :data:`MIN_TOKEN_LENGTH` is refused (``ValueError``), as is a file with no
+    token at all, so a typo cannot silently turn privileged access off or open
+    it to a guessable secret.  Generate one with ``openssl rand -hex 32``.
+    """
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise ValueError(f"cannot read token file {path}: {error}") from error
+    digests = []
+    for line in text.splitlines():
+        token = line.strip()
+        if not token or token.startswith("#"):
+            continue
+        if len(token) < MIN_TOKEN_LENGTH:
+            raise ValueError(
+                f"token in {path} is shorter than {MIN_TOKEN_LENGTH} characters "
+                "(try: openssl rand -hex 32)"
+            )
+        digests.append(hashlib.sha256(token.encode("utf-8")).digest())
+    if not digests:
+        raise ValueError(f"token file {path} contains no token")
+    return tuple(digests)
+
+
+def is_privileged(scope: dict, digests: tuple[bytes, ...]) -> bool:
+    """Whether the request carries ``Authorization: Bearer <token>`` for a known token.
+
+    Digests are compared in constant time, and every digest is always
+    compared, so timing reveals neither a match nor its position.
+    """
+    if not digests:
+        return False
+    supplied = None
+    for key, value in scope.get("headers", ()):
+        if key.lower() == b"authorization":
+            supplied = value.decode("latin-1")
+    if supplied is None:
+        return False
+    scheme, _, token = supplied.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return False
+    candidate = hashlib.sha256(token.strip().encode("utf-8")).digest()
+    matched = False
+    for digest in digests:
+        matched |= hmac.compare_digest(candidate, digest)
+    return matched
+
+
 class RateLimitMiddleware:
-    """Answer 429 for requests to ``paths`` that exceed the limiter, before reading the body."""
+    """Answer 429 for requests to ``paths`` that exceed the limiter, before reading the body.
+
+    A request with a valid privileged bearer token (``privileged``: token
+    digests) skips the limiter and is not counted.  The job queue limits still
+    apply to it.
+    """
 
     def __init__(
         self,
@@ -137,8 +201,10 @@ class RateLimitMiddleware:
         limiter: RateLimiter,
         paths: frozenset[str] | set[str],
         trusted: frozenset[str] | set[str] = frozenset(),
+        privileged: tuple[bytes, ...] = (),
     ) -> None:
         self.app = app
+        self.privileged = tuple(privileged)
         self.limiter = limiter
         self.paths = frozenset(paths)
         self.trusted = frozenset(trusted)
@@ -149,6 +215,9 @@ class RateLimitMiddleware:
             or scope.get("method") not in LIMITED_METHODS
             or scope.get("path") not in self.paths
         ):
+            await self.app(scope, receive, send)
+            return
+        if is_privileged(scope, self.privileged):
             await self.app(scope, receive, send)
             return
         key = client_identity(scope, self.trusted)

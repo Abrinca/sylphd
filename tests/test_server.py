@@ -835,3 +835,55 @@ def test_unknown_estimate_of_a_contig_sketch_is_null(tiny_database) -> None:
     header = columns_for_mode("profile", ProfileParams(estimate_unknown=True))
     cells = dict(zip(header, format_row(row, header).split("\t")))
     assert cells["True_cov"] == "" and cells["Sequence_abundance"] == ""
+
+
+class TestPrivilegedToken:
+    TOKEN = "t0ken-" + "x" * 24
+
+    def _app(self, tmp_path: Path, **extra):
+        from sylphd.limits import load_token_digests
+
+        path = tmp_path / "tokens"
+        path.write_text(f"# ops\n\n{self.TOKEN}\n")
+        return create_app(
+            ServerConfig(
+                db_path=ECOLI_TWO_STAGE,
+                rate_limit=(1, 60.0),
+                privileged_tokens=load_token_digests(path),
+                **extra,
+            )
+        )
+
+    def test_token_skips_rate_limit(self, tmp_path: Path) -> None:
+        with TestClient(self._app(tmp_path)) as c:
+            auth = {"authorization": f"Bearer {self.TOKEN}"}
+            codes = [c.post("/query", content=b"x", headers=auth).status_code for _ in range(4)]
+            assert 429 not in codes
+            assert codes == [415] * 4
+
+    def test_anonymous_and_wrong_token_are_limited(self, tmp_path: Path) -> None:
+        with TestClient(self._app(tmp_path)) as c:
+            assert c.post("/query", content=b"x").status_code == 415
+            assert c.post("/query", content=b"x").status_code == 429
+            bad = {"authorization": "Bearer " + "y" * 30}
+            assert c.post("/query", content=b"x", headers=bad).status_code == 429
+            basic = {"authorization": f"Basic {self.TOKEN}"}
+            assert c.post("/query", content=b"x", headers=basic).status_code == 429
+
+    def test_privileged_requests_do_not_use_up_the_anonymous_bucket(self, tmp_path: Path) -> None:
+        with TestClient(self._app(tmp_path)) as c:
+            auth = {"authorization": f"Bearer {self.TOKEN}"}
+            for _ in range(3):
+                c.post("/query", content=b"x", headers=auth)
+            assert c.post("/query", content=b"x").status_code == 415
+
+    def test_token_file_validation(self, tmp_path: Path) -> None:
+        from sylphd.limits import load_token_digests
+
+        short = tmp_path / "short"
+        short.write_text("abc\n")
+        empty = tmp_path / "empty"
+        empty.write_text("# nothing\n")
+        for bad in (short, empty, tmp_path / "missing"):
+            with pytest.raises(ValueError):
+                load_token_digests(bad)

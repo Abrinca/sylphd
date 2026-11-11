@@ -131,6 +131,9 @@ class ServerConfig:
     max_sequence_mb: int = 20
     #: ``(count, window_seconds)`` for the per-client rate limit, or ``None``.
     rate_limit: tuple[int, float] | None = None
+    #: SHA-256 digests of the bearer tokens that bypass the rate limit
+    #: (``--privileged-token-file``); see :func:`sylphd.limits.load_token_digests`.
+    privileged_tokens: tuple[bytes, ...] = ()
     #: How many jobs (samples) may wait for a job slot; ``None`` is unlimited.
     max_queue: int | None = None
     #: Peers whose ``X-Forwarded-For`` header is trusted (IPs or ``"unix"``).
@@ -745,6 +748,7 @@ def create_app(
             limiter=RateLimiter(count, window),
             paths=frozenset(("/profile", "/query", "/assembly", "/contigs", "/usage")),
             trusted=frozenset(config.trusted_proxies),
+            privileged=config.privileged_tokens,
         )
     if config.cors_origins:
         origins = [o for o in config.cors_origins if o != "local"]

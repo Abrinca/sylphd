@@ -4,6 +4,17 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Privileged access without a rate limit.** `sylphd serve --privileged-token-file PATH` reads
+  bearer tokens (one per line, `#` comments allowed, at least 16 characters; only SHA-256 digests
+  are kept in memory). A request with `Authorization: Bearer <token>` skips `--rate-limit` and is
+  not counted in the client's bucket. `--max-jobs`, `--max-queue` and the size limits still apply.
+  Clients send the token with `--token-file PATH` or `$SYLPHD_TOKEN`, and
+  `connect(..., token=...)`; the client refuses to send it over plain `http://` to a remote host.
+
 ## [0.4.2] - 2026-11-10
 
 ### Added

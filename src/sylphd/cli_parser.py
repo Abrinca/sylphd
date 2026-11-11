@@ -170,6 +170,15 @@ def add_serve_parser(subparsers: argparse._SubParsersAction) -> None:
         help="per-client POST rate limit, e.g. 10/min (off by default)",
     )
     serve_parser.add_argument(
+        "--privileged-token-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "file of bearer tokens (one per line) whose holders skip --rate-limit "
+            "(queue limits still apply); keep it 0600"
+        ),
+    )
+    serve_parser.add_argument(
         "--max-queue",
         type=_non_negative,
         default=None,
@@ -519,6 +528,15 @@ def _add_client_options(parser: argparse.ArgumentParser) -> None:
             "server base URL, http:// or https://, optionally with a path "
             "prefix (e.g. https://api.example.org/sylphd) "
             "[default: $SYLPHD_URL]"
+        ),
+    )
+    parser.add_argument(
+        "--token-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "file holding a privileged bearer token, sent as Authorization "
+            "[default: $SYLPHD_TOKEN, the token itself]"
         ),
     )
     parser.add_argument(

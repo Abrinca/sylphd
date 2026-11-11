@@ -54,6 +54,7 @@
 			request>client_ip delete
 			request>headers>X-Forwarded-For delete
 			request>headers>X-Real-Ip delete
+			request>headers>Authorization delete
 			request>headers>Forwarded delete
 			wrap console
 		}
