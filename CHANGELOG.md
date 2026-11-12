@@ -15,6 +15,13 @@ All notable changes to `sylphd` are documented here. The format follows
   Clients send the token with `--token-file PATH` or `$SYLPHD_TOKEN`, and
   `connect(..., token=...)`; the client refuses to send it over plain `http://` to a remote host.
 
+### Fixed
+
+- **No traceback on `SIGTERM` with `--socket`.** The server's SIGTERM handler raised `SystemExit`
+  inside uvicorn's still-running event loop, so asyncio cancelled the lifespan task and Starlette
+  logged a `CancelledError` traceback on shutdown. The handler now removes the socket and ends the
+  process with the default SIGTERM action.
+
 ## [0.4.2] - 2026-11-10
 
 ### Added

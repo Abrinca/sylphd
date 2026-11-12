@@ -140,11 +140,14 @@ def serve(
     previous_sigterm = None
     if socket_path is not None and threading.current_thread() is threading.main_thread():
         # uvicorn re-raises SIGTERM after its graceful shutdown, which would
-        # kill the process before the ``finally`` below runs.  Clean up first
-        # and exit normally instead.
+        # kill the process before the ``finally`` below runs.  Clean up first,
+        # then terminate with the default action.  Raising SystemExit here
+        # instead would unwind through the still-running event loop, whose
+        # task cancellation Starlette logs as a lifespan traceback.
         def handle_sigterm(signum: int, frame: Any) -> None:
             cleanup()
-            raise SystemExit(0)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGTERM)
 
         previous_sigterm = signal.signal(signal.SIGTERM, handle_sigterm)
 
