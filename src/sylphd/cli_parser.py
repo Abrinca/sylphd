@@ -86,6 +86,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_assembly_parser(subparsers)
     add_download_parser(subparsers)
     add_setup_parser(subparsers)
+    add_taxdb_parser(subparsers)
+    add_taxonomy_parser(subparsers)
     return parser
 
 
@@ -168,6 +170,22 @@ def add_serve_parser(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         metavar="N/min",
         help="per-client POST rate limit, e.g. 10/min (off by default)",
+    )
+    serve_parser.add_argument(
+        "--taxonomy-db",
+        metavar="FILE",
+        default=None,
+        help=(
+            "NCBI taxonomy file (from `sylphd taxdb build`): serves /taxonomy/*; "
+            "a replaced file is picked up without a restart"
+        ),
+    )
+    serve_parser.add_argument(
+        "--taxonomy-rate-limit",
+        type=_rate_limit,
+        default=None,
+        metavar="N/min",
+        help="per-client rate limit of the /taxonomy/* endpoints, e.g. 120/min (off by default)",
     )
     serve_parser.add_argument(
         "--privileged-token-file",
@@ -763,5 +781,65 @@ def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
         _add_profile_options(parser)
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="progress messages on stderr"
+    )
+    _add_client_options(parser)
+
+
+def add_taxdb_parser(subparsers: argparse._SubParsersAction) -> None:
+    taxdb_parser = subparsers.add_parser(
+        "taxdb", help="build the NCBI taxonomy file (see `sylphd serve --taxonomy-db`)"
+    )
+    actions = taxdb_parser.add_subparsers(dest="taxdb_command", required=True)
+    build = actions.add_parser(
+        "build",
+        help="build the taxonomy SQLite file from NCBI's new_taxdump.tar.gz",
+    )
+    build.add_argument(
+        "-o", "--output", required=True, metavar="FILE", help="SQLite file to write (atomic)"
+    )
+    build.add_argument(
+        "--taxdump",
+        metavar="FILE",
+        help="a local new_taxdump.tar.gz [default: download the current one]",
+    )
+    build.add_argument(
+        "--cache-dir",
+        metavar="DIR",
+        help="where the download is unpacked, deleted afterwards [default: next to --output]",
+    )
+    build.add_argument(
+        "--no-fuzzy",
+        action="store_true",
+        help="skip the fuzzy-search index (saves about 15%% of the file)",
+    )
+    build.add_argument("--force", action="store_true", help="replace the output file")
+    build.add_argument("-q", "--quiet", action="store_true", help="no progress output")
+
+
+def add_taxonomy_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "taxonomy",
+        help="look up NCBI taxa by taxid or name, on a server or in a taxonomy file",
+        description=(
+            "Each QUERY is a taxid (digits) or a name. Prints one tab-separated line per "
+            "taxon: taxid, name, rank, parent, genetic code, mitochondrial genetic code."
+        ),
+    )
+    parser.add_argument("queries", nargs="+", metavar="QUERY", help="taxid or exact name")
+    parser.add_argument(
+        "--db", metavar="FILE", help="read this taxonomy file instead of asking a server"
+    )
+    parser.add_argument(
+        "--search",
+        action="store_true",
+        help="treat each QUERY as the start of a name (with --fuzzy: a similar name)",
+    )
+    parser.add_argument("--fuzzy", action="store_true", help="with --search: tolerate typos")
+    parser.add_argument("--rank", metavar="RANK", help="with --search: only this rank")
+    parser.add_argument(
+        "--limit", type=int, default=10, metavar="N", help="with --search: hits per query [10]"
+    )
+    parser.add_argument(
+        "--lineage", action="store_true", help="print the lineage (root first) instead"
     )
     _add_client_options(parser)

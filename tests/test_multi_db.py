@@ -567,6 +567,7 @@ class TestSingleDatabaseGoldens:
         info["limits"].pop("max_params_bytes")
         info["limits"].pop("max_contigs")
         info.pop("usage")
+        info.pop("taxonomy")  # additive: the web app does not read it
         assert web_golden.normalise(info) == web_golden.load("info")
 
     def test_assembly(self) -> None:

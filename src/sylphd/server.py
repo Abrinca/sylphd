@@ -55,6 +55,7 @@ from .profiling import (
 from .protocol import PROFILE_PARAM_KEYS, ProfileParams
 from .server_errors import RequestError, answers_errors, check_queue, job_errors
 from .server_middleware import AccessLogMiddleware, BodyLimitMiddleware
+from .server_taxonomy import TAXONOMY_PATHS, taxonomy_routes
 from .server_upload import (
     MAX_PARAMS_BYTES,
     MAX_SKETCHES,
@@ -62,6 +63,7 @@ from .server_upload import (
     read_upload,
     require_multipart,
 )
+from .taxdb import TaxDb
 from .usage import POLICY, WINDOW_MINUTES, Usage
 
 log = logging.getLogger("uvicorn.error")
@@ -154,6 +156,12 @@ class ServerConfig:
     #: Usage statistics (``--usage-db``); the caller opens the file, so a bad
     #: path fails before the database is loaded.  ``None`` records nothing.
     usage: Usage | None = None
+    #: A taxonomy file built by ``sylphd taxdb build`` (``--taxonomy-db``);
+    #: switches on the ``/taxonomy/*`` endpoints.
+    taxonomy_db: Path | None = None
+    #: ``(count, window_seconds)`` per client for the ``/taxonomy/*``
+    #: endpoints (``--taxonomy-rate-limit``), counted apart from ``rate_limit``.
+    taxonomy_rate_limit: tuple[int, float] | None = None
 
     def __post_init__(self) -> None:
         if self.max_contigs < 1:
@@ -216,6 +224,7 @@ async def _info(request: Request) -> JSONResponse:
                 "max_queue": state.max_queue,
             },
             "usage": _usage_info(state.usage),
+            "taxonomy": _taxonomy_info(state),
             "endpoints": _endpoints(state),
             "params": _params_info(),
         }
@@ -228,9 +237,27 @@ def _usage_info(usage: Usage | None) -> dict[str, Any]:
     return {"enabled": True, "policy": POLICY, "window_minutes": WINDOW_MINUTES}
 
 
+def _taxonomy_info(state: Any) -> dict[str, Any]:
+    if state.taxdb is None:
+        return {"enabled": False}
+    info = state.taxdb.info()
+    return {
+        "enabled": True,
+        "source": info.get("source"),
+        "source_date": info.get("source_date"),
+        "taxa": info.get("taxa"),
+        "fuzzy": bool(info.get("fuzzy")),
+        "rate_limit": _rate_limit_dict(state.taxonomy_rate_limit),
+    }
+
+
 def _endpoints(state: Any) -> list[str]:
     endpoints = ["/health", "/info", "/profile", "/query", "/assembly", "/contigs"]
-    return [*endpoints, "/usage"] if state.usage is not None else endpoints
+    if state.usage is not None:
+        endpoints.append("/usage")
+    if state.taxdb is not None:
+        endpoints.extend(sorted(TAXONOMY_PATHS))
+    return endpoints
 
 
 async def _usage(request: Request) -> Response:
@@ -684,6 +711,8 @@ def _lifespan(config: ServerConfig) -> Any:
             metadata = app.state.metadata
             if metadata is not None:
                 metadata.close()
+            if app.state.taxdb is not None:
+                app.state.taxdb.close()
 
     return lifespan
 
@@ -714,6 +743,9 @@ def create_app(
     ]
     if config.usage is not None:
         routes.append(Route("/usage", _usage, methods=["GET"]))
+    taxdb = TaxDb(config.taxonomy_db) if config.taxonomy_db is not None else None
+    if taxdb is not None:
+        routes.extend(taxonomy_routes())
     app = Starlette(
         routes=routes,
         exception_handlers={
@@ -735,6 +767,8 @@ def create_app(
     app.state.name = config.name
     app.state.about = config.about
     app.state.usage = config.usage
+    app.state.taxdb = taxdb
+    app.state.taxonomy_rate_limit = config.taxonomy_rate_limit
     app.state.jobs = JobSlots(config.max_jobs, config.max_queue)
     # Starlette middleware: the last added is the outermost, so CORS wraps
     # rate-limit and body-limit errors too.
@@ -747,6 +781,15 @@ def create_app(
             RateLimitMiddleware,
             limiter=RateLimiter(count, window),
             paths=frozenset(("/profile", "/query", "/assembly", "/contigs", "/usage")),
+            trusted=frozenset(config.trusted_proxies),
+            privileged=config.privileged_tokens,
+        )
+    if taxdb is not None and config.taxonomy_rate_limit is not None:
+        count, window = config.taxonomy_rate_limit
+        app.add_middleware(
+            RateLimitMiddleware,
+            limiter=RateLimiter(count, window),
+            paths=TAXONOMY_PATHS,
             trusted=frozenset(config.trusted_proxies),
             privileged=config.privileged_tokens,
         )

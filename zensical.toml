@@ -20,6 +20,7 @@ nav = [
     { "Profiling reads in the browser" = "guides/profiling-in-browser.md" },
     { "Identifying an assembly" = "guides/assembly.md" },
     { "Taxonomic profiles" = "guides/taxonomic-profiles.md" },
+    { "NCBI taxonomy" = "guides/ncbi-taxonomy.md" },
     { "Running a public server" = "guides/public-server.md" },
   ] },
   { "Commands" = [
@@ -31,6 +32,8 @@ nav = [
     { "assembly" = "commands/assembly.md" },
     { "download" = "commands/download.md" },
     { "setup" = "commands/setup.md" },
+    { "taxdb" = "commands/taxdb.md" },
+    { "taxonomy" = "commands/taxonomy.md" },
   ] },
   { "Reference" = [
     { "HTTP API" = "reference/http-api.md" },

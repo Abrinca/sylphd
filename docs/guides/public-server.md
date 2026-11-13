@@ -69,6 +69,7 @@ never logged: only sizes, timings and request outcomes appear in the server log,
 | `--max-upload-mb N` | `512` | all `POST`s | request body limit (413 above it) |
 | `--max-sequence-mb N` | `20` | raw `/assembly` | upload limit of a raw sequence before decompression; gzip bodies may decompress to 5× this. Sketch uploads use `--max-upload-mb` |
 | `--rate-limit N/min` | off | `/profile`, `/query`, `/assembly`, `/contigs` | per-client limit (`N/min` or `N/s`); over the limit: `429` with `Retry-After` |
+| `--taxonomy-rate-limit N/min` | off | `/taxonomy/*` (with `--taxonomy-db`) | per-client limit of the taxonomy lookups alone; cheap calls, so a higher number than `--rate-limit`, such as `120/min` |
 | `--max-queue N` | unlimited | the same | jobs allowed to wait for a job slot; beyond that `503` with `Retry-After: 1` |
 
 `/health` and `/info` are always served and never limited.

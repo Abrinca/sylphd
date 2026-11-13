@@ -42,6 +42,7 @@ from .download import (
     taxonomy_table,
 )
 from .limits import load_token_digests
+from .ncbitax import Taxonomy
 from .metadata_build import build_metadata_db, update_metadata_db
 from .taxonomy_sources import TaxonomySource
 from .paths import check_socket_path, default_socket_path, parse_tcp
@@ -58,6 +59,7 @@ from .sketching import (
     sketch_assembly,
     sketch_sample,
 )
+from .taxdb import build_taxdb
 from .taxonomy import (
     TaxonomyError,
     default_taxonomies,
@@ -163,6 +165,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
         max_sequence_mb=args.max_sequence_mb,
         rate_limit=args.rate_limit,
         privileged_tokens=tokens,
+        taxonomy_db=Path(args.taxonomy_db) if args.taxonomy_db else None,
+        taxonomy_rate_limit=args.taxonomy_rate_limit,
         max_queue=args.max_queue,
         trusted_proxies=tuple(args.trusted_proxy or ()),
         cors_origins=tuple(args.cors_origin or ()),
@@ -252,6 +256,8 @@ def _log_startup(
     if config.rate_limit is not None:
         count, window = config.rate_limit
         extras.append(f"rate-limit={count}/{int(window)}s")
+    if config.taxonomy_db is not None:
+        extras.append(f"taxonomy={config.taxonomy_db.name}")
     if config.cors_origins:
         extras.append(f"cors={','.join(config.cors_origins)}")
     if config.about.path:
@@ -1212,6 +1218,79 @@ def cmd_setup(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_taxdb(args: argparse.Namespace) -> int:
+    """``sylphd taxdb build``: write the taxonomy file."""
+    log = None if args.quiet else (lambda message: print(f"{PROG}: {message}", file=sys.stderr))
+    info = build_taxdb(
+        args.output,
+        taxdump=args.taxdump,
+        force=args.force,
+        fuzzy=not args.no_fuzzy,
+        cache_dir=args.cache_dir,
+        log=log,
+        progress=None if args.quiet else ProgressPrinter(sys.stderr),
+    )
+    if log is not None:
+        log(
+            f"wrote {args.output}: {info['taxa']:,} taxa, {info['names']:,} names, "
+            f"taxdump of {info['source_date']}"
+        )
+    return 0
+
+
+_TAXON_HEADER = ("taxid", "name", "rank", "parent", "genetic_code", "mito_genetic_code")
+
+
+def _taxon_line(taxon: Any) -> str:
+    fields = (
+        taxon.taxid,
+        taxon.name,
+        taxon.rank,
+        taxon.parent_taxid,
+        taxon.genetic_code_id,
+        taxon.mito_genetic_code_id,
+    )
+    return "\t".join("" if value is None else str(value) for value in fields)
+
+
+def cmd_taxonomy(args: argparse.Namespace) -> int:
+    """``sylphd taxonomy``: look taxa up by taxid or name."""
+    if args.db is not None and any(
+        getattr(args, name, None) for name in ("socket", "tcp", "url")
+    ):
+        _print_error("--db cannot be combined with --socket, --tcp or --url")
+        return 2
+    tax = (
+        Taxonomy.connect(db=args.db)
+        if args.db is not None
+        else Taxonomy.from_client(_client_from_args(args))
+    )
+    missing = 0
+    with tax:
+        print("\t".join(_TAXON_HEADER))
+        for query in args.queries:
+            if args.search:
+                matches = tax.search(
+                    query, fuzzy=args.fuzzy, rank=args.rank, limit=args.limit
+                )
+                taxa = [m.taxon for m in matches]
+            elif query.isdigit():
+                taxon = tax.get(int(query))
+                taxa = [taxon] if taxon is not None else []
+            else:
+                taxa = tax.by_name(query)
+            if not taxa:
+                print(f"{PROG}: not found: {query}", file=sys.stderr)
+                missing += 1
+            for taxon in taxa:
+                if args.lineage:
+                    for step in taxon.lineage():
+                        print(_taxon_line(step))
+                else:
+                    print(_taxon_line(taxon))
+    return 1 if missing else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1223,6 +1302,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "assembly": cmd_assembly,
         "download": cmd_download,
         "setup": cmd_setup,
+        "taxdb": cmd_taxdb,
+        "taxonomy": cmd_taxonomy,
     }
     try:
         return int(commands[args.command](args))

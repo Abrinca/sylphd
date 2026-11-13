@@ -567,6 +567,30 @@ The response carries one result per contig, in request order, plus a summary of 
 - `summary`, `caveats` and `database` are per request, so a client that splits a large assembly into
   several requests adds the counters and merges `consensus_bp` by `(rank, taxon)`.
 
+## `/taxonomy/*` { #taxonomy }
+
+Only on a server started with [`--taxonomy-db`](../commands/taxdb.md) (`/info` says
+`taxonomy.enabled`). The calls are index lookups: they never wait for a job slot and are covered by
+`--taxonomy-rate-limit`, not by `--rate-limit`. Bodies are JSON (at most 1 MiB), at most 1000 taxids
+or names per request. A merged taxid answers with its replacement (`merged_from`); an unknown or
+deleted one answers `null`. The [Python objects](../guides/ncbi-taxonomy.md) wrap these calls.
+
+| Endpoint | Request | Answer |
+|---|---|---|
+| `GET /taxonomy/info` | | `source`, `source_date`, `taxa`, `names`, `fuzzy`, `divisions`, `genetic_codes` |
+| `POST /taxonomy/nodes` | `{"taxids": [562, ...]}` | `{"nodes": [record or null, ...]}` in order |
+| `POST /taxonomy/lineage` | `{"taxids": [...]}` | `{"lineages": [[{taxid, name, rank}, ...root first] or null]}` |
+| `POST /taxonomy/names` | `{"taxids": [...]}` | `{"names": [[{name, name_class, unique_name}, ...] or null]}` |
+| `POST /taxonomy/children` | `{"taxid": 561, "descendants": false, "rank": null, "limit": 100000}` | `{"taxid", "taxa": [{taxid, name, rank, parent}] or null, "truncated"}` |
+| `POST /taxonomy/lookup` | `{"names": ["E. coli", ...]}` | `{"results": [{"query", "matches": [{taxid, name, name_class, scientific_name, rank}]}]}` |
+| `POST /taxonomy/search` | `{"query": "escherichia c", "fuzzy": false, "rank": null, "limit": 20}` | `{"hits": [{taxid, name, name_class, scientific_name, rank, score}]}`; `limit` at most 100 |
+
+A node record has `taxid`, `parent`, `rank`, `name`, `unique_name`, `embl_code`, `division_id`,
+`genetic_code_id`, `mito_genetic_code_id`, `plastid_genetic_code_id`,
+`hydrogenosome_genetic_code_id`, `hidden`, `hidden_subtree_root`, `specified_species`, `comments`
+(and `merged_from` when it was merged). Bad input is a `400`, a body over 1 MiB a `413`, and over
+the rate limit a `429` with `Retry-After`.
+
 ## Errors
 
 Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.

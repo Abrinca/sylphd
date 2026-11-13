@@ -145,6 +145,16 @@ class SylphClient:
         return f"cannot talk to sylphd at {self.base_url}: {error}"
 
     # -- endpoints --------------------------------------------------------
+    def taxonomy(self, operation: str, payload: Mapping[str, Any] | None = None) -> Any:
+        """Call a ``/taxonomy/<operation>`` endpoint: ``info`` is a GET, the rest POST JSON.
+
+        Needs a server started with ``--taxonomy-db``; see :class:`sylphd.ncbitax.Taxonomy`
+        for the friendly interface.
+        """
+        if operation == "info":
+            return self._request("GET", "taxonomy/info").json()
+        return self._request("POST", f"taxonomy/{operation}", json=dict(payload or {})).json()
+
     def health(self) -> dict[str, Any]:
         return self._request("GET", "health").json()
 

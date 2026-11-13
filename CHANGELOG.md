@@ -15,6 +15,29 @@ All notable changes to `sylphd` are documented here. The format follows
   Clients send the token with `--token-file PATH` or `$SYLPHD_TOKEN`, and
   `connect(..., token=...)`; the client refuses to send it over plain `http://` to a remote host.
 
+- **The NCBI taxonomy as a service and a library.** `sylphd taxdb build -o taxdump.sqlite` turns
+  NCBI's `new_taxdump.tar.gz` into one indexed SQLite file (3 million taxa, about 1 GB, 30 s): every
+  node with its genetic code, mitochondrial/plastid/hydrogenosome codes, division and flags, every
+  name with its class, merged and deleted taxids, and the genetic code and division tables.
+  `sylphd serve --taxonomy-db FILE` serves it at `/taxonomy/{info,nodes,lineage,names,children,lookup,search}`
+  (batch JSON, exact names, prefix search and typo-tolerant fuzzy search in tens of milliseconds);
+  `--taxonomy-rate-limit` limits it apart from the job endpoints, a privileged token lifts it, and a
+  rebuilt file is picked up without a restart. `from sylphd.ncbitax import Taxonomy` gives `Taxon`
+  objects (`.name`, `.rank`, `.genetic_code_id`, `.parent`, `.children()`, `.lineage()`, `.at_rank()`, ...)
+  from a socket, a URL or a file, with the same answers from each and without pysylph or starlette
+  installed. `sylphd taxonomy` looks taxa up on the command line. See the
+  [NCBI taxonomy guide](../guides/ncbi-taxonomy.md).
+
+### Changed
+
+- **The base install is light: pick `sylphd[server]`, `sylphd[client]` or `sylphd[taxonomy]`.**
+  Plain `sylphd` now depends on `httpx` only, enough for `sylphd.ncbitax` and `sylphd.taxdb`.
+  `sylphd[client]` adds pysylph and dnaio (the command line, local sketching); `sylphd[server]` adds
+  the web server on top. **Upgrading a server or a client means installing the extra**: the Docker
+  image, `deploy/update.sh` and the install docs already do. Without it, `sylphd` prints which extra
+  to install instead of a traceback. The host's installed `sylphd-update` must be refreshed
+  (`setup-server.sh`) before updating to this release.
+
 ### Fixed
 
 - **No traceback on `SIGTERM` with `--socket`.** The server's SIGTERM handler raised `SystemExit`
