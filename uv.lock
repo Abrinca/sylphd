@@ -209,8 +209,16 @@ wheels = [
 name = "sylphd"
 source = { editable = "." }
 dependencies = [
-    { name = "dnaio" },
     { name = "httpx" },
+]
+
+[package.optional-dependencies]
+client = [
+    { name = "dnaio" },
+    { name = "pysylph" },
+]
+server = [
+    { name = "dnaio" },
     { name = "pysylph" },
     { name = "python-multipart" },
     { name = "starlette" },
@@ -220,20 +228,27 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "sylphd", extra = ["server"] },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "dnaio" },
+    { name = "dnaio", marker = "extra == 'client'" },
+    { name = "dnaio", marker = "extra == 'server'" },
     { name = "httpx" },
-    { name = "pysylph", git = "https://github.com/MrTomRod/pysylph?branch=multi-db" },
-    { name = "python-multipart" },
-    { name = "starlette" },
-    { name = "uvicorn" },
+    { name = "pysylph", marker = "extra == 'client'", git = "https://github.com/MrTomRod/pysylph?branch=multi-db" },
+    { name = "pysylph", marker = "extra == 'server'", git = "https://github.com/MrTomRod/pysylph?branch=multi-db" },
+    { name = "python-multipart", marker = "extra == 'server'" },
+    { name = "starlette", marker = "extra == 'server'" },
+    { name = "uvicorn", marker = "extra == 'server'" },
 ]
+provides-extras = ["client", "server", "taxonomy"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest" }]
+dev = [
+    { name = "pytest" },
+    { name = "sylphd", extras = ["server"] },
+]
 
 [[package]]
 name = "typing-extensions"

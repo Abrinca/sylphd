@@ -26,14 +26,15 @@ uv sync
 uv run sylphd --help
 ```
 
-or, in another project: `uv add "sylphd @ git+https://github.com/Abrinca/sylphd"`.
+or, in another project: `uv add "sylphd[client] @ git+https://github.com/Abrinca/sylphd"` (`sylphd[server]` on the
+machine that runs the server, `sylphd[taxonomy]` for NCBI taxonomy lookups alone).
 
 If you would rather not install a Rust toolchain, tagged releases carry prebuilt wheels for Linux
 x86_64 and aarch64 (CPython 3.14):
 
 ```console
 uv venv --python 3.14
-uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z "sylphd==X.Y.Z"
+uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z "sylphd[server]==X.Y.Z"
 ```
 
 Replace `vX.Y.Z` / `X.Y.Z` with the tag and version of a release from the

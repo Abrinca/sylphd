@@ -122,7 +122,7 @@ sudo sylphd-update v0.2.0     # or a specific tag
 The script refreshes the managed CPython 3.14 patch release, downloads the
 release assets for the machine's architecture, verifies them against
 `SHA256SUMS`, creates `/srv/sylphd/releases/<version>-<timestamp>/`, installs
-with `uv pip install --find-links <dir>`, smoke-tests `sylphd --version`,
+`sylphd[server]` with `uv pip install --find-links <dir>`, smoke-tests `sylphd --version`,
 atomically switches the `/srv/sylphd/current` symlink, restarts the unit and
 waits for `/health` on the socket. If the health check fails it switches back
 and exits non-zero. The newest three releases are kept.

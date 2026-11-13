@@ -5,4 +5,5 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends procps \
  && rm -rf /var/lib/apt/lists/*
 RUN --mount=type=bind,source=dist,target=/dist \
-    uv pip install --system --only-binary :all: --find-links /dist /dist/sylphd-*.whl
+    wheel=$(ls /dist/sylphd-*.whl) \
+ && uv pip install --system --only-binary :all: --find-links /dist "sylphd[server] @ file://$wheel"

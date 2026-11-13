@@ -1,5 +1,19 @@
 # Install
 
+## Which package
+
+Install the extra that matches what the machine does:
+
+| Extra | For | Brings |
+|---|---|---|
+| `sylphd[server]` | the machine that runs `sylphd serve` | everything below, plus the web server |
+| `sylphd[client]` | machines that profile against a server (`profile`, `query`, `assembly`, ...) | pysylph and dnaio, to sketch locally |
+| `sylphd[taxonomy]` | Python code that only looks up NCBI taxa, from a server or a file: [NCBI taxonomy](guides/ncbi-taxonomy.md) | nothing but `httpx`: no Rust, no compiler |
+
+The commands below use `sylphd[server]`; swap in `sylphd[client]` or `sylphd[taxonomy]` where that is
+what you need. Only `server` and `client` need pysylph, and with it the Rust toolchain or a release
+wheel (see below).
+
 ## Requirements
 
 - **Python 3.14** or newer (the project is tested on 3.14 only).
@@ -26,7 +40,7 @@ compiler. Download them with `gh`, point `uv` at the asset list, and install:
 ```bash
 uv venv --python 3.14
 uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z \
-               "sylphd==X.Y.Z"
+               "sylphd[server]==X.Y.Z"
 sylphd --version
 ```
 
@@ -44,7 +58,7 @@ takes the latest release):
 ```bash
 mkdir -p sylphd-wheels && cd sylphd-wheels
 gh release download --repo Abrinca/sylphd --pattern '*.whl'
-uv pip install --find-links . sylphd
+uv pip install --find-links . "sylphd[server]"
 ```
 
 A release contains:
@@ -93,25 +107,27 @@ docker run --rm -v ./data:/data -p 127.0.0.1:8080:8080 abrincagenomics/sylphd:X.
 ```bash
 git clone https://github.com/Abrinca/sylphd
 cd sylphd
-uv sync
+uv sync        # installs sylphd[server] and the test tools
 uv run sylphd --help
 ```
 
 ## Into another project
 
 ```bash
-uv add "sylphd @ git+https://github.com/Abrinca/sylphd"
+uv add "sylphd[client] @ git+https://github.com/Abrinca/sylphd"
 ```
+
+(`sylphd[taxonomy]` for taxonomy lookups alone, `sylphd[server]` to embed the server.)
 
 ## As a tool
 
 ```bash
-uv tool install "sylphd @ git+https://github.com/Abrinca/sylphd"
+uv tool install "sylphd[server] @ git+https://github.com/Abrinca/sylphd"   # the server machine
+uv tool install "sylphd[client] @ git+https://github.com/Abrinca/sylphd"   # a client machine
 sylphd --version
 ```
 
-The same command works on the server machine and on client machines. Clients need the package too,
-because they sketch locally with pysylph.
+Clients need the package too, because they sketch locally with pysylph.
 
 ## Documentation
 

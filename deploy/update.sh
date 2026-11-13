@@ -146,13 +146,13 @@ install -d -o sylphd -g sylphd -m 0755 "$release"
 as_sylphd "$UV" venv --python "$PYTHON_SERIES" "$release" ||
     die "could not create the virtualenv"
 
-log "installing sylphd==$version"
+log "installing sylphd[server]==$version"
 as_sylphd "$UV" pip install \
     --python "$release/bin/python" \
     --find-links "$tmp" \
     --only-binary pysylph,dnaio \
     --compile-bytecode \
-    "sylphd==$version" || die "installation failed"
+    "sylphd[server]==$version" || die "installation failed"
 
 # The finished release belongs to root: the service runs it but cannot change
 # it (hence --compile-bytecode above).  chown -R does not follow symlinks.

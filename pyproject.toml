@@ -23,9 +23,23 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Typing :: Typed",
 ]
+# The base install is light on purpose: sylphd.ncbitax and sylphd.taxdb need only httpx.
+# Everything that sketches or serves is an extra: see docs/install.md.
 dependencies = [
-  "dnaio",
   "httpx",
+]
+
+[project.optional-dependencies]
+# Look up NCBI taxa (a server, a socket or a file): no Rust, no pysylph.
+taxonomy = []
+# The command line against a server: sketches locally.
+client = [
+  "dnaio",
+  "pysylph",
+]
+# `sylphd serve`, and everything `client` does.
+server = [
+  "dnaio",
   "pysylph",
   "python-multipart",
   "starlette",
@@ -38,7 +52,7 @@ Documentation = "https://abrinca.github.io/sylphd/docs/"
 Repository = "https://github.com/Abrinca/sylphd"
 
 [project.scripts]
-sylphd = "sylphd.cli:main"
+sylphd = "sylphd.entry:main"
 
 [tool.uv]
 # `libz-ng-sys` (a dependency of the sylph Rust crate) wants `cmake` at build
@@ -52,6 +66,7 @@ pysylph = { git = "https://github.com/MrTomRod/pysylph", branch = "multi-db" }
 [dependency-groups]
 dev = [
   "pytest",
+  "sylphd[server]",
 ]
 
 [tool.hatch.version]

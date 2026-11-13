@@ -202,11 +202,22 @@ jobs:
           ls -l dist
           uv venv --python 3.14 smoke
           VIRTUAL_ENV="$PWD/smoke" uv pip install --python smoke/bin/python \
-            --only-binary :all: --find-links dist "sylphd==$VERSION" pytest
+            --only-binary :all: --find-links dist "sylphd[server]==$VERSION" pytest
           smoke/bin/sylphd --version
           smoke/bin/sylphd info --help > /dev/null
           # The fork's wheel, not PyPI's pysylph 0.1.3.
           smoke/bin/python -c 'import pysylph; print(pysylph.__version__); assert "+g" in pysylph.__version__'
+      - name: The base install needs no pysylph
+        env:
+          VERSION: ${{ needs.sdist.outputs.version }}
+        run: |
+          set -eux
+          uv venv --python 3.14 lean
+          VIRTUAL_ENV="$PWD/lean" uv pip install --python lean/bin/python \
+            --only-binary :all: --find-links dist "sylphd==$VERSION"
+          lean/bin/python -c 'import sylphd.ncbitax, sylphd.client'
+          ! lean/bin/python -c 'import pysylph' 2> /dev/null
+          lean/bin/sylphd --version 2>&1 | grep -q "sylphd\[client\]"
       - name: Run a test subset against the installed package
         run: |
           set -eux
