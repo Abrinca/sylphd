@@ -11,6 +11,9 @@
     || location.protocol === 'file:';
   const configured = pageIsLocal ? (cfg.devApiBase || cfg.apiBase) : cfg.apiBase;
   const API = (apiOverride || configured || '').trim().replace(/\/+$/, '');
+  // The access token saved for this server (see token.js); sent only to this server.
+  const tok = window.SylphdToken.forServer(API);
+  let tokenRequired = false; // the server's /info says it refuses requests without a valid token
   const LOCAL_INPUT_CAP = 2e9; // sanity cap on the input of the in-browser sketcher
   const EXAMPLE_URL = 'example/mycoplasma_genitalium_G37.fna.gz';
   const EXAMPLE_NAME = 'mycoplasma_genitalium_G37.fna.gz';
@@ -28,6 +31,7 @@
     spDetails: $('sp-details'), spDetailsToggle: $('sp-details-toggle'),
     spPrivacyUsage: $('sp-privacy-usage'), spPrivacyUsageLink: $('sp-privacy-usage-link'),
     spChange: $('sp-change'), spReset: $('sp-reset'), spConnect: $('sp-connect'), spAbout: $('sp-about'),
+    spToken: $('sp-token'), spTokenBtn: $('sp-token-btn'),
     spAboutBody: $('sp-about-body'), spAboutNote: $('sp-about-note'), banner: $('server-banner'), submitHint: $('submit-hint'),
   };
 
@@ -255,6 +259,101 @@
     });
   }
 
+  /* ------------------------------------------------------- access token */
+  const TOKEN_TEXT = {
+    none: 'No token saved: you are an anonymous client, subject to the server\u2019s rate limit.',
+    unknown: 'A token is saved; the server has not judged it yet.',
+    valid: 'The server accepts this token.',
+    rejected: 'This server does not accept the saved token (mistyped, or replaced on the server?): you are treated as an anonymous client.',
+  };
+  function buildTokenForm() {
+    const input = el('input', {
+      type: 'password', id: 'api-token', placeholder: 'paste your token', spellcheck: 'false',
+      autocomplete: 'off', autocapitalize: 'off', 'aria-label': 'Access token',
+    });
+    const state = el('p', { class: 'detail token-state', role: 'status' });
+    const err = el('p', { class: 'detail connect-err', role: 'alert', hidden: true });
+    const forget = el('button', { type: 'button', class: 'btn btn-ghost', text: 'Forget', onclick: () => {
+      tok.forget();
+      input.value = '';
+      loadInfo();
+    } });
+    const form = el('form', { class: 'connect', novalidate: true },
+      el('label', { for: 'api-token', text: 'Access token' }),
+      el('div', { class: 'connect-row' }, input, el('button', { type: 'submit', class: 'btn', text: 'Save' }), forget,
+        el('button', { type: 'button', class: 'btn btn-ghost', text: 'Close', onclick: () => closeToken() })),
+      err, state,
+      el('p', { class: 'detail' },
+        'A token lifts the rate limit of this server (or opens a private one). It is saved in this browser only, for this server only, ',
+        'and sent only to it. Anyone who can use this browser profile, or run a script on this site\u2019s origin, can read it: ',
+        'do not save a token on a shared computer.'));
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const v = input.value.trim();
+      if (!v) { forget.click(); return; }
+      if (!tok.set(v)) {
+        err.textContent = 'A token holds printable characters without spaces.';
+        err.hidden = false;
+        input.focus();
+        return;
+      }
+      err.hidden = true;
+      input.value = '';
+      loadInfo();
+    });
+    form.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeToken(); });
+    form.refresh = () => {
+      let text = TOKEN_TEXT[tok.status];
+      if (tokenRequired && tok.status !== 'valid') text = tok.status === 'rejected' ? `This server requires an access token. ${TOKEN_TEXT.rejected}` : 'This server requires an access token.';
+      if (!tok.canSend() && tok.has()) text = 'The saved token is not sent: this server\u2019s address is plain http, and a token is only sent over https (or to localhost).';
+      state.textContent = text;
+      state.className = `detail token-state${tok.status === 'rejected' || (tokenRequired && tok.status !== 'valid') ? ' warn' : ''}`;
+      forget.hidden = !tok.has();
+      input.placeholder = tok.has() ? 'replace the saved token' : 'paste your token';
+    };
+    return form;
+  }
+  const tokenFormEl = buildTokenForm();
+  ui.spToken.append(tokenFormEl);
+  function openToken() {
+    ui.spToken.hidden = false;
+    ui.spTokenBtn.setAttribute('aria-expanded', 'true');
+    tokenFormEl.refresh();
+    ui.panel.scrollIntoView({ block: 'nearest' });
+    $('api-token').focus();
+  }
+  function closeToken() {
+    ui.spToken.hidden = true;
+    ui.spTokenBtn.setAttribute('aria-expanded', 'false');
+    ui.spTokenBtn.focus();
+  }
+  ui.spTokenBtn.addEventListener('click', () => (ui.spToken.hidden ? openToken() : closeToken()));
+  // Any verdict from the server (info, a job, usage) updates the button, the chip and the panel;
+  // a rejection opens the panel once so it cannot go unnoticed.
+  let rejectionShown = false;
+  let requiredShown = false;
+  tok.onChange((status) => {
+    if (status !== 'rejected') rejectionShown = false;
+    syncToken();
+    if (status === 'rejected' && !rejectionShown) {
+      rejectionShown = true;
+      if (ui.spToken.hidden) openToken();
+    }
+  });
+  function syncToken() {
+    // A rejection says more than "required": it wins over it.
+    const needs = tokenRequired && tok.status !== 'valid' && tok.status !== 'rejected';
+    ui.spTokenBtn.dataset.state = needs ? 'required' : tok.status;
+    const label = tok.status === 'rejected' ? 'Access token (not accepted)' : needs ? 'Access token (required)'
+      : tok.status === 'valid' ? 'Access token (accepted)' : 'Access token';
+    ui.spTokenBtn.title = label;
+    ui.spTokenBtn.setAttribute('aria-label', label);
+    tokenFormEl.refresh();
+    if (serverInfo) renderPanelHead();
+  }
+  // A response of this server: remember what it says about the token.
+  const noteToken = (res) => tok.note(res && res.headers ? res.headers.get('X-Token-Valid') : null);
+
   const shownProblem = () => serverProblem;
 
   function renderBanner() {
@@ -350,6 +449,13 @@
       }
     }
 
+    if (tok.has() || tokenRequired) {
+      const needs = tokenRequired && tok.status !== 'valid' && tok.status !== 'rejected';
+      const text = tok.status === 'rejected' ? 'token not accepted' : needs ? 'token required'
+        : tok.status === 'valid' ? 'token accepted' : 'token saved';
+      metaItems.push(el('span', { class: `sp-token-chip${needs || tok.status === 'rejected' ? ' warn' : ''}`, text }));
+    }
+
     const kids = [hostEl];
     if (metaItems.length) {
       const metaKids = [];
@@ -415,12 +521,23 @@
       return;
     }
     try {
-      const res = await fetch(`${API}/info`, { signal: timeoutSignal(8000), cache: 'no-store' });
+      const res = await fetch(`${API}/info`, { signal: timeoutSignal(8000), cache: 'no-store', headers: tok.headers() });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const info = await res.json();
       serverInfo = info;
+      tokenRequired = !!(info.access && info.access.token_required);
+      noteToken(res);
+      if (info.access && info.access.token_valid === true) tok.note('true');
+      else if (info.access && info.access.token_valid === false) tok.note('false');
       const db = info.database || {};
-      setStatus('online', 'Server online');
+      const blocked = tokenRequired && tok.status !== 'valid';
+      setStatus('online', !blocked ? 'Server online'
+        : tok.status === 'rejected' ? 'Server online · token not accepted' : 'Server online · access token required');
+      syncToken();
+      if (blocked && !requiredShown) {
+        requiredShown = true; // ask once; the key button stays for later
+        if (ui.spToken.hidden) openToken();
+      }
       const lim = info.limits || {};
       const fact = (label, value, title) => el('div', { class: 'sp-fact' },
         el('dt', { text: label }), el('dd', { title: title || null, text: value }));
@@ -442,6 +559,7 @@
       renderCatalog();
       infoTimer = setTimeout(loadInfo, 60000);
       setProblem(null);
+      syncToken();
       refreshInput();
       notifyInfo();
     } catch (e) {
@@ -853,13 +971,14 @@
       phase.text = `Sending the sketch (${fmtBytes(body.size)}) and searching…`;
       let res;
       try {
-        res = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': type }, signal: controller.signal });
+        res = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': type, ...tok.headers() }, signal: controller.signal });
       } catch (e) {
         if (e.name === 'AbortError') throw e;
         const err = new Error('network');
         err.network = true;
         throw err;
       }
+      noteToken(res);
       const raw = await res.text();
       let data = null;
       try { data = JSON.parse(raw); } catch { /* not JSON */ }
@@ -908,10 +1027,16 @@
       node = notice('error', 'Upload too large (413)',
         'The server rejected the sketch because it is over its upload limit (or that of its proxy). This input is too large or diverse for this server; use the sylphd command line.',
         msg && el('p', { class: 'detail', text: `Server message: ${msg}` }));
+    } else if (status === 401) {
+      node = notice('warn', 'Access token required (401)',
+        el('p', null, tok.has() ? 'The server does not accept the saved token.' : 'This server only accepts requests with an access token.', ' Open the key button at the top of the page to enter one.'),
+        msg && el('p', { class: 'detail', text: `Server message: ${msg}` }));
+      openToken();
     } else if (status === 429) {
       const secs = retry != null ? retry : 60;
       node = notice('warn', 'Rate limit reached (429)',
-        el('p', null, 'Too many requests from your address. You can try again in ', el('strong', { 'data-countdown': true, text: `${secs} s` }), '.'),
+        el('p', null, 'Too many requests from your address. You can try again in ', el('strong', { 'data-countdown': true, text: `${secs} s` }), '.',
+          tok.status === 'valid' ? '' : ' A token lifts the limit: use the key button at the top of the page.'),
         msg && el('p', { class: 'detail', text: `Server message: ${msg}` }));
       startCooldown(secs);
     } else if (status === 503) {
@@ -1600,6 +1725,7 @@
     accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal, updateSubmit,
     assemblyInput: () => input,
     api: API, apiOverride,
+    token: tok, authHeaders: () => tok.headers(), noteToken,
     info: () => serverInfo,
     usage: usageOn,
     problem: () => (API ? serverProblem : 'none'),

@@ -162,28 +162,110 @@ def load_token_digests(path: str | Path) -> tuple[bytes, ...]:
     return tuple(digests)
 
 
+def bearer_token(scope: dict) -> str | None:
+    """The token of an ``Authorization: Bearer <token>`` header, or ``None``."""
+    supplied = None
+    for key, value in scope.get("headers", ()):
+        if key.lower() == b"authorization":
+            supplied = value.decode("latin-1")
+    if supplied is None:
+        return None
+    scheme, _, token = supplied.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
 def is_privileged(scope: dict, digests: tuple[bytes, ...]) -> bool:
     """Whether the request carries ``Authorization: Bearer <token>`` for a known token.
 
     Digests are compared in constant time, and every digest is always
     compared, so timing reveals neither a match nor its position.
     """
-    if not digests:
+    token = bearer_token(scope)
+    if not digests or token is None:
         return False
-    supplied = None
-    for key, value in scope.get("headers", ()):
-        if key.lower() == b"authorization":
-            supplied = value.decode("latin-1")
-    if supplied is None:
-        return False
-    scheme, _, token = supplied.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        return False
-    candidate = hashlib.sha256(token.strip().encode("utf-8")).digest()
+    candidate = hashlib.sha256(token.encode("utf-8")).digest()
     matched = False
     for digest in digests:
         matched |= hmac.compare_digest(candidate, digest)
     return matched
+
+
+#: Response header that says whether the bearer token of the request is
+#: accepted; sent only when the request carried one.
+TOKEN_VALID_HEADER = "X-Token-Valid"
+
+#: ASGI scope key under which :class:`TokenMiddleware` leaves its verdict
+#: (``True``/``False``, absent when no token was sent), for ``GET /info``.
+TOKEN_SCOPE_KEY = "sylphd.token_valid"
+
+#: Paths a server that requires a token still answers without one, so a
+#: client can find out that it needs one.
+OPEN_PATHS = frozenset({"/", "/health", "/info"})
+
+
+class TokenMiddleware:
+    """Report whether a request's bearer token is valid; optionally require one.
+
+    A request that carries a token gets ``X-Token-Valid: true|false`` on its
+    response, whatever the status, so a client can warn about a mistyped or
+    rotated-out token instead of seeing only a rate limit.  With ``require``
+    every path outside :data:`OPEN_PATHS` answers ``401`` without a valid
+    token (CORS preflights are answered by the CORS middleware outside this
+    one and never get here).
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        *,
+        digests: tuple[bytes, ...],
+        require: bool = False,
+        open_paths: frozenset[str] | set[str] = OPEN_PATHS,
+    ) -> None:
+        self.app = app
+        self.digests = tuple(digests)
+        self.require = require
+        self.open_paths = frozenset(open_paths)
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        sent = bearer_token(scope) is not None
+        valid = sent and is_privileged(scope, self.digests)
+        if sent:
+            scope[TOKEN_SCOPE_KEY] = valid
+        header = (TOKEN_VALID_HEADER.lower().encode(), b"true" if valid else b"false")
+
+        async def send_with_verdict(message: dict) -> None:
+            if sent and message["type"] == "http.response.start":
+                message = {**message, "headers": [*message.get("headers", ()), header]}
+            await send(message)
+
+        if (
+            self.require
+            and not valid
+            and scope.get("method") != "OPTIONS"
+            and scope.get("path") not in self.open_paths
+        ):
+            from starlette.responses import JSONResponse
+
+            response = JSONResponse(
+                {
+                    "error": (
+                        "this server requires an access token: send "
+                        "'Authorization: Bearer <token>'"
+                        + (" (the token you sent is not accepted)" if sent else "")
+                    )
+                },
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            await response(scope, receive, send_with_verdict)
+            return
+        await self.app(scope, receive, send_with_verdict)
 
 
 class RateLimitMiddleware:

@@ -887,6 +887,9 @@
     } else if (status === 413) {
       node = S.notice('error', 'Upload too large (413)',
         'The server rejected a batch of contig sketches because it is over its upload limit. The request is split until it fits; a single contig sketch can still be too large.', msg);
+    } else if (status === 401) {
+      node = S.notice('warn', 'Access token required (401)',
+        el('p', null, S.token.has() ? 'The server does not accept the saved token.' : 'This server only accepts requests with an access token.', ' Use the key button at the top of the page to enter one.'), msg);
     } else if (status === 429) {
       const secs = err.retryAfter != null ? err.retryAfter : 60;
       node = S.notice('warn', 'Rate limit reached (429)',
@@ -1052,13 +1055,14 @@
     }
     let res;
     try {
-      res = await fetch(`${S.api}/contigs`, { method: 'POST', body, signal });
+      res = await fetch(`${S.api}/contigs`, { method: 'POST', body, signal, headers: S.authHeaders() });
     } catch (e) {
       if (e.name === 'AbortError') throw e;
       const err = new Error('network');
       err.network = true;
       throw err;
     }
+    S.noteToken(res);
     const raw = await res.text();
     let data = null;
     try { data = JSON.parse(raw); } catch { /* not JSON */ }

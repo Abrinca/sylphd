@@ -99,6 +99,14 @@ several), and a sketch cannot be mixed with reads. The *Upload* chip in the head
 sketch the server takes; typical sketch sizes are in
 [Sizing the upload limit](public-server.md#sizing-the-upload-limit).
 
+## Access token { #token }
+
+A server can lift its rate limit for holders of a token, or require one. The key button in the server
+bar at the top of the page opens a form: paste the token and *Save*. It is remembered in this browser
+for that server only and sent only to it; the page says *token accepted* or *token not accepted*, and
+a server that requires a token opens the form by itself. *Forget* removes it. See
+[Privileged access](public-server.md#privileged-access) for what to keep in mind on a shared computer.
+
 ## Limits and what to expect
 
 - **Speed:** a 1.55 GB gzipped ONT file (254k reads, 2.1 Gbp) is sketched in about 10 s in

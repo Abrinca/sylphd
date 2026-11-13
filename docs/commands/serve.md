@@ -9,7 +9,7 @@ sylphd serve --db [NAME=]PATH [--db [NAME=]PATH ...] [--meta PATH]
              [--socket PATH | --tcp HOST:PORT]
              [--max-jobs N] [--max-contigs N] [--max-upload-mb N] [--hash]
              [--allow-sequences] [--max-sequence-mb N] [--rate-limit N/min]
-             [--max-queue N] [--privileged-token-file FILE] [--trusted-proxy IP]
+             [--max-queue N] [--privileged-token-file FILE] [--require-token] [--trusted-proxy IP]
              [--cors-origin ORIGIN] [--name TEXT] [--about FILE] [--usage-db FILE]
              [--taxonomy-db FILE] [--taxonomy-rate-limit N/min] [--log-level LEVEL]
 ```
@@ -106,7 +106,8 @@ The details of the limits, client identity and CORS are in
 | `--usage-db FILE` | off | SQLite file for opt-in usage statistics, created if missing (its directory must exist and be writable). Without it **nothing is recorded**, `GET /usage` is a `404` and `/info` reports `"usage": {"enabled": false}` |
 | `--taxonomy-db FILE` | off | NCBI taxonomy file from [`sylphd taxdb build`](taxdb.md): serves [`/taxonomy/*`](../reference/http-api.md#taxonomy). A file that is replaced is picked up on the next request, no restart needed |
 | `--taxonomy-rate-limit N/min` | off | per-client rate limit of `/taxonomy/*` alone (`N/min` or `N/s`), counted apart from `--rate-limit` |
-| `--privileged-token-file FILE` | off | bearer tokens, one per line, whose holders skip `--rate-limit` and `--taxonomy-rate-limit`; see [privileged access](../guides/public-server.md#privileged-access) |
+| `--privileged-token-file FILE` | off | bearer tokens, one per line, whose holders skip `--rate-limit` and `--taxonomy-rate-limit`; see [privileged access](../guides/public-server.md#privileged-access). A token the server does not know is reported (`X-Token-Valid: false`), not refused |
+| `--require-token` | off | with `--privileged-token-file`: refuse every request except `/`, `/health` and `/info` (`401`) unless it carries a valid token, a private server. Without the token file the server does not start |
 
 With it, each successful request to `/assembly`, `/contigs`, `/profile` or `/query` adds to
 counters per ten-minute window, endpoint, kind of client (`web`, `cli` with its version, `other`):

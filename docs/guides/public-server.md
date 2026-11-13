@@ -72,31 +72,7 @@ never logged: only sizes, timings and request outcomes appear in the server log,
 | `--taxonomy-rate-limit N/min` | off | `/taxonomy/*` (with `--taxonomy-db`) | per-client limit of the taxonomy lookups alone; cheap calls, so a higher number than `--rate-limit`, such as `120/min` |
 | `--max-queue N` | unlimited | the same | jobs allowed to wait for a job slot; beyond that `503` with `Retry-After: 1` |
 
-`/health` and `/info` are always served and never limited.
-
-### Privileged access { #privileged-access }
-
-To exempt yourself (or a trusted pipeline) from `--rate-limit`, create a token file readable by the
-service user and start the server with `--privileged-token-file`:
-
-```bash
-openssl rand -hex 32 | sudo tee /etc/sylphd/tokens >/dev/null
-sudo chown root:sylphd /etc/sylphd/tokens && sudo chmod 0640 /etc/sylphd/tokens
-sylphd serve ... --rate-limit 10/min --privileged-token-file /etc/sylphd/tokens
-```
-
-The file holds one token per line (blank lines and `#` comments are ignored), so a token can be
-rotated by adding the new one, switching clients, then removing the old one and restarting. Clients
-pass the token with `--token-file PATH` or the `SYLPHD_TOKEN` environment variable (preferred over
-a command-line value, which shows up in `ps`):
-
-```bash
-sylphd profile --url https://sylphd.example.org --token-file ~/.config/sylphd/token reads.sylsp
-```
-
-A privileged request skips only the rate limit: `--max-jobs`, `--max-queue` and upload limits still
-apply, so the host cannot be overloaded by it. Use HTTPS; the client refuses to send a token over
-plain `http://` to anything but localhost. Treat the token as a password. At most 4096 sketches fit in one
+`/health` and `/info` are always served and never limited. At most 4096 sketches fit in one
 `/query` or `/profile` request; `/info` reports that cap as `max_sketches`. For `/contigs` the cap
 is `--max-contigs` (`4096` by default), reported as `max_contigs`, plus the largest JSON `params`
 part as `max_params_bytes`.
@@ -137,6 +113,50 @@ profiling). With `--max-queue` set, at most `--max-jobs` + `--max-queue` jobs ar
 without it nothing bounds the number of waiting uploads. The public
 instance uses `--max-upload-mb 200` on a 2-core, 12 GB VM. Keep a reverse proxy's body limit a
 little above `--max-upload-mb`, so oversized uploads get sylphd's own error message.
+
+### Privileged access { #privileged-access }
+
+To exempt yourself (or a trusted pipeline) from `--rate-limit`, create a token file readable by the
+service user and start the server with `--privileged-token-file`:
+
+```bash
+openssl rand -hex 32 | sudo tee /etc/sylphd/tokens >/dev/null
+sudo chown root:sylphd /etc/sylphd/tokens && sudo chmod 0640 /etc/sylphd/tokens
+sylphd serve ... --rate-limit 10/min --privileged-token-file /etc/sylphd/tokens
+```
+
+The file holds one token per line (blank lines and `#` comments are ignored), so a token can be
+rotated by adding the new one, switching clients, then removing the old one and restarting. Clients
+pass the token with `--token-file PATH` or the `SYLPHD_TOKEN` environment variable (preferred over
+a command-line value, which shows up in `ps`):
+
+```bash
+sylphd profile --url https://sylphd.example.org --token-file ~/.config/sylphd/token reads.sylsp
+```
+
+A privileged request skips only the rate limit: `--max-jobs`, `--max-queue` and upload limits still
+apply, so the host cannot be overloaded by it. Use HTTPS; the client refuses to send a token over
+plain `http://` to anything but localhost. Treat the token as a password.
+
+**A wrong token is reported, not refused.** The server treats a request whose token it does not
+know as anonymous, but every response to a request that carried a token has an
+`X-Token-Valid: true` or `false` header (also on errors and `429`s), and `GET /info` says
+`access.token_valid`. The command line and the Python client print a warning once
+(`sylphd: warning: ... does not accept this access token`), so a mistyped or rotated-out token does
+not hide behind a rate limit. The web page shows it next to the server name.
+
+**A private server.** `--require-token` (with `--privileged-token-file`) refuses every request
+without a valid token with `401` and `WWW-Authenticate: Bearer`, except `GET /`, `/health` and
+`/info`, which stay open so clients and the web page can find out that a token is needed
+(`access.token_required` in `/info`). Rate limits then only matter between token holders, who skip them.
+
+**In the web page.** The key button in the server bar opens the token form. The token is saved in the
+browser's `localStorage` under the address of that server and sent only to it (a `?api=` override
+to another server never receives it, and plain `http://` only to localhost), so it is remembered on
+the next visit; *Forget* removes it. Anyone who can use that browser profile, or run a script on the
+same origin (all pages under `github.io/<user>` share one), can read it: do not save a token on a
+shared computer. A server that requires a token opens the form by itself. The server must allow the
+page's origin (`--cors-origin`), which now includes the `Authorization` header.
 
 ## Client identity and `--trusted-proxy`
 

@@ -183,6 +183,29 @@ class TestQueries:
         assert db.search("escherichia", rank="species")[0]["taxid"] == 562
         assert db.search("") == []
 
+    def test_digits_complete_the_taxid(self, db: TaxDb) -> None:
+        hits = db.search("56")
+        assert [h["taxid"] for h in hits] == [561, 562]
+        assert {h["name_class"] for h in hits} == {"taxid"}
+        assert hits[0]["scientific_name"] == "Escherichia" and hits[0]["rank"] == "genus"
+        assert hits[0]["name"] == hits[0]["scientific_name"]
+        assert [h["taxid"] for h in db.search("562")] == [562]  # exact, nothing longer exists
+        assert db.search("562")[0]["score"] == 1.0 and db.search("56")[0]["score"] < 1.0
+        assert [h["taxid"] for h in db.search("9")] == [9605, 9606]  # no taxid 9; 96xx
+        assert [h["taxid"] for h in db.search("5", rank="species")] == [550, 562]
+        assert [h["taxid"] for h in db.search("1")] == [1]
+        assert [h["taxid"] for h in db.search("0562")] == [562] and db.search("0") == []
+        assert db.search("99999999999") == [] and db.search("424242") == []
+        assert db.search("5", limit=1)[0]["taxid"] == 550 and len(db.search("5", limit=1)) == 1
+        # fuzzy is irrelevant for digits
+        assert db.search("56", fuzzy=True) == hits
+
+    def test_an_old_merged_taxid_completes_to_its_replacement(self, db: TaxDb) -> None:
+        hit = db.search("12")[0]
+        assert (hit["taxid"], hit["name_class"], hit["name"]) == (562, "merged taxid", "12")
+        assert hit["scientific_name"] == "Escherichia coli" and hit["score"] == 1.0
+        assert db.search("12", rank="genus") == []
+
     def test_fuzzy_search_tolerates_typos(self, db: TaxDb) -> None:
         assert db.search("escherichia colli", fuzzy=True)[0]["taxid"] == 562
         assert db.search("saccharomyces cerevisae", fuzzy=True)[0]["taxid"] == 4932
@@ -253,6 +276,10 @@ class TestObjects:
         assert hit.taxon.taxid == 562 and 0.9 < hit.score <= 1
         assert tax.search("eschericia", fuzzy=True, rank="genus")[0].taxon.taxid == 561
         assert {n["name_class"] for n in tax.taxid(562).names()} >= {"synonym"}
+        by_id = tax.search(56)  # an int works, too
+        assert [m.taxon.taxid for m in by_id] == [561, 562] and by_id[0].name_class == "taxid"
+        old = tax.search("12")[0]
+        assert (old.name, old.name_class, old.taxon.taxid) == ("12", "merged taxid", 562)
 
     def test_batch_fetch_and_cache(self, taxdb_path) -> None:
         calls = []

@@ -897,3 +897,64 @@ class TestShutdown:
         while time.monotonic() < deadline and socket_path.exists():
             time.sleep(0.1)
         assert not socket_path.exists()
+
+
+class TestRequireToken:
+    """A private server: ``--require-token`` with the client's ``--token-file`` and its warning."""
+
+    TOKEN = "cli-token-" + "z" * 24
+
+    @pytest.fixture(scope="class")
+    def private(self, tmp_path_factory):
+        directory = tmp_path_factory.mktemp("private")
+        tokens = directory / "tokens"
+        tokens.write_text(self.TOKEN + "\n")
+        socket_path = directory / "sylphd.sock"
+        process = subprocess.Popen(
+            [
+                sys.executable, "-m", "sylphd", "serve",
+                "--db", str(ECOLI_TWO_STAGE), "--socket", str(socket_path),
+                "--privileged-token-file", str(tokens), "--require-token",
+                "--log-level", "warning",
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            _wait_for_socket(socket_path)
+            yield socket_path, tokens, directory
+        finally:
+            process.terminate()
+            process.wait(timeout=20)
+
+    def test_without_a_token_the_server_says_it_needs_one(self, private) -> None:
+        socket_path, _, _ = private
+        result = _run("taxonomy", "--socket", str(socket_path), "562", check=False)
+        assert result.returncode == 1
+        assert "requires an access token" in result.stderr
+
+    def test_a_wrong_token_warns_and_is_still_refused(self, private) -> None:
+        socket_path, _, directory = private
+        wrong = directory / "wrong"
+        wrong.write_text("w" * 30 + "\n")
+        result = _run("taxonomy", "--socket", str(socket_path), "--token-file", str(wrong), "562", check=False)
+        assert result.returncode == 1
+        assert "sylphd: warning:" in result.stderr and "does not accept this access token" in result.stderr
+        assert "not accepted" in result.stderr
+
+    def test_info_stays_open_and_a_wrong_token_warns_there_too(self, private) -> None:
+        socket_path, tokens, directory = private
+        assert _run("info", "--socket", str(socket_path)).returncode == 0
+        wrong = directory / "wrong"
+        wrong.write_text("w" * 30 + "\n")
+        result = _run("info", "--socket", str(socket_path), "--token-file", str(wrong))
+        assert "does not accept this access token" in result.stderr
+        good = _run("info", "--socket", str(socket_path), "--token-file", str(tokens))
+        assert "warning" not in good.stderr
+
+    def test_require_token_needs_a_token_file(self, tmp_path) -> None:
+        result = _run(
+            "serve", "--db", str(ECOLI_TWO_STAGE), "--socket", str(tmp_path / "s.sock"),
+            "--require-token", check=False,
+        )
+        assert result.returncode == 2
+        assert "--require-token needs --privileged-token-file" in result.stderr

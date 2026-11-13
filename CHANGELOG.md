@@ -28,6 +28,21 @@ All notable changes to `sylphd` are documented here. The format follows
   installed. `sylphd taxonomy` looks taxa up on the command line. See the
   [NCBI taxonomy guide](../guides/ncbi-taxonomy.md).
 
+- **Taxid autocomplete.** `/taxonomy/search` (and `Taxonomy.search`, `sylphd taxonomy --search`) with a
+  query of digits only completes the taxid: the exact id, then the ids that start with the digits,
+  shorter first; a merged taxid answers with its replacement. Hits keep the name-search shape
+  (`name_class` is `"taxid"` or `"merged taxid"`).
+- **Wrong tokens are reported; private servers; tokens in the web page.** A response to a request that
+  carried a bearer token now has `X-Token-Valid: true|false` (and `GET /info` says
+  `access.token_valid`), so the command line and the Python client warn once
+  (`sylphd: warning: ... does not accept this access token`) instead of silently falling back to the
+  rate limit. `serve --require-token` (with `--privileged-token-file`) refuses everything except `/`,
+  `/health` and `/info` with `401` unless the token is valid; `/info` reports `access.token_required`.
+  CORS now allows the `Authorization` header and exposes `X-Token-Valid`. The web page has a key
+  button in the server bar: the token is kept in `localStorage` per server, sent only to that server
+  (and only over https or to localhost), flagged when rejected, and the form opens by itself on a
+  server that requires one.
+
 ### Changed
 
 - **The base install is light: pick `sylphd[server]`, `sylphd[client]` or `sylphd[taxonomy]`.**

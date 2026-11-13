@@ -887,3 +887,78 @@ class TestPrivilegedToken:
         for bad in (short, empty, tmp_path / "missing"):
             with pytest.raises(ValueError):
                 load_token_digests(bad)
+
+
+class TestTokenVerdictAndRequirement:
+    TOKEN = "t0ken-" + "x" * 24
+
+    def _app(self, tmp_path: Path, **extra):
+        from sylphd.limits import load_token_digests
+
+        path = tmp_path / "tokens"
+        path.write_text(self.TOKEN + "\n")
+        return create_app(
+            ServerConfig(
+                db_path=ECOLI_TWO_STAGE,
+                privileged_tokens=load_token_digests(path),
+                cors_origins=("*",),
+                **extra,
+            )
+        )
+
+    def test_verdict_header_only_when_a_token_is_sent(self, tmp_path: Path) -> None:
+        with TestClient(self._app(tmp_path)) as c:
+            assert "x-token-valid" not in c.get("/health").headers
+            good = c.get("/health", headers={"authorization": f"Bearer {self.TOKEN}"})
+            assert good.headers["x-token-valid"] == "true"
+            bad = c.get("/health", headers={"authorization": "Bearer " + "y" * 30})
+            assert bad.headers["x-token-valid"] == "false"
+            # a verdict on error responses too, and CORS lets a page read it
+            err = c.post("/query", content=b"x", headers={"authorization": "Bearer nope-nope-nope-nope"})
+            assert err.status_code == 415 and err.headers["x-token-valid"] == "false"
+            cors = c.get(
+                "/health",
+                headers={"origin": "https://p.example", "authorization": f"Bearer {self.TOKEN}"},
+            )
+            assert "x-token-valid" in cors.headers["access-control-expose-headers"].lower()
+
+    def test_info_says_whether_a_token_is_required_and_valid(self, tmp_path: Path) -> None:
+        with TestClient(self._app(tmp_path)) as c:
+            assert c.get("/info").json()["access"] == {"token_required": False}
+            ok = c.get("/info", headers={"authorization": f"Bearer {self.TOKEN}"}).json()
+            assert ok["access"] == {"token_required": False, "token_valid": True}
+            no = c.get("/info", headers={"authorization": "Bearer " + "y" * 30}).json()
+            assert no["access"]["token_valid"] is False
+
+    def test_cors_preflight_allows_authorization(self, tmp_path: Path) -> None:
+        with TestClient(self._app(tmp_path, require_token=True)) as c:
+            r = c.options(
+                "/query",
+                headers={
+                    "origin": "https://p.example",
+                    "access-control-request-method": "POST",
+                    "access-control-request-headers": "authorization,content-type",
+                },
+            )
+            assert r.status_code == 200
+            assert "authorization" in r.headers["access-control-allow-headers"].lower()
+
+    def test_require_token_refuses_everything_but_the_open_paths(self, tmp_path: Path) -> None:
+        with TestClient(self._app(tmp_path, require_token=True)) as c:
+            assert c.get("/health").status_code == 200
+            info = c.get("/info").json()
+            assert info["access"]["token_required"] is True
+            refused = c.post("/query", content=b"x")
+            assert refused.status_code == 401
+            assert refused.headers["www-authenticate"] == "Bearer"
+            assert "requires an access token" in refused.json()["error"]
+            assert "x-token-valid" not in refused.headers
+            wrong = c.post("/query", content=b"x", headers={"authorization": "Bearer " + "y" * 30})
+            assert wrong.status_code == 401 and wrong.headers["x-token-valid"] == "false"
+            assert "not accepted" in wrong.json()["error"]
+            auth = {"authorization": f"Bearer {self.TOKEN}"}
+            assert c.post("/query", content=b"x", headers=auth).status_code == 415  # got through
+
+    def test_require_token_needs_tokens(self) -> None:
+        with pytest.raises(ValueError, match="privileged_tokens"):
+            ServerConfig(db_path=ECOLI_TWO_STAGE, require_token=True)

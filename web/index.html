@@ -9,6 +9,7 @@
   <link rel="icon" type="image/svg+xml" href="img/sylphd-icon-tile.svg">
   <link rel="stylesheet" href="style.css">
   <script src="config.js"></script>
+  <script src="token.js"></script>
   <script src="sketching.js" defer></script>
   <script src="vendor/marked.umd.js" defer></script>
   <script src="vendor/purify.min.js" defer></script>
@@ -41,6 +42,9 @@
             </div>
             <div class="sp-actions">
               <button type="button" id="sp-details-toggle" class="btn btn-small" aria-expanded="false" aria-controls="sp-details">Details ▾</button>
+              <button type="button" id="sp-token-btn" class="btn btn-small btn-icon" data-state="none" aria-expanded="false" aria-controls="sp-token" aria-label="Access token" title="Access token">
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M10.5 9.5a3.5 3.5 0 1 0-3-3L2 12v2h2v-1.5h1.5V11H7l1.5-1.5"/></svg>
+              </button>
               <button type="button" id="sp-change" class="btn btn-small btn-icon" aria-expanded="false" aria-controls="sp-connect" aria-label="Change server" title="Change server">
                 <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M11 2l3 3L5 14H2v-3L11 2z"/></svg>
               </button>
@@ -55,6 +59,7 @@
           </div>
         </div>
         <div id="sp-connect" class="sp-connect" hidden></div>
+        <div id="sp-token" class="sp-connect" hidden></div>
         <div id="sp-details" class="sp-details" hidden>
           <div class="sp-details-overview">
             <div id="status-detail" class="status-detail" role="status"></div>

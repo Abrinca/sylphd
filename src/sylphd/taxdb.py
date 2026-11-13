@@ -67,6 +67,9 @@ MAX_DEPTH = 200
 #: Most descendants one call returns (``truncated`` tells when it was cut).
 MAX_DESCENDANTS = 100_000
 
+#: A taxid has at most this many digits (NCBI's are below 2^31).
+MAX_TAXID_DIGITS = 10
+
 #: Most hits of a search; the candidates the fuzzy search re-ranks; the
 #: vocabulary words it weighs per query word.
 MAX_SEARCH = 100
@@ -703,6 +706,10 @@ class TaxDb:
     ) -> list[dict[str, Any]]:
         """Names starting with ``query`` (or, with ``fuzzy``, similar to it).
 
+        A query of digits only searches taxids instead: the ids that start with
+        them (the exact one first, then the shorter ones), ``name_class`` is
+        ``"taxid"`` and ``fuzzy`` is ignored.
+
         Each hit is ``{taxid, name, name_class, scientific_name, rank, score}``
         (``score`` 1.0 for an exact name; for ``fuzzy`` the similarity 0-1),
         best first, at most one per taxid.  Fuzzy search needs the file to be
@@ -712,9 +719,67 @@ class TaxDb:
         text = query.strip().casefold()
         if not text:
             return []
+        if text.isascii() and text.isdigit() and len(text) <= MAX_TAXID_DIGITS:
+            return self._taxid_prefix(text, rank, limit)
         if fuzzy:
             return self._fuzzy(text, rank, limit)
         return self._prefix(text, rank, limit)
+
+    def _taxid_prefix(self, digits: str, rank: str | None, limit: int) -> list[dict[str, Any]]:
+        """Taxids that start with ``digits``: the exact one, then 10x..19x.. and so on.
+
+        Shorter ids come first (they are the older, better known taxa).  An exact
+        id that was merged into another answers with its replacement
+        (``name_class`` ``"merged taxid"``).  Each range is one index scan.
+        """
+        db = self._connect()
+        digits = digits.lstrip("0")
+        if not digits:
+            return []
+        number = int(digits)
+        extra = "AND rank = ?" if rank else ""
+        hits: list[dict[str, Any]] = []
+        moved = db.execute("SELECT new FROM merged WHERE old=?", (number,)).fetchone()
+        if moved is not None:
+            row = db.execute(
+                "SELECT taxid, name, rank FROM node WHERE taxid=?", (moved[0],)
+            ).fetchone()
+            if row is not None and (rank is None or row[2] == rank):
+                hits.append(
+                    {
+                        "taxid": row[0],
+                        "name": digits,
+                        "name_class": "merged taxid",
+                        "scientific_name": row[1],
+                        "rank": row[2],
+                        "score": 1.0,
+                    }
+                )
+        for extra_digits in range(MAX_TAXID_DIGITS - len(digits) + 1):
+            if len(hits) >= limit:
+                break
+            low = number * 10**extra_digits
+            high = (number + 1) * 10**extra_digits - 1
+            params: list[Any] = [low, high]
+            if rank:
+                params.append(rank)
+            params.append(limit - len(hits))
+            for taxid, name, node_rank in db.execute(
+                f"SELECT taxid, name, rank FROM node WHERE taxid BETWEEN ? AND ? {extra} "
+                "ORDER BY taxid LIMIT ?",
+                params,
+            ):
+                hits.append(
+                    {
+                        "taxid": taxid,
+                        "name": name,
+                        "name_class": "taxid",
+                        "scientific_name": name,
+                        "rank": node_rank,
+                        "score": 1.0 if extra_digits == 0 else round(len(digits) / len(str(taxid)), 4),
+                    }
+                )
+        return hits
 
     def _prefix(self, text: str, rank: str | None, limit: int) -> list[dict[str, Any]]:
         db = self._connect()

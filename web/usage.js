@@ -269,7 +269,8 @@
     }
     if (!modal.body.querySelector('.usage-ready')) modal.body.replaceChildren(S.notice('info', 'Loading the usage statistics…'));
     try {
-      const res = await fetch(`${S.api}/usage`, { signal: S.timeoutSignal(15000), cache: 'no-store' });
+      const res = await fetch(`${S.api}/usage`, { signal: S.timeoutSignal(15000), cache: 'no-store', headers: S.authHeaders() });
+      S.noteToken(res);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (activeModal !== modal || mine !== modal.token) return;

@@ -20,7 +20,7 @@ sylphd taxonomy --db taxdump.sqlite --search --fuzzy --rank species "bacilus sub
 
 | Option | Meaning |
 |---|---|
-| `--search` | treat each `QUERY` as the start of a name |
+| `--search` | treat each `QUERY` as the start of a name, or, if it is digits only, of a taxid |
 | `--fuzzy` | with `--search`: tolerate typos (`escherichia colli`) |
 | `--rank RANK` | with `--search`: only taxa of this rank (`species`, `genus`, ...) |
 | `--limit N` | with `--search`: hits per query [10] |

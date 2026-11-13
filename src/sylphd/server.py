@@ -40,7 +40,14 @@ from starlette.routing import Route
 from . import __version__, per_contig
 from .about import About
 from .assembly import INTERPRETATION_THRESHOLDS
-from .limits import JobSlots, JobTimes, RateLimiter, RateLimitMiddleware
+from .limits import (
+    TOKEN_SCOPE_KEY,
+    JobSlots,
+    JobTimes,
+    RateLimiter,
+    RateLimitMiddleware,
+    TokenMiddleware,
+)
 from .metadata import MetadataDB
 from .paths import SOCKET_MODE
 from .profiling import (
@@ -136,6 +143,9 @@ class ServerConfig:
     #: SHA-256 digests of the bearer tokens that bypass the rate limit
     #: (``--privileged-token-file``); see :func:`sylphd.limits.load_token_digests`.
     privileged_tokens: tuple[bytes, ...] = ()
+    #: Refuse every request outside ``/``, ``/health`` and ``/info`` that has
+    #: no valid token (``--require-token``); needs ``privileged_tokens``.
+    require_token: bool = False
     #: How many jobs (samples) may wait for a job slot; ``None`` is unlimited.
     max_queue: int | None = None
     #: Peers whose ``X-Forwarded-For`` header is trusted (IPs or ``"unix"``).
@@ -164,6 +174,8 @@ class ServerConfig:
     taxonomy_rate_limit: tuple[int, float] | None = None
 
     def __post_init__(self) -> None:
+        if self.require_token and not self.privileged_tokens:
+            raise ValueError("require_token needs privileged_tokens (--privileged-token-file)")
         if self.max_contigs < 1:
             raise ValueError("max_contigs must be at least 1")
         if self.db_paths:
@@ -225,6 +237,7 @@ async def _info(request: Request) -> JSONResponse:
             },
             "usage": _usage_info(state.usage),
             "taxonomy": _taxonomy_info(state),
+            "access": _access_info(request, state),
             "endpoints": _endpoints(state),
             "params": _params_info(),
         }
@@ -235,6 +248,14 @@ def _usage_info(usage: Usage | None) -> dict[str, Any]:
     if usage is None:
         return {"enabled": False}
     return {"enabled": True, "policy": POLICY, "window_minutes": WINDOW_MINUTES}
+
+
+def _access_info(request: Request, state: Any) -> dict[str, Any]:
+    """Whether this server asks for a token, and (if the request sent one) whether it is valid."""
+    access: dict[str, Any] = {"token_required": state.require_token}
+    if TOKEN_SCOPE_KEY in request.scope:
+        access["token_valid"] = request.scope[TOKEN_SCOPE_KEY]
+    return access
 
 
 def _taxonomy_info(state: Any) -> dict[str, Any]:
@@ -768,6 +789,7 @@ def create_app(
     app.state.about = config.about
     app.state.usage = config.usage
     app.state.taxdb = taxdb
+    app.state.require_token = config.require_token
     app.state.taxonomy_rate_limit = config.taxonomy_rate_limit
     app.state.jobs = JobSlots(config.max_jobs, config.max_queue)
     # Starlette middleware: the last added is the outermost, so CORS wraps
@@ -793,6 +815,12 @@ def create_app(
             trusted=frozenset(config.trusted_proxies),
             privileged=config.privileged_tokens,
         )
+    if config.privileged_tokens or config.require_token:
+        app.add_middleware(
+            TokenMiddleware,
+            digests=config.privileged_tokens,
+            require=config.require_token,
+        )
     if config.cors_origins:
         origins = [o for o in config.cors_origins if o != "local"]
         app.add_middleware(
@@ -802,8 +830,8 @@ def create_app(
                 LOCAL_ORIGIN_REGEX if "local" in config.cors_origins else None
             ),
             allow_methods=["GET", "POST"],
-            allow_headers=["Content-Type"],
-            expose_headers=["Retry-After", "X-Request-Id"],
+            allow_headers=["Content-Type", "Authorization"],
+            expose_headers=["Retry-After", "X-Request-Id", "X-Token-Valid"],
             max_age=600,
         )
     app.add_middleware(GZipMiddleware, minimum_size=1024)

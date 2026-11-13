@@ -287,3 +287,63 @@ def test_token_is_refused_over_plain_http_to_a_remote_host() -> None:
     with pytest.raises(ValueError, match="plain http"):
         SylphClient(base_url="http://example.org", token="s" * 20)
     SylphClient(base_url="http://localhost:8080", token="s" * 20)
+
+
+class TestTokenVerdict:
+    def _client(self, replies: list[httpx.Response]):
+        from sylphd.client import SylphClient
+
+        client = SylphClient(base_url="https://example.test", token="s" * 20)
+        client._client = httpx.Client(
+            transport=httpx.MockTransport(lambda request: replies.pop(0)),
+            base_url="https://example.test/",
+        )
+        return client
+
+    def test_warns_once_when_the_server_rejects_the_token(self) -> None:
+        import warnings
+
+        from sylphd.client import TokenWarning
+
+        client = self._client(
+            [httpx.Response(200, json={}, headers={"x-token-valid": "false"})] * 3
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            client.info()
+            client.info()
+            client.info()
+        assert [w.category for w in caught] == [TokenWarning]
+        assert "does not accept this access token" in str(caught[0].message)
+        assert client.token_valid is False
+
+    def test_valid_token_is_silent_and_a_later_rejection_warns_again(self) -> None:
+        import warnings
+
+        client = self._client(
+            [
+                httpx.Response(200, json={}, headers={"x-token-valid": "true"}),
+                httpx.Response(200, json={}, headers={"x-token-valid": "false"}),
+            ]
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            client.info()
+            assert client.token_valid is True and not caught
+            client.info()
+        assert len(caught) == 1
+
+    def test_no_header_means_nothing_is_known(self) -> None:
+        client = self._client([httpx.Response(200, json={})])
+        client.info()
+        assert client.token_valid is None
+
+    def test_a_401_names_the_token_requirement(self) -> None:
+        from sylphd.client import ClientError
+
+        client = self._client(
+            [httpx.Response(401, json={"error": "this server requires an access token: send ..."})]
+        )
+        with pytest.raises(ClientError, match="requires an access token") as raised:
+            client.info()
+        assert raised.value.status_code == 401

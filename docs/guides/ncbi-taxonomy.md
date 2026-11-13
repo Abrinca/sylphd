@@ -46,6 +46,7 @@ tax.lookup(["human", "mouse"])            # many names at once: {name: [Match, .
 tax.taxids([562, 9606, 12])               # many taxids in one request; None where unknown
 tax.search("escherichia c")               # names starting with ...
 tax.search("escherichia colli", fuzzy=True, rank="species")   # tolerates typos
+tax.search("56")                          # digits complete the taxid: 56, 561, 562, 563, ...
 ```
 
 - A taxid that NCBI merged gives its replacement, with `.merged_from` set to the id you asked for.
@@ -66,6 +67,15 @@ tax.search("escherichia colli", fuzzy=True, rank="species")   # tolerates typos
 `nodes.dmp`, already filled in for every taxon from its ancestors. `tax.genetic_codes()` holds the
 tables (`1` Standard, `2` Vertebrate Mitochondrial, `11` Bacterial, ...) with amino acids and start
 codons. A mitochondrial code of `0` means NCBI gives none.
+
+## Autocomplete
+
+`search()` is built for a search box. Letters complete names (prefix, or `fuzzy=True` for typos); **digits
+complete the taxid**: `search("56")` gives the taxon 56 and then 561, 562, 563, ... (shorter ids first),
+and an old merged taxid such as `12` answers with its replacement. Each `Match` has the matched
+`name`, its `name_class` (`"scientific name"`, `"synonym"`, `"common name"`, `"taxid"`, ...), a `score`
+and the whole `Taxon` (taxid, scientific name, rank, genetic codes, ...); over HTTP a hit is the light
+`{taxid, name, name_class, scientific_name, rank, score}` and `/taxonomy/nodes` gives the rest.
 
 ## Fuzzy search
 

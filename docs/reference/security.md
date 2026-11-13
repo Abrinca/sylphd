@@ -56,6 +56,14 @@ server keeps only SHA-256 digests, compares them in constant time and never logs
 token. Keep the file `0640 root:sylphd`, send tokens only over HTTPS, and note that a reverse proxy
 must not log the `Authorization` header (the example `Caddyfile` deletes it from its access log).
 
+Every response to a request that carried a bearer token says whether it is valid
+(`X-Token-Valid`), which tells a client holding a wrong token (and anyone guessing) that it is
+wrong. Tokens are 256-bit random values and failed guesses are still rate limited like anonymous
+requests, so this does not help guessing; it makes a mistyped token visible. `--require-token`
+turns the server private: only `/`, `/health` and `/info` answer without a valid token. The web page
+keeps a token in `localStorage` per server and sends it only to that server; scripts on the same
+origin can read it, so it should not be saved on a shared computer.
+
 ### The `/contigs` work bound
 
 `POST /contigs` carries one sketch per contig and a JSON object with each contig's measurements.

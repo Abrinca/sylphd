@@ -568,6 +568,7 @@ class TestSingleDatabaseGoldens:
         info["limits"].pop("max_contigs")
         info.pop("usage")
         info.pop("taxonomy")  # additive: the web app does not read it
+        info.pop("access")  # additive: read by the token control only
         assert web_golden.normalise(info) == web_golden.load("info")
 
     def test_assembly(self) -> None:

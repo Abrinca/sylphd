@@ -197,6 +197,14 @@ def add_serve_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     serve_parser.add_argument(
+        "--require-token",
+        action="store_true",
+        help=(
+            "refuse every request except / /health /info (401) without a valid token "
+            "from --privileged-token-file: a private server"
+        ),
+    )
+    serve_parser.add_argument(
         "--max-queue",
         type=_non_negative,
         default=None,
@@ -832,7 +840,7 @@ def add_taxonomy_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--search",
         action="store_true",
-        help="treat each QUERY as the start of a name (with --fuzzy: a similar name)",
+        help="treat each QUERY as the start of a name (with --fuzzy: a similar name), or of a taxid when it is digits",
     )
     parser.add_argument("--fuzzy", action="store_true", help="with --search: tolerate typos")
     parser.add_argument("--rank", metavar="RANK", help="with --search: only this rank")

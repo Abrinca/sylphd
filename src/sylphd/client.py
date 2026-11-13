@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import warnings
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Self
@@ -32,6 +33,10 @@ RETRY_STATUSES = frozenset({429, 503})
 
 #: Longest wait between two attempts, in seconds.
 MAX_RETRY_DELAY = 30.0
+
+
+class TokenWarning(UserWarning):
+    """The server does not accept the access token this client sends."""
 
 
 def normalize_base_url(url: str) -> str:
@@ -100,6 +105,10 @@ class SylphClient:
         self.timeout = timeout if timeout is not None else default_timeout()
         #: How often a 429/503 reply is retried (after its ``Retry-After``).
         self.retries = max(0, retries)
+        self.token = token or None
+        #: ``False`` once a response said the token is not accepted, ``True``
+        #: once one said it is, ``None`` while nothing is known (or no token).
+        self.token_valid: bool | None = None
         transport = None
         if self.socket_path is not None:
             transport = httpx.HTTPTransport(uds=str(self.socket_path), retries=0)
@@ -135,9 +144,26 @@ class SylphClient:
             if response.status_code not in RETRY_STATUSES or attempt == self.retries:
                 break
             time.sleep(_retry_delay(response, attempt))
+        self._note_token(response)
         if response.status_code >= 400:
             raise ClientError(_error_message(response), response.status_code)
         return response
+
+    def _note_token(self, response: httpx.Response) -> None:
+        """Warn (once) when the server says the token we send is not valid."""
+        verdict = response.headers.get("x-token-valid")
+        if verdict is None:
+            return
+        was = self.token_valid
+        self.token_valid = verdict.strip().lower() == "true"
+        if not self.token_valid and was is not False:
+            where = self.base_url or f"the server on {self.socket_path}"
+            warnings.warn(
+                f"{where} does not accept this access token (mistyped, or replaced "
+                "on the server?); you are treated as an anonymous client",
+                TokenWarning,
+                stacklevel=4,
+            )
 
     def _connection_message(self, error: httpx.HTTPError) -> str:
         if self.socket_path is not None:

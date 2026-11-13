@@ -22,6 +22,20 @@ the four POST endpoints and to `GET /usage`. With `curl` over a Unix socket:
 curl --unix-socket "$XDG_RUNTIME_DIR/sylphd.sock" http://localhost/info
 ```
 
+## Access tokens { #access-tokens }
+
+A request may carry `Authorization: Bearer <token>`. A token from the server's
+`--privileged-token-file` skips the rate limits; anything else is treated as no token.
+
+- Every response to a request that carried a bearer token has **`X-Token-Valid: true`** or
+  **`false`**, whatever its status (also `4xx` and `429`); a request without a token gets no such
+  header. The header is exposed to browsers (CORS), and `GET /info` repeats the verdict as
+  `access.token_valid`. A wrong token is therefore reported, not refused.
+- With `--require-token` every path except `GET /`, `/health` and `/info` answers `401`
+  (`{"error": "this server requires an access token: ..."}`, `WWW-Authenticate: Bearer`) unless the
+  token is valid. `/info` says `access.token_required` so a client can tell in advance.
+- CORS preflights allow the `Authorization` header.
+
 ## Request id and compression
 
 Every response carries an **`X-Request-Id`** header, error responses included: 12 hex characters,
@@ -97,6 +111,10 @@ Reports:
   `{"enabled": true, "policy": 1, "window_minutes": 10}`. `policy` is an integer that is raised
   whenever what the statistics track changes; the web page asks its visitor to agree again when it
   rises. See [`GET /usage`](#get-usage);
+- `taxonomy`: `{"enabled": false}`, or with `--taxonomy-db` `{"enabled": true, "source", "source_date",
+  "taxa", "fuzzy", "rate_limit"}`; see [`/taxonomy/*`](#taxonomy);
+- `access`: `{"token_required": bool}` (`--require-token`), plus `"token_valid": bool` when the request
+  carried `Authorization: Bearer ...`; see [Access tokens](#access-tokens);
 - `endpoints`: the endpoint paths this server serves (`/usage` only when it is on);
 - `params`: the keys each POST endpoint accepts, so a client does not have to probe with 400s:
   `{"/profile": [...], "/query": [...], "/contigs": [...], "/assembly": [...]}`. The lists are
@@ -585,6 +603,14 @@ deleted one answers `null`. The [Python objects](../guides/ncbi-taxonomy.md) wra
 | `POST /taxonomy/lookup` | `{"names": ["E. coli", ...]}` | `{"results": [{"query", "matches": [{taxid, name, name_class, scientific_name, rank}]}]}` |
 | `POST /taxonomy/search` | `{"query": "escherichia c", "fuzzy": false, "rank": null, "limit": 20}` | `{"hits": [{taxid, name, name_class, scientific_name, rank, score}]}`; `limit` at most 100 |
 
+`/taxonomy/search` is the autocomplete. A `query` of letters completes names (`name` is the matched name,
+`name_class` its class, `scientific_name` the taxon's own name, `score` 1.0 for an exact match;
+`fuzzy` tolerates typos). A `query` of **digits only** completes the taxid instead: the exact
+taxid first, then those that start with the digits, shorter ids first (`"56"` gives 56, 561, 562,
+563, ...), with `name_class` `"taxid"` and `fuzzy` ignored. An old taxid that was merged answers
+with its replacement (`name_class` `"merged taxid"`, `name` the id you typed). Each hit is one taxon;
+fetch the full record with `/taxonomy/nodes`.
+
 A node record has `taxid`, `parent`, `rank`, `name`, `unique_name`, `embl_code`, `division_id`,
 `genetic_code_id`, `mito_genetic_code_id`, `plastid_genetic_code_id`,
 `hydrogenosome_genetic_code_id`, `hidden`, `hidden_subtree_root`, `specified_species`, `comments`
@@ -598,10 +624,11 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 | Status | When |
 |---|---|
 | `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request (or more than the server's `max_contigs` for `/contigs`); for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, malformed or non-`ACGTN` raw sequence, or a `Content-Length` that is not an integer; for `/contigs` a `contigs` list that does not match the sketch parts, a duplicate or unusable contig name, a `contig_kmers` that is not a positive integer or that no sequence of that `length` can have, or an out-of-range option |
+| `401` | `--require-token` and no valid token (`WWW-Authenticate: Bearer`) |
 | `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted); `GET /usage` without `--usage-db` |
 | `413` | the body exceeds `--max-upload-mb`, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
 | `415` | `/query`, `/profile` and `/contigs` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |
-| `429` | rate limited (`--rate-limit`, also for `GET /usage`); with `Retry-After` in seconds |
+| `429` | rate limited (`--rate-limit`, also for `GET /usage`; `--taxonomy-rate-limit` for `/taxonomy/*`); with `Retry-After` in seconds; a valid token skips it |
 | `503` | the job queue is full (`--max-queue`), or the request has more samples than fit in it; nothing was run; with `Retry-After: 1` |
 | `500` | profiling failed inside the server |
 

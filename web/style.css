@@ -987,3 +987,9 @@ body.modal-open { overflow: hidden; }
 .usage-breakdown .alist { margin-top: 6px; }
 .usage-statement { margin-bottom: 0; }
 .taxtree-reset { display: block; margin: 0 0 6px; font-size: .9rem; }
+
+/* Access token: the key button's state, the chip in the server bar, the panel's message. */
+#sp-token-btn[data-state="valid"] { color: var(--species); }
+#sp-token-btn[data-state="rejected"], #sp-token-btn[data-state="required"] { color: var(--distant); }
+.sp-token-chip { font-size: .82rem; }
+.sp-token-chip.warn, .token-state.warn { color: var(--distant); }

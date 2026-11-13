@@ -10,6 +10,7 @@ import os
 import sqlite3
 import sys
 import time
+import warnings
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -24,7 +25,7 @@ from . import per_contig_client
 from .about import About, check_name
 from .assembly import gtdb_species, hit_lineage, species_caveat
 from .cli_parser import PROG, build_parser
-from .client import ClientError, connect
+from .client import ClientError, TokenWarning, connect
 from .download import (
     LIST_KEYWORD,
     METADATA_FILES,
@@ -154,6 +155,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except ValueError as error:
         _print_error(str(error))
         return 2
+    if args.require_token and not args.privileged_token_file:
+        _print_error("--require-token needs --privileged-token-file")
+        return 2
     config = ServerConfig(
         db_paths=specs,
         meta_path=Path(args.meta) if args.meta else None,
@@ -165,6 +169,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         max_sequence_mb=args.max_sequence_mb,
         rate_limit=args.rate_limit,
         privileged_tokens=tokens,
+        require_token=args.require_token,
         taxonomy_db=Path(args.taxonomy_db) if args.taxonomy_db else None,
         taxonomy_rate_limit=args.taxonomy_rate_limit,
         max_queue=args.max_queue,
@@ -258,6 +263,10 @@ def _log_startup(
         extras.append(f"rate-limit={count}/{int(window)}s")
     if config.taxonomy_db is not None:
         extras.append(f"taxonomy={config.taxonomy_db.name}")
+    if config.require_token:
+        extras.append("token-required")
+    elif config.privileged_tokens:
+        extras.append("privileged-tokens")
     if config.cors_origins:
         extras.append(f"cors={','.join(config.cors_origins)}")
     if config.about.path:
@@ -1291,7 +1300,18 @@ def cmd_taxonomy(args: argparse.Namespace) -> int:
     return 1 if missing else 0
 
 
+def _show_warning(message, category, filename, lineno, file=None, line=None) -> None:
+    if issubclass(category, TokenWarning):
+        print(f"{PROG}: warning: {message}", file=file or sys.stderr)
+    else:
+        _original_showwarning(message, category, filename, lineno, file, line)
+
+
+_original_showwarning = warnings.showwarning
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    warnings.showwarning = _show_warning
     parser = build_parser()
     args = parser.parse_args(argv)
     commands = {

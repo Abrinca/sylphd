@@ -460,9 +460,10 @@
       run.xhr = xhr;
       xhr.open('POST', url);
       xhr.responseType = 'text';
+      for (const [name, value] of Object.entries(S.authHeaders())) xhr.setRequestHeader(name, value);
       xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) run.prog.uploaded = ev.loaded; };
       xhr.upload.onload = () => { run.prog.uploaded = run.sketch.size; setPhase(run, 'profile'); };
-      xhr.onload = () => resolve({ status: xhr.status, retryAfter: parseInt(xhr.getResponseHeader('Retry-After'), 10), text: xhr.responseText });
+      xhr.onload = () => { S.noteToken({ headers: { get: (n) => xhr.getResponseHeader(n) } }); resolve({ status: xhr.status, retryAfter: parseInt(xhr.getResponseHeader('Retry-After'), 10), text: xhr.responseText }); };
       xhr.onerror = () => { const e = new Error('network'); e.network = true; reject(e); };
       xhr.ontimeout = xhr.onerror;
       xhr.onabort = () => reject(abortError());
@@ -568,6 +569,10 @@
       return { kind: 'error', title: 'Sketch too large (413)', retry: null, body: [
         el('p', { text: `The sketch (${size}) is over the upload limit of the server or its proxy. Sketches grow with the number of distinct k-mers, so very diverse or very large samples produce big ones.` }),
         el('p', { text: 'Download the sketch and profile it with the sylphd command line, or sketch a subset of the reads.' }), detail] };
+    }
+    if (status === 401) {
+      return { kind: 'warn', title: 'Access token required (401)', retry: null, body: [
+        el('p', { text: `${S.token.has() ? 'The server does not accept the saved token.' : 'This server only accepts requests with an access token.'} The sketch is kept; use the key button at the top of the page to enter a token, then upload it again.` }), detail] };
     }
     if (status === 429) {
       return { kind: 'warn', title: 'Rate limit reached (429)', retry: retry != null ? retry : 60,

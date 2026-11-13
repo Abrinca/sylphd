@@ -420,7 +420,7 @@ class Taxonomy:
 
     def search(
         self,
-        query: str,
+        query: str | int,
         *,
         fuzzy: bool = False,
         rank: str | None = None,
@@ -430,7 +430,12 @@ class Taxonomy:
 
         Best first, one hit per taxon, ``rank`` restricts to one rank.  Fuzzy
         search needs a taxonomy built with the fuzzy index (the default).
+
+        A query of digits (``"56"`` or ``56``) completes the **taxid** instead: the exact
+        taxid first, then the ids that start with the digits (``Match.name_class`` is
+        ``"taxid"``; an old merged taxid answers with its replacement, ``"merged taxid"``).
         """
+        query = str(query)
         options: dict[str, Any] = {"fuzzy": fuzzy, "limit": limit}
         if rank is not None:
             options["rank"] = rank
