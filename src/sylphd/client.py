@@ -39,6 +39,41 @@ class TokenWarning(UserWarning):
     """The server does not accept the access token this client sends."""
 
 
+def _sketching() -> Any:
+    """:mod:`sylphd.sketching`, which needs pysylph (the ``client`` extra)."""
+    try:
+        from . import sketching
+    except ImportError as error:
+        if (error.name or "").split(".")[0] not in {"pysylph", "dnaio"}:
+            raise
+        raise ImportError(
+            f"sketching needs {error.name}: install 'sylphd[client]' (or 'sylphd[server]')"
+        ) from error
+    return sketching
+
+
+def _sample_input(sketching: Any, reads: Any, name: str | None) -> Any:
+    """A :class:`SampleInput` from a path, an ``(r1, r2)`` pair or a ready ``SampleInput``."""
+    import dataclasses
+
+    if isinstance(reads, sketching.SampleInput):
+        return dataclasses.replace(reads, name=name) if name else reads
+    if isinstance(reads, (str, os.PathLike)):
+        path = os.fspath(reads)
+        return sketching.SampleInput(
+            name or sketching.sample_name_from_path(path), ((path,),)
+        )
+    if isinstance(reads, (tuple, list)) and len(reads) == 2:
+        first, second = os.fspath(reads[0]), os.fspath(reads[1])
+        return sketching.SampleInput(
+            name or sketching.sample_name_from_path(first, paired=True), ((first, second),)
+        )
+    raise TypeError(
+        "reads must be a path, an (r1, r2) pair of paths or a SampleInput, "
+        f"not {type(reads).__name__}"
+    )
+
+
 def normalize_base_url(url: str) -> str:
     """Validate a base URL and strip its trailing slash.
 
@@ -106,6 +141,7 @@ class SylphClient:
         #: How often a 429/503 reply is retried (after its ``Retry-After``).
         self.retries = max(0, retries)
         self.token = token or None
+        self._info: dict[str, Any] | None = None
         #: ``False`` once a response said the token is not accepted, ``True``
         #: once one said it is, ``None`` while nothing is known (or no token).
         self.token_valid: bool | None = None
@@ -130,6 +166,141 @@ class SylphClient:
             timeout=self.timeout,
             headers=headers,
         )
+
+    # -- from files: sketch here, send the sketch ---------------------------
+    #
+    # The methods below take paths: they sketch on this machine with the server's
+    # ``c`` and ``k`` (only the sketch, never the sequence, is uploaded) and call
+    # the endpoints above.  They need pysylph (``pip install 'sylphd[client]'``).
+    def database_info(self) -> dict[str, Any]:
+        """The server's ``GET /info`` document, fetched once and kept (see :meth:`info`)."""
+        if self._info is None:
+            self._info = self.info()
+        return self._info
+
+    def sketch_parameters(self) -> tuple[int, int]:
+        """``(c, k)`` to sketch with: the pooled values of the server's databases."""
+        database = self.database_info().get("database") or {}
+        try:
+            return int(database["c"]), int(database["k"])
+        except (KeyError, TypeError, ValueError):
+            raise ClientError("the server does not report its sketch parameters (c, k)") from None
+
+    def profile_reads(
+        self,
+        reads: Any,
+        *,
+        name: str | None = None,
+        params: ProfileParams | None = None,
+        fields: Sequence[str] | None = None,
+        tax_sources: Sequence[str] | None = None,
+        taxprof: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Taxonomic profile of one sample of reads (``POST /profile``).
+
+        ``reads`` is a FASTQ/FASTA path (gzip fine), a ``(r1, r2)`` pair of paths for
+        paired-end reads, a ``.sylsp`` sketch, or a :class:`sylphd.sketching.SampleInput`.
+        The sample is named after the file unless ``name`` is given.  Returns the
+        sample's result: its ``hits`` and, with ``taxprof``, the clade profiles.
+        """
+        return self._reads("profile", reads, name, params, fields, tax_sources, taxprof)
+
+    def query_reads(
+        self,
+        reads: Any,
+        *,
+        name: str | None = None,
+        params: ProfileParams | None = None,
+        fields: Sequence[str] | None = None,
+        tax_sources: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """ANI hits of one sample of reads (``POST /query``); ``reads`` as in :meth:`profile_reads`."""
+        return self._reads("query", reads, name, params, fields, tax_sources, None)
+
+    def identify_assembly(
+        self,
+        assembly: str | os.PathLike[str],
+        *,
+        name: str | None = None,
+        top: int = 10,
+        min_ani: float = 80.0,
+    ) -> dict[str, Any]:
+        """The closest genomes of one assembly (``POST /assembly``).
+
+        ``assembly`` is a FASTA path (gzip fine), sketched here as one sample; only the
+        sketch is sent, so it works on every server and the sequence never leaves this
+        machine.  Returns ``query`` (name, records, length, GC), ``hits`` (best first, at
+        most ``top``, ANI of at least ``min_ani``) and the server's interpretation.
+        """
+        sketching = _sketching()
+        c, k = self.sketch_parameters()
+        label = name or sketching.sample_name_from_path(assembly)
+        sketch, stats = sketching.sketch_assembly(assembly, label, c=c, k=k)
+        payload = sketch.to_bytes()
+        self._check_upload(payload)
+        return self.assembly_sketch(
+            payload, top=top, min_ani=min_ani, name=label,
+            records=stats.records, length=stats.length, gc=stats.gc,
+        )
+
+    def classify_contigs(
+        self,
+        assembly: str | os.PathLike[str],
+        *,
+        options: Any = None,
+        **overrides: Any,
+    ) -> Any:
+        """Classify every contig of a fragmented assembly on its own (``POST /contigs``).
+
+        Sketches each record, sends the sketches in batches that fit the server's contig and
+        upload limits, and returns a :class:`sylphd.per_contig_client.PerContigRun`: its
+        ``records`` (one dict per classified contig, input order), ``summary()``, and
+        ``write_tsv()`` / ``document()`` for the same table and JSON the command line writes.
+        Options are those of :class:`sylphd.per_contig_client.PerContigOptions` given as
+        keywords: ``top``, ``min_ani``, ``min_length``, ``fields``, ``consensus_ratio``,
+        ``consensus_z``, or a whole ``options=`` object.
+        """
+        _sketching()
+        import dataclasses
+
+        from . import per_contig_client
+
+        options = dataclasses.replace(options or per_contig_client.PerContigOptions(), **overrides)
+        return per_contig_client.run(self, assembly, options, info=self.database_info())
+
+    def _reads(
+        self,
+        endpoint: str,
+        reads: Any,
+        name: str | None,
+        params: ProfileParams | None,
+        fields: Sequence[str] | None,
+        tax_sources: Sequence[str] | None,
+        taxprof: Sequence[str] | None,
+    ) -> dict[str, Any]:
+        sketching = _sketching()
+        sample = _sample_input(sketching, reads, name)
+        c, k = self.sketch_parameters()
+        sketch = sketching.sketch_sample(sample, c=c, k=k)
+        sketching.check_sketch(sketch, c=c, k=k, name=sample.name)
+        payload = sketch.to_bytes()
+        self._check_upload(payload)
+        samples = [(sample.name, payload)]
+        if endpoint == "profile":
+            result = self.profile(
+                samples, params=params, fields=fields, tax_sources=tax_sources, taxprof=taxprof
+            )
+        else:
+            result = self.query(samples, params=params, fields=fields, tax_sources=tax_sources)
+        return result[0]
+
+    def _check_upload(self, payload: bytes) -> None:
+        limit = int((self.database_info().get("limits") or {}).get("max_upload_mb") or 0) * 1024 * 1024
+        if limit and len(payload) > limit:
+            raise ClientError(
+                f"the sketch is {len(payload)} bytes, over the server's "
+                f"{limit // (1024 * 1024)} MB upload limit"
+            )
 
     # -- plumbing ---------------------------------------------------------
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:

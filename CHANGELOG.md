@@ -28,6 +28,12 @@ All notable changes to `sylphd` are documented here. The format follows
   installed. `sylphd taxonomy` looks taxa up on the command line. See the
   [NCBI taxonomy guide](../guides/ncbi-taxonomy.md).
 
+- **The Python client sketches for you.** `client.profile_reads(reads)` (a path, an `(r1, r2)` pair,
+  a `.sylsp` or a `SampleInput`), `client.query_reads(reads)`, `client.identify_assembly(path)` and
+  `client.classify_contigs(path)` sketch on this machine with the server's `c` and `k`, send only the
+  sketch and return the server's result (`classify_contigs` a `PerContigRun`). Also
+  `client.sketch_parameters()` and `client.database_info()` (cached). Without pysylph they raise an
+  `ImportError` that names `sylphd[client]`. See the [Python client guide](../guides/python-client.md).
 - **Taxid autocomplete.** `/taxonomy/search` (and `Taxonomy.search`, `sylphd taxonomy --search`) with a
   query of digits only completes the taxid: the exact id, then the ids that start with the digits,
   shorter first; a merged taxid answers with its replacement. Hits keep the name-search shape
