@@ -4,6 +4,15 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Dependency refresh.** `uv lock --upgrade` moves anyio 4.15.1 → 4.16.0, click 8.5.0 → 8.5.1,
+  dnaio 1.2.4 → 1.2.5, isal 1.8.0 → 1.9.1, python-multipart 0.0.32 → 0.0.34 and zlib-ng
+  1.0.0 → 1.1.0. `pysylph` stays on the `multi-db` commit pinned in `uv.lock`, so no Rust rebuild is
+  involved. No source changes; the test suite is unchanged at 896 passed, 6 skipped.
+
 ## [0.5.1] - 2026-11-13
 
 ### Added
