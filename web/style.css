@@ -839,6 +839,30 @@ details.lineage li span { min-width: 0; overflow-wrap: break-word; }
   .sp-privacy-line { font-size: .78rem; gap: 5px; }
 }
 
+/* ------------------------------------------------ operator messages */
+.messages { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; }
+.messages[hidden] { display: none; }
+.msg {
+  display: flex; align-items: flex-start; gap: 8px; padding: 5px 8px 5px 10px;
+  border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px;
+  font-size: .86rem; line-height: 1.4; background: var(--card);
+}
+.msg-info { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--card)); }
+.msg-warning { border-color: var(--genus); background: var(--genus-bg); }
+.msg-danger { border-color: var(--distant); background: var(--distant-bg); }
+.msg-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.msg-title { margin-right: 2px; }
+.msg-body { display: inline; }
+.msg-body > p:first-child { display: inline; }
+.msg-body p { margin: 0 0 .3em; }
+.msg-body > :last-child { margin-bottom: 0; }
+.msg-body a { color: inherit; text-decoration: underline; }
+.msg-close {
+  flex: none; margin: -2px 0 0; padding: 0 6px; border: 0; border-radius: 6px; background: transparent;
+  color: inherit; font: inherit; font-size: 1.15rem; line-height: 1.4; cursor: pointer; opacity: .7;
+}
+.msg-close:hover, .msg-close:focus-visible { opacity: 1; background: color-mix(in srgb, currentColor 14%, transparent); }
+
 /* ------------------------------------------------ per-contig (Assembly) */
 .per-contig-bar { margin-top: 16px; }
 .pc-toggle { margin-top: 0; }

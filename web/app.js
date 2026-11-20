@@ -32,7 +32,7 @@
     spPrivacyUsage: $('sp-privacy-usage'), spPrivacyUsageLink: $('sp-privacy-usage-link'),
     spChange: $('sp-change'), spReset: $('sp-reset'), spConnect: $('sp-connect'), spAbout: $('sp-about'),
     spToken: $('sp-token'), spTokenBtn: $('sp-token-btn'),
-    spAboutBody: $('sp-about-body'), spAboutNote: $('sp-about-note'), banner: $('server-banner'), submitHint: $('submit-hint'),
+    spMessages: $('messages'), spAboutBody: $('sp-about-body'), spAboutNote: $('sp-about-note'), banner: $('server-banner'), submitHint: $('submit-hint'),
   };
 
   /* ----------------------------------------------------------- helpers */
@@ -489,6 +489,25 @@
     ui.spAboutBody.replaceChildren(window.SylphdAbout.render(md));
   }
 
+  // Operator messages (GET /messages) under the status bar. Optional: an older server has no such
+  // endpoint, and any failure just means no messages (never an error banner). Read with every
+  // successful /info check, so an edited file shows up within a minute without a reload.
+  const messageView = window.SylphdMessages && ui.spMessages
+    ? window.SylphdMessages.create(ui.spMessages, { render: window.SylphdAbout && window.SylphdAbout.render })
+    : null;
+  async function loadMessages() {
+    if (!messageView) return;
+    const api = API;
+    try {
+      const res = await fetch(`${api}/messages`, { signal: timeoutSignal(5000), cache: 'no-store', headers: tok.headers() });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const list = window.SylphdMessages.clean(await res.json());
+      if (api === API) messageView.show(list);
+    } catch {
+      if (api === API) messageView.clear();
+    }
+  }
+
   async function loadInfo() {
     clearTimeout(infoTimer);
     if (!API) {
@@ -499,6 +518,7 @@
       renderPanelHead();
       renderAbout();
       renderCatalog();
+      if (messageView) messageView.clear();
       setProblem('none');
       notifyInfo();
       return;
@@ -516,6 +536,7 @@
       renderPanelHead();
       renderAbout();
       renderCatalog();
+      if (messageView) messageView.clear();
       setProblem('invalid');
       notifyInfo();
       return;
@@ -557,6 +578,7 @@
       renderPanelHead();
       renderAbout();
       renderCatalog();
+      loadMessages();
       infoTimer = setTimeout(loadInfo, 60000);
       setProblem(null);
       syncToken();
@@ -570,6 +592,7 @@
       renderPanelHead();
       renderAbout();
       renderCatalog();
+      if (messageView) messageView.clear();
       setProblem('offline');
       notifyInfo();
       const retryBtns = document.querySelectorAll('#retry-now, #sp-retry');

@@ -12,6 +12,7 @@ on:
     paths:
       - "web/**"
       - "tests/test_web_about_browser.py"
+      - "tests/test_web_messages_browser.py"
       - "tests/test_web_sylsp_js.py"
       - "tests/package*.json"
       - "tests/data/*.sylsp"
@@ -22,6 +23,7 @@ on:
     paths:
       - "web/**"
       - "tests/test_web_about_browser.py"
+      - "tests/test_web_messages_browser.py"
       - "tests/test_web_sylsp_js.py"
       - "tests/package*.json"
       - "tests/data/*.sylsp"
@@ -52,4 +54,5 @@ jobs:
         run: >
           PYTHONPATH=src uv run --no-project --python 3.14 --with pytest==9.2.0
           pytest --noconftest -q -rs
-          tests/test_web_about_browser.py tests/test_web_sylsp_js.py
+          tests/test_web_about_browser.py tests/test_web_messages_browser.py
+          tests/test_web_sylsp_js.py
