@@ -7,11 +7,13 @@ A condensed version of the design plan the project started from.
 1. **Split sketching from the database.** Every process that uses pysylph deserialises the database
    into its own memory. For GTDB r232 `c200` that takes about 2 s and about 2 GB of RAM per process
    (the screening index; the 20 GB second stage is read lazily from the file and shared through the
-   page cache). A server pays this once and shares one copy across runs, parallel jobs and users,
-   while clients do the per-sample sketching work locally.
+   page cache). GlobDB r232 is larger: a server with GlobDB, UHGV and fungi holds 4.15 GiB after
+   loading and needs 7.5 GiB at start-up (see the
+   [GlobDB evaluation](globdb-evaluation.md#memory)). A server pays this once and shares one copy
+   across runs, parallel jobs and users, while clients do the per-sample sketching work locally.
 2. **Sketches are small enough for a public server.** Once sketching and database lookup were split,
    it became clear that sketches are tiny compared with both the input reads and the reference
-   databases (e.g., 74.5 MB for a 1.2 GB `FASTQ.gz` against ~21 GB of databases; ~0.1 MB for a
+   databases (e.g., 74.5 MB for a 1.2 GB `FASTQ.gz` against ~32 GB of databases; ~0.1 MB for a
    bacterial assembly) and contain only k-mer hashes and counts. Sending only the sketch over HTTP
    made a public server (`sylphd.abrinca.com`) and an in-browser WebAssembly sketcher practical.
 

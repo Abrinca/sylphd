@@ -164,7 +164,8 @@ uploads for `curl` and scripts; the public instance runs with it.
 - [Commands](commands/serve.md), [HTTP API](reference/http-api.md) and
   [metadata database](reference/metadata.md).
 - [Security notes](reference/security.md): there is no authentication by design.
-- [Citing](project/citing.md) sylphd, pysylph, sylph and GTDB.
+- [Citing](project/citing.md) sylphd, pysylph, sylph, GlobDB and GTDB.
+- [GlobDB evaluation](project/globdb-evaluation.md): why the public server uses GlobDB instead of GTDB, and what it costs in RAM.
 
 !!! note
     The server speaks plain HTTP, has no TLS and no authentication. Run it on a machine you trust and

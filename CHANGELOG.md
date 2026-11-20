@@ -17,14 +17,19 @@ All notable changes to `sylphd` are documented here. The format follows
   without a link in the reads table (they have no GTDB, NCBI or GlobDB genome page), and the
   taxonomy chart offers a GTDB link for GlobDB clades except for their catalogue-named species.
   GTDB genomes in GlobDB keep their NCBI and GTDB links.
-
 - **TSV output now matches sylph's, byte for byte.** This changes the TSV (not the JSON). Where
   `sylphd` wrote an empty cell, it now writes what sylph 1.0.0 writes: `HIGH` or `LOW` in
   `Eff_lambda` when lambda cannot be estimated (taken from `Lambda_status`), `NA-NA` in
   `ANI_5-95_percentile` and `Lambda_5-95_percentile` when there is no interval, and, for a sketch
   without read statistics under `-u`, `inf` in `True_cov` and `NaN` in the abundances. `Adjusted_ANI`
   is capped at 100 as in sylph. Scripts that tested for empty cells need updating. Metadata columns
-  still use empty cells for missing values.
+  still use empty cells for missing values. One known difference remains: under `--no-adjust`
+  `sylphd` hides the ANI interval (`NA-NA` in the TSV, `null` in JSON) because it describes the
+  disabled adjustment, where stock sylph still prints it.
+- **Dependency refresh.** `uv lock --upgrade` moves anyio 4.15.1 → 4.16.0, click 8.5.0 → 8.5.1,
+  dnaio 1.2.4 → 1.2.5, isal 1.8.0 → 1.9.1, python-multipart 0.0.32 → 0.0.34 and zlib-ng
+  1.0.0 → 1.1.0. `pysylph` stays on the `multi-db` commit pinned in `uv.lock`, so no Rust rebuild is
+  involved. No source changes; the test suite is unchanged at 896 passed, 6 skipped.
 
 ### Added
 
@@ -38,9 +43,9 @@ All notable changes to `sylphd` are documented here. The format follows
   shown in a compact row (the consensus fields now share the per-contig row). Reads mode has a small
   slider (90 to 95, whole numbers) next to the minimum ANI input; the number input stays the value,
   so any number can still be typed, and the slider then shows the nearest position.
-
 - **GlobDB r232, and genomes named without an assembly version.** The catalogue lists
-  `globdb_r232_sylph_v2_c200.syl2db` (346,232 genomes) with the sylph-tax source `GlobDB_r232`
+  `globdb_r232_sylph_v2_c200.syl2db` (346,232 genomes; the publisher has no checksum, so the entry
+  carries an MD5 computed from a complete download, which `download --verify` checks) with the sylph-tax source `GlobDB_r232`
   (346,233 keys: `QXLSG_01327` is in no genome). GlobDB names its genomes `GCA_041167105` and its
   contigs `GCA_041167105_000000000001`, with no `.N` anywhere, while GTDB's metadata is keyed
   `GCA_041167105.1`. An unversioned `GCA_`/`GCF_` accession now resolves to the metadata row of its
@@ -74,13 +79,14 @@ All notable changes to `sylphd` are documented here. The format follows
   marks the strain row with a `nearest` object. Profiles of a file without nearest taxa are byte for
   byte unchanged. No format bump: the tables are optional, format 3 stays, and an older file reads
   exactly as before.
-
-### Changed
-
-- **Dependency refresh.** `uv lock --upgrade` moves anyio 4.15.1 → 4.16.0, click 8.5.0 → 8.5.1,
-  dnaio 1.2.4 → 1.2.5, isal 1.8.0 → 1.9.1, python-multipart 0.0.32 → 0.0.34 and zlib-ng
-  1.0.0 → 1.1.0. `pysylph` stays on the `multi-db` commit pinned in `uv.lock`, so no Rust rebuild is
-  involved. No source changes; the test suite is unchanged at 896 passed, 6 skipped.
+- **Documentation for the GlobDB switch.** A new [GlobDB evaluation](globdb-evaluation.md)
+  page (reads classified against GTDB, the minimum-ANI sweep, memory under hard limits, parity with
+  stock sylph) with its scripts in `scripts/benchmarks/globdb/`; the README and the docs home page
+  tell the idea with to-scale diagrams and animated demos of Reads and Assembly mode; `deploy/` has
+  the GlobDB configuration (8 GiB of RAM recommended, 7.5 GiB the lowest limit that starts; the
+  GTDB one needs 6 and 5.25) next to the GTDB one, with the metadata build; the docs describe the
+  TSV placeholders, the `ncbi_nearest_*` columns and that `/info`'s per-database `gtdb` flag means
+  "the genome names are GTDB accessions", which is also true for GlobDB.
 
 ## [0.5.1] - 2026-11-13
 

@@ -101,10 +101,10 @@ profile:  Sample_file Genome_file Taxonomic_abundance Sequence_abundance
 |---|---|
 | `Sample_file` | sample name |
 | `Genome_file` | database genome file name, as stored in the database |
-| `Adjusted_ANI` | coverage-adjusted ANI in percent (the naive ANI with `--no-adjust`) |
+| `Adjusted_ANI` | coverage-adjusted ANI in percent, capped at 100 in the TSV, as in sylph (the naive ANI with `--no-adjust`) |
 | `Eff_cov` | effective coverage; labelled `True_cov` with `--estimate-unknown` (or `--estimate-read-counts`, which implies it), as in sylph |
-| `ANI_5-95_percentile` | confidence interval of the adjusted ANI, `low-high` |
-| `Eff_lambda`, `Lambda_5-95_percentile` | sylph's effective lambda (its coverage model parameter) and its interval |
+| `ANI_5-95_percentile` | confidence interval of the adjusted ANI, `low-high`; `NA-NA` when there is none |
+| `Eff_lambda`, `Lambda_5-95_percentile` | sylph's effective lambda (its coverage model parameter) and its interval (`NA-NA` when there is none); `Eff_lambda` is `HIGH` (median coverage too high) or `LOW` (not estimable) when lambda cannot be estimated |
 | `Median_cov`, `Mean_cov_geq1` | median coverage and mean coverage of k-mers seen at least once |
 | `Containment_ind` | contained k-mers over total genome k-mers, `7096/10826` |
 | `Naive_ANI` | containment ANI without the coverage adjustment |
@@ -113,12 +113,18 @@ profile:  Sample_file Genome_file Taxonomic_abundance Sequence_abundance
 | `Contig_name` | contig name and description recorded for the genome in the database |
 | `accession` | genome accession (`GCA_...`/`GCF_...`) derived from `Genome_file`; empty when there is none |
 
+Missing values are written as sylph writes them, so the sylph columns of the TSV are byte-identical
+to sylph's (the metadata columns and `accession` use empty cells). For a sketch without read
+statistics (one made from contigs or an assembly) under
+`--estimate-unknown`, `True_cov` is `inf` and the abundances are `NaN`.
+
 `--fields` selects the metadata columns that follow (comma-separated names, `all` by default,
 `none` to omit them); see the [metadata database](../reference/metadata.md#columns) for the names.
 `--fields` needs a server started with `--meta`. Unknown column names are rejected.
 
-With `--no-adjust`, `Adjusted_ANI` equals `Naive_ANI` and `ANI_5-95_percentile` is left empty,
-because that interval still describes the (disabled) adjustment.
+With `--no-adjust`, `Adjusted_ANI` equals `Naive_ANI` and `ANI_5-95_percentile` is `NA-NA` (`null`
+in JSON), because that interval still describes the (disabled) adjustment. This is a deliberate
+difference from stock sylph, whose hidden `--no-adjust` still prints that interval.
 
 ## Using a remote server
 

@@ -44,6 +44,12 @@ sylphd setup -m data/bac120_metadata_r232.tsv.gz data/ar53_metadata_r232.tsv.gz 
              --taxonomy UHGV_default --taxonomy FungiRefSeq-latest \
              -o data/meta.sqlite --release 232
 
+# the GlobDB configuration of the public server: GlobDB's own genomes resolve to their GTDB rows,
+# and the ones with no NCBI record get a nearest NCBI taxon (see deploy/README.md)
+sylphd setup -m data/bac120_metadata_r232.tsv.gz data/ar53_metadata_r232.tsv.gz \
+             --taxonomy GlobDB_r232 --taxonomy UHGV_default --taxonomy FungiRefSeq-latest \
+             --ncbi-taxonomy -o data/meta-globdb.sqlite --release 232
+
 # a local file under a chosen name
 sylphd setup -m data/*.tsv.gz --taxonomy UHGV=./my_uhgv.tsv.gz -o data/meta.sqlite
 

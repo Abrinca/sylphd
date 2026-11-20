@@ -78,9 +78,11 @@ Reports:
 - `databases`: one object per database, always present (a single entry on a single-database
   server): `name` (alias or file name), `file` (the file name, since `name` may be an alias),
   `kind` (`two-stage` for a `.syl2db`, `plain` for a `.syldb`), `size`, `sha256`,
-  `genomes`, `c`, `k`, `screen_c`, `two_stage` and `gtdb` (`true` when a sample of up to 100
-  genome names of the database are GTDB accessions of the metadata file; a fungi or UHGV server
-  that has GTDB metadata only for taxonomy lookups reports `false`). Results carry no
+  `genomes`, `c`, `k`, `screen_c`, `two_stage` and `gtdb` (`true` when any of a sample of up to
+  100 genome names, spread evenly over the database, is a GTDB accession of the metadata file. It
+  is `true` for a GTDB database and also for GlobDB, whose `GCA_`/`GCF_` names are GTDB accessions
+  with or without the assembly version: it means "the genome names are GTDB accessions", not "this
+  is GTDB's database". A fungi or UHGV server that has GTDB metadata only for taxonomy lookups reports `false`). Results carry no
   per-database field: a hit belongs to the database whose taxonomy it has;
 - `metadata`: `file` (the base name of the SQLite file), `size`, `columns`, `rows`, `release`,
   `built`, `format_version`, `reps_only` and `sources`, or `null` without `--meta`. It also carries `taxonomy_sources` — one object per
@@ -251,9 +253,10 @@ follow `accession`. Rows keep sylph's column names; in JSON `Eff_cov` is never r
 The TSV renders missing values as sylph does: `Eff_lambda` is `HIGH` or `LOW` according to
 `Lambda_status` when it is `null`, a missing interval is `NA-NA`, and for a sketch without read
 statistics under `estimate_unknown` `True_cov` is `inf` and the abundances are `NaN` (in JSON all of
-these are `null`).
-With `no_adjust`, `Adjusted_ANI` is the naive containment ANI and `ANI_5-95_percentile` is `null`:
-the interval still describes the disabled adjustment.
+these are `null`). The TSV also caps `Adjusted_ANI` at 100 as sylph does; JSON keeps the value.
+With `no_adjust`, `Adjusted_ANI` is the naive containment ANI and `ANI_5-95_percentile` is `null`
+(`NA-NA` in the TSV): the interval still describes the disabled adjustment. This is a deliberate
+difference from stock sylph, whose hidden `--no-adjust` still prints that interval.
 
 With sylph-tax taxonomy sources (see [the metadata reference](metadata.md#taxonomy-sources)), every row has four more columns, and
 they are listed in `metadata.columns` so `fields` can select them:

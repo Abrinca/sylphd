@@ -59,6 +59,13 @@ plain, 169 k genomes together) a `profile` request takes about 35 ms instead of 
 `/assembly` about 45 ms instead of 1 ms, while the two plain databases add just over 1 GiB of
 resident memory; `--max-jobs 2` stays a sane default there. An empty database is an error.
 
+A `.syl2db` keeps only its screening index in RAM and reads the dense sketches from the file on
+demand, so RAM does not follow the file size, and the start-up peak, not the steady state, sets the
+floor. Measured under a hard memory limit with UHGV and fungi added: GTDB r232 holds 3.07 GiB after
+loading and the lowest limit that starts is 5.25 GiB; GlobDB r232 holds 4.15 GiB and needs 7.5 GiB.
+Below the floor the process is killed while loading. Recommended `MemoryMax`: 6 GiB (GTDB) and 8 GiB (GlobDB),
+see the [GlobDB evaluation](../project/globdb-evaluation.md#memory).
+
 ## Address
 
 | Option | Default | Meaning |

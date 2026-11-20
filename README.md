@@ -3,7 +3,7 @@
 A small server and client around [sylph](https://github.com/bluenote-1577/sylph): one
 long-running server keeps a sylph database in memory, while clients sketch samples locally and
 send only the sketches. This avoids paying the database deserialisation cost (about 2 s and 2 GB
-of RAM for GTDB r232 c200) in every process. Results come back as TSV or JSON, joined with GTDB
+of RAM for GTDB r232 c200, more for GlobDB r232) in every process. Results come back as TSV or JSON, joined with GTDB
 metadata or another taxonomy source (sylph-tax), and the client can build `sylph-tax`-style
 taxonomic profiles.
 
@@ -133,7 +133,10 @@ sylphd profile -r sample.fq.gz -o sample.profile.tsv
 ```
 
 `sylphd download --list-databases` shows the other pre-built databases (GTDB r226/r220/r214,
-GlobDB, viral and eukaryotic catalogues). They are built and hosted by the
+GlobDB r232, viral and eukaryotic catalogues). The public server runs GlobDB r232 (31 GB, needs
+8 GiB of RAM) with UHGV and RefSeq fungi; [`deploy/README.md`](deploy/README.md) gives that
+configuration and the [GlobDB evaluation](https://abrinca.github.io/sylphd/docs/project/globdb-evaluation/)
+compares it with GTDB. They are built and hosted by the
 [sylph project](https://sylph-docs.github.io/pre%E2%80%90built-databases/); the downloader uses
 [`aria2c`](https://aria2.github.io/) when it is installed and resumes interrupted transfers
 otherwise.
@@ -159,8 +162,8 @@ The tests use pysylph's small test data, copied into `tests/data`.
 ## How to cite
 
 You are using sylphd. If it helps your research, please cite sylphd, pysylph, sylph (Shaw and Yu,
-*Nature Biotechnology* 2024, [doi:10.1038/s41587-024-02412-y](https://doi.org/10.1038/s41587-024-02412-y))
-and GTDB. The full list with all references is in the
+*Nature Biotechnology* 2024, [doi:10.1038/s41587-024-02412-y](https://doi.org/10.1038/s41587-024-02412-y)),
+GlobDB (the database of the public server, CC BY-SA 4.0) and GTDB (its taxonomy). The full list with all references is in the
 [documentation](https://abrinca.github.io/sylphd/docs/project/citing/) and at the bottom of the web
 app.
 

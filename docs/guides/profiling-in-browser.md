@@ -32,7 +32,9 @@ sketch leaves your computer.
 3. Check the sample name (it defaults to the file name without suffixes) and press **Sketch and
    profile**.
 
-Under **Options** you can change the minimum ANI (default 95 %, as `sylph profile`) and the minimum
+The options sit under the file list, all visible. You can change the minimum ANI (default 95 %, as
+`sylph profile`; type any value or use the slider next to the field, which moves in whole numbers
+from 90 to 95, and shows the nearest position when you type something else) and the minimum
 number of k-mers per genome (10), turn off *Estimate unknown fraction* (`--estimate-unknown`, on by
 default) or turn on *Estimate read counts* (`--estimate-read-counts`, experimental: reads per genome instead of a share
 of the sample; it implies *Estimate unknown fraction*), or choose *Only sketch* to keep the sketch without uploading it.

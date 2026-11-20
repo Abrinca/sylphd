@@ -45,6 +45,9 @@ published MD5, so only its size is checked.
 # the recommended database: GTDB r232, c200, two-stage (about 19 GB)
 sylphd download --database gtdb-r232-c200-dbv2.syl2db --outdir data
 
+# GlobDB r232, the database of the public server (31.2 GB, 346,232 genomes; two-stage)
+sylphd download --database globdb_r232_sylph_v2_c200.syl2db --taxonomy GlobDB_r232 --outdir data
+
 # taxonomy files for the viral and fungal databases (a few MB each)
 sylphd download --taxonomy UHGV_default --taxonomy UHGV_ictv \
                 --taxonomy FungiRefSeq-latest --outdir data
@@ -64,7 +67,9 @@ For databases, the size in the catalogue is checked first; it is instant and alw
 `--verify`, `sylphd` also computes the MD5 in 8 MiB chunks and compares it with the catalogue entry
 when one is published. **That reads the whole file**: a 20 GB database takes minutes on a slow
 disk. Some mirrors publish no MD5 for a file; `--verify` then falls back to the size check and says
-so.
+so. GlobDB's publisher has none for `globdb_r232_sylph_v2_c200.syl2db` (31.2 GB), so the catalogue
+carries an MD5 we computed ourselves from a complete download: `--verify` then checks a copy against
+the file that was evaluated and deployed, not against a checksum the publisher stands behind.
 
 Taxonomy files are small (12 KB to 27 MB), so their size and MD5 are **always** checked; there is
 no `--verify` switch for them. Sizes and checksums were read from the Zenodo API

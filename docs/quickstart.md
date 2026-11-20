@@ -20,6 +20,11 @@ releases (r226, r220, r214), GlobDB, viral and eukaryotic databases. See
 
 The server reads `c` and `k` from the database, and clients sketch with the same values.
 
+The public server uses `globdb_r232_sylph_v2_c200.syl2db` instead: GlobDB r232 (346,232 genomes, 31.2
+GB, GTDB taxonomy), which needs about 8 GiB of RAM against 6 GiB for GTDB. See the
+[GlobDB evaluation](project/globdb-evaluation.md) and [`deploy/README.md`](https://github.com/Abrinca/sylphd/blob/main/deploy/README.md#globdb-configuration-the-public-instance)
+before choosing.
+
 ## Get metadata
 
 The metadata database is optional but recommended: it adds GTDB and NCBI taxonomy, genome quality

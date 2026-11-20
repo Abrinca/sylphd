@@ -111,7 +111,10 @@ read until its job has finished, so the waiting jobs cost their upload size each
 parts are spooled to a temporary file while they arrive, but are read back into memory before
 profiling). With `--max-queue` set, at most `--max-jobs` + `--max-queue` jobs are admitted;
 without it nothing bounds the number of waiting uploads. The public
-instance uses `--max-upload-mb 200` on a 2-core, 12 GB VM. Keep a reverse proxy's body limit a
+instance uses `--max-upload-mb 200` on a 2-core, 12 GB VM. These job costs come on top of the
+resident databases (4.15 GiB for GlobDB, UHGV and fungi), and `MemoryMax` must also cover the
+start-up peak: see [serve](../commands/serve.md#database-and-metadata) and the
+[GlobDB evaluation](../project/globdb-evaluation.md#memory). Keep a reverse proxy's body limit a
 little above `--max-upload-mb`, so oversized uploads get sylphd's own error message.
 
 ### Privileged access { #privileged-access }
