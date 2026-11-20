@@ -153,6 +153,10 @@ DATABASES: dict[str, Database] = {
             "globdb_r232_sylph_v2_c200.syl2db",
             hosts=(_FAUST,),
             size=31194509116,
+            # The publisher publishes no checksum: this MD5 was computed by us
+            # from a complete download (2026-11-20), so a later copy can be
+            # checked against the file that was evaluated and deployed.
+            md5="5226ac6258c10a45c9b0558fe9bdeb70",
             # Measured with len(TwoStageDatabase).  The taxonomy file below has
             # 346,233 rows: one key (QXLSG_01327) is in no database genome.
             genomes=346232,
