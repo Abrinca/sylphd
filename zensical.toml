@@ -9,6 +9,7 @@ site_dir = "site"
 repo_url = "https://github.com/Abrinca/sylphd"
 repo_name = "Abrinca/sylphd"
 edit_uri = "edit/main/docs/"
+extra_css = ["stylesheets/extra.css"]
 
 nav = [
   { "Home" = "index.md" },

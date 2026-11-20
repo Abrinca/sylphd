@@ -7,12 +7,84 @@ of RAM for GTDB r232 c200) in every process. Results come back as TSV or JSON, j
 metadata or another taxonomy source (sylph-tax), and the client can build `sylph-tax`-style
 taxonomic profiles.
 
-- **Web app:** <https://abrinca.github.io/sylphd/>: paste an assembly, get its closest GTDB genomes.
+- **Web app:** <https://abrinca.github.io/sylphd/>: identify an assembly or profile sequencing reads in the browser, backed by the free public server (`sylphd.abrinca.com`).
 - **Documentation:** <https://abrinca.github.io/sylphd/docs/>
 
 The client and server speak HTTP over a Unix socket by default; clients can also use a TCP address
 or an `http://`/`https://` URL (`--url`). The server has no TLS and no authentication: run it on a
 machine you trust, or behind a reverse proxy.
+
+## The idea
+
+`sylphd` grew out of three steps:
+
+### 1. The process was cumbersome
+
+Running `sylph` requires a bash shell, downloading ~20 GB of reference databases, enough RAM to
+hold them, and learning both `sylph` and `sylph-tax` syntax. That takes at least 30 min to 1 h for
+a bioinformatician (even with an LLM agent) and is out of reach for most biologists — and still
+leaves you with plain TSV files and no visualisation. Moreover, if you make many separate `sylph`
+calls, every call has to deserialise the reference database and load it into memory (~2 s and
+~2 GB of RAM per process for GTDB r232 `c=200`, plus the 20 GB second stage on disk), which is slow
+and inefficient.
+
+### 2. Split sylph into two processes
+
+Sketching is per-sample CPU work that belongs on the client; keeping database querying in a
+long-lived daemon (**`sylphd` = sylph daemon**) lets every run, parallel job and user share a
+single resident database — locally for sensitive data, or on a remote server — while returning
+GTDB and NCBI taxonomy directly (replacing a separate `sylph-tax` step).
+
+```mermaid
+flowchart LR
+    C["<b><code>sylphd client</code></b><br/>Reads or contigs are reduced to a small sketch"]
+    S["<b><code>sylphd daemon</code></b><br/>Holds reference database in memory"]
+
+    C -->|"sketch"| S
+    S -->|"ANI hits, GTDB &amp; NCBI taxonomy"| C
+
+    linkStyle 0 stroke:#e11d48,stroke-width:2px
+```
+
+### 3. Only the sketch travels — so a public server makes sense
+
+Once sketching and database lookup were split, it became clear how small sketches are (for example,
+74.5 MB for a 1.2 GB `FASTQ.gz` — 16× smaller — and ~0.1 MB for a bacterial assembly), and that
+they contain only k-mer hashes and counts, never raw reads. Because neither the reads nor ~21 GB of
+reference databases need to move across the network, a free public server (`sylphd.abrinca.com`)
+with an in-browser WebAssembly sketcher and interactive visualisations became practical.
+
+```mermaid
+flowchart LR
+    subgraph local["Your browser or machine"]
+        R["<b>Reads</b><br/>1.2 GB FASTQ.gz<br/><i>stays local</i>"]
+    end
+
+    subgraph wire["Internet"]
+        S["<b>Sketch · 74.5 MB</b><br/><i>the only thing sent<br/>(16× smaller)</i>"]
+    end
+
+    subgraph srv["Free public server: sylphd.abrinca.com"]
+        direction TB
+        DB1[("<b>GTDB r232</b><br/>20.0 GB · 199,923 genomes")]
+        DB2[("<b>RefSeq fungi</b><br/>0.78 GB · 661 genomes")]
+        DB3[("<b>UHGV gut viruses</b><br/>0.23 GB · 168,536 genomes")]
+    end
+
+    R -->|"sketch locally"| S
+    S --> DB1
+    S --> DB2
+    S --> DB3
+
+    style S stroke:#e11d48,stroke-width:2px
+    linkStyle 0 stroke:#e11d48,stroke-width:2px
+```
+
+| Where | What | Size | Relative to sketch |
+|---|---|---:|---:|
+| Your browser / machine (stays local) | Sequencing reads (`FASTQ.gz`) | 1.2 GB | 16× larger |
+| **Over the internet (sent)** | **Sketch (k-mer hashes & counts)** | **74.5 MB** | **1×** |
+| Public server (`sylphd.abrinca.com`) | GTDB r232 (199,923 genomes) + RefSeq fungi (661) + UHGV gut viruses (168,536) | 21.0 GB | 282× larger |
 
 ## Install
 

@@ -10,31 +10,115 @@ A [web app](https://abrinca.github.io/sylphd/) built on the same server needs no
 modes: it finds the closest GTDB genomes of an assembly, and it profiles sequencing reads. Both are
 sketched [in your browser](guides/profiling-in-browser.md), so the sequences never leave your computer.
 
-## Why a server
+## The idea
 
-Every process that uses [pysylph](https://github.com/althonos/pysylph) deserialises the database
-into its own memory. For GTDB r232 at `c=200` that costs about **2 s and 2 GB of RAM per process**
-(the screening index; the 20 GB second stage is read lazily from the file and shared through the
-page cache). A server pays this once. Runs, parallel jobs and users then share one copy.
+`sylphd` grew out of three steps:
 
-Clients send **sketches, not reads**. Sketching is per-sample CPU work and belongs on the client,
-and a sketch is small (about 1–2 MB for a 40 Mb read pool). No file paths cross the boundary, and
-the server never needs access to your data.
+### 1. The process was cumbersome
+
+Running `sylph` requires a bash shell, downloading ~20 GB of reference databases, enough RAM to
+hold them, and learning both `sylph` and `sylph-tax` syntax. This takes at least 30 min to 1 h for
+a bioinformatician (even with an LLM agent) and is out of reach for most biologists — and even that
+still leaves you with plain TSV files and no visualisation. Moreover, if there are many separate
+`sylph` calls (my use case), every call has to deserialise the reference database and load it into
+memory, not very efficient.
+
+### 2. Split sylph into two processes
+
+Sketching is independent, per-sample CPU work, while database lookup is read-only against a large
+shared index. Splitting them turns `sylph` into a client and a daemon (**`sylphd` = sylph daemon**):
 
 ```mermaid
 flowchart LR
-    R["reads / assemblies<br/>(FASTA, FASTQ, .sylsp)"] -->|"sketch locally"| C["sylphd client"]
-    C -->|"sketches over HTTP<br/>(Unix socket, TCP or URL)"| S["sylphd serve<br/>database in memory"]
-    S -->|"JSON rows"| T["TSV, JSON, .sylphmpa<br/>(written by the client)"]
-    DB[("sylph database<br/>.syl2db")] --> S
-    MD[("metadata<br/>SQLite")] --> S
-    B["web app<br/>(sketched in the browser)"] -->|"sketch"| S
-    W["curl, scripts"] -.->|"raw FASTA<br/>(--allow-sequences)"| S
+    C["<b><code>sylphd client</code></b><br/>Reads or contigs are reduced to a small sketch"]
+    S["<b><code>sylphd daemon</code></b><br/>Holds reference database in memory"]
+
+    C -->|"sketch"| S
+    S -->|"ANI hits, GTDB &amp; NCBI taxonomy"| C
+
+    linkStyle 0 stroke:#e11d48,stroke-width:2px
 ```
 
+- **Local or remote daemon:** run your own local daemon for sensitive data, or point clients at a
+  shared daemon on another machine — every run, parallel job and user shares one database in memory.
+- **Built-in taxonomy (replaces `sylph-tax`):** the daemon joins hits with GTDB and NCBI taxonomy
+  IDs and names (plus other `sylph-tax` sources), not only the closest genome accession.
+
+### 3. Only the sketch travels — so a public server makes sense
+
+Once sketching and database processes were separated, a second consequence stood out: **sketches
+are small**. Sketching a 1.2 GB `FASTQ.gz` read file produces a ~74.5 MB sketch (**16× smaller**),
+and a bacterial assembly sketches down to ~0.1 MB. Because a sketch holds only k-mer hashes and
+counts — never raw reads or file paths — neither gigabytes of reads nor ~21 GB of reference
+databases have to move across the network. That made it practical to run a **free public server**
+(`sylphd.abrinca.com`) and pair it with a WebAssembly sketcher and interactive visualisations in
+the browser — no shell, no database download, no install, and your reads never leave your computer.
+
+<div class="sketch-flow" role="figure" aria-label="Only the sketch travels: 1.2 GB FASTQ.gz reads stay in your browser or machine, only a 74.5 MB sketch crosses the internet to query 21 GB of reference databases on sylphd.abrinca.com">
+  <div class="sketch-flow-zone sketch-flow-local">
+    <div class="sketch-flow-heading">Local<br><code>sylphd client</code><br><small>your browser / machine</small></div>
+    <div class="sketch-flow-local-body">
+      <div class="sketch-flow-reads-anchor">
+        <div class="sketch-flow-reads-row">
+          <div class="sketch-flow-reads-bar" title="1.2 GB FASTQ.gz"></div>
+          <div class="sketch-flow-taper-left" aria-hidden="true"></div>
+        </div>
+        <div class="sketch-flow-reads-caption">
+          <div class="sketch-flow-label">Reads</div>
+          <div class="sketch-flow-meta"><strong class="sketch-flow-size">1.2 GB</strong> <small>FASTQ.gz</small></div>
+        </div>
+      </div>
+      <div class="sketch-flow-footnote"><strong class="sketch-flow-payoff">Reads stay local</strong><br><small>sketching makes them 16&times; smaller!</small></div>
+    </div>
+  </div>
+  <div class="sketch-flow-zone sketch-flow-wire">
+    <div class="sketch-flow-heading">Internet</div>
+    <div class="sketch-flow-wire-body">
+      <div class="sketch-flow-wire-half sketch-flow-wire-top">
+        <div class="sketch-flow-divider" aria-hidden="true"></div>
+        <div class="sketch-flow-sketch-title">Sketch, <strong class="sketch-flow-size">74.5 MB</strong></div>
+      </div>
+      <div class="sketch-flow-line" title="74.5 MB sketch"></div>
+      <div class="sketch-flow-wire-half sketch-flow-wire-bottom">
+        <div class="sketch-flow-sketch-sub"><strong class="sketch-flow-payoff">only sketch is sent</strong></div>
+        <div class="sketch-flow-divider" aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
+  <div class="sketch-flow-zone sketch-flow-server">
+    <div class="sketch-flow-heading">Public<br><code>sylphd server</code><br><small>sylphd.abrinca.com</small></div>
+    <div class="sketch-flow-server-body">
+      <div class="sketch-flow-fan" aria-hidden="true"></div>
+      <div class="sketch-flow-dbs">
+        <div class="sketch-flow-db">
+          <div class="sketch-flow-db-bar sketch-flow-db-gtdb" title="20.0 GB"></div>
+          <div>
+            <div class="sketch-flow-label">GTDB r232</div>
+            <div class="sketch-flow-meta"><strong class="sketch-flow-size">20.0 GB</strong> <small>(199k genomes)</small></div>
+          </div>
+        </div>
+        <div class="sketch-flow-db">
+          <div class="sketch-flow-db-bar sketch-flow-db-fungi" title="0.78 GB"></div>
+          <div>
+            <div class="sketch-flow-label">RefSeq fungi</div>
+            <div class="sketch-flow-meta"><strong class="sketch-flow-size">0.78 GB</strong> <small>(661 genomes)</small></div>
+          </div>
+        </div>
+        <div class="sketch-flow-db">
+          <div class="sketch-flow-db-bar sketch-flow-db-uhgv" title="0.23 GB"></div>
+          <div>
+            <div class="sketch-flow-label">UHGV viruses</div>
+            <div class="sketch-flow-meta"><strong class="sketch-flow-size">0.23 GB</strong> <small>(169k genomes)</small></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 Assemblies are sketched locally too (`sylphd assembly`, and the web app in the browser), so a server
-started without `--allow-sequences` never receives a sequence. The flag adds raw FASTA uploads for
-scripts; the public instance runs with it.
+started without `--allow-sequences` never receives a sequence. The optional flag adds raw FASTA
+uploads for `curl` and scripts; the public instance runs with it.
 
 ## What it does
 

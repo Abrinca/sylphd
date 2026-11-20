@@ -1,0 +1,304 @@
+/* "Only the sketch travels" proportional diagram (docs/index.md) */
+:root {
+  --sketch-flow-size-color: #e11d48;
+  --sketch-flow-payoff-color: #0d9488;
+}
+
+[data-md-color-scheme="slate"] {
+  --sketch-flow-size-color: #fb3767;
+  --sketch-flow-payoff-color: #2dd4bf;
+}
+
+.sketch-flow {
+  display: grid;
+  grid-template-columns: 1fr minmax(145px, 0.85fr) 1.55fr;
+  grid-template-rows: auto 1fr;
+  border: 1px dashed var(--md-default-fg-color--lighter);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 1.25rem 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+/* Flatten zone wrappers into the 3x2 grid so all 3 headings share row 1
+   and all 3 bodies share row 2 (exact vertical alignment across columns). */
+.sketch-flow-zone {
+  display: contents;
+}
+
+.sketch-flow-heading {
+  grid-row: 1;
+  padding: 0.9rem 1rem 0.65rem;
+  font-weight: 700;
+  font-size: 0.84rem;
+  color: var(--md-default-fg-color);
+  text-align: center;
+}
+
+.sketch-flow-heading small {
+  font-weight: 400;
+  color: var(--md-default-fg-color--light);
+}
+
+.sketch-flow-local > .sketch-flow-heading,
+.sketch-flow-local > .sketch-flow-local-body {
+  grid-column: 1;
+  background: var(--md-code-bg-color);
+}
+
+.sketch-flow-wire > .sketch-flow-heading,
+.sketch-flow-wire > .sketch-flow-wire-body {
+  grid-column: 2;
+  background: var(--md-default-bg-color);
+}
+
+.sketch-flow-server > .sketch-flow-heading,
+.sketch-flow-server > .sketch-flow-server-body {
+  grid-column: 3;
+  background: var(--md-code-bg-color);
+}
+
+.sketch-flow-wire > .sketch-flow-heading {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+/* Left zone: Reads bar + taper to the wire, vertically centered in row 2 */
+.sketch-flow-local-body {
+  grid-row: 2;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0.25rem 0 0.9rem 2.2rem;
+}
+
+.sketch-flow-reads-anchor {
+  position: relative;
+  width: 100%;
+}
+
+.sketch-flow-reads-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.sketch-flow-reads-bar {
+  width: 22px;
+  height: 12px;
+  background: var(--md-default-fg-color);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.sketch-flow-taper-left {
+  flex: 1;
+  min-width: 24px;
+  height: 12px;
+  background: var(--md-default-fg-color--lighter);
+  opacity: 0.45;
+  clip-path: polygon(0 0, 100% 42%, 100% 58%, 0 100%);
+}
+
+.sketch-flow-reads-caption {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 11px;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.sketch-flow-label {
+  font-weight: 700;
+  color: var(--md-default-fg-color);
+}
+
+.sketch-flow-meta {
+  font-size: 0.75rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.sketch-flow-size {
+  font-weight: 700;
+  color: var(--sketch-flow-size-color);
+}
+
+.sketch-flow-payoff {
+  font-weight: 700;
+  color: var(--sketch-flow-payoff-color);
+}
+
+.sketch-flow-footnote {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 1rem;
+  right: 1rem;
+  font-size: 0.73rem;
+  color: var(--md-default-fg-color--light);
+}
+
+/* Middle zone: equal top & bottom halves lock the red line to exact 50% of row 2 */
+.sketch-flow-wire-body {
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0.25rem 0 0.9rem;
+}
+
+.sketch-flow-wire-half {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.sketch-flow-wire-top {
+  justify-content: flex-end;
+}
+
+.sketch-flow-wire-bottom {
+  justify-content: flex-start;
+}
+
+.sketch-flow-divider {
+  width: 0;
+  flex: 1;
+  min-height: 20px;
+  border-left: 1px dashed var(--md-default-fg-color--lighter);
+  margin: 0.35rem 0;
+}
+
+.sketch-flow-sketch-title {
+  font-weight: 700;
+  color: var(--md-default-fg-color);
+  font-size: 0.84rem;
+  padding: 0 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.sketch-flow-line {
+  width: 100%;
+  height: 2px;
+  background: var(--sketch-flow-size-color);
+  flex-shrink: 0;
+}
+
+.sketch-flow-sketch-sub {
+  font-size: 0.76rem;
+  padding: 0 0.5rem;
+  margin-top: 0.3rem;
+}
+
+/* Right zone: flared connector + to-scale database bars (10 px = 1 GB) */
+.sketch-flow-server-body {
+  grid-row: 2;
+  display: flex;
+  align-items: stretch;
+  padding: 0.25rem 1rem 0.9rem 0;
+}
+
+.sketch-flow-fan {
+  width: 44px;
+  flex-shrink: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(94, 122, 105, 0.35) 0%,
+    rgba(94, 122, 105, 0.35) 86%,
+    rgba(201, 185, 59, 0.35) 93%,
+    rgba(158, 58, 66, 0.35) 100%
+  );
+  clip-path: polygon(0 49%, 100% 0, 100% 100%, 0 51%);
+}
+
+.sketch-flow-dbs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  justify-content: center;
+}
+
+.sketch-flow-db {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.sketch-flow-db-bar {
+  width: 22px;
+  flex-shrink: 0;
+  border-radius: 1px;
+}
+
+.sketch-flow-db-gtdb {
+  height: 200px;
+  background: #5e7a69;
+}
+
+.sketch-flow-db-fungi {
+  height: 8px;
+  background: #c9b93b;
+}
+
+.sketch-flow-db-uhgv {
+  height: 3px;
+  background: #9e3a42;
+}
+
+@media (max-width: 680px) {
+  .sketch-flow {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sketch-flow-zone {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sketch-flow-local,
+  .sketch-flow-server {
+    background: var(--md-code-bg-color);
+  }
+
+  .sketch-flow-wire {
+    background: var(--md-default-bg-color);
+  }
+
+  .sketch-flow-local-body {
+    flex-direction: column;
+    justify-content: center;
+    padding: 0.5rem 1rem 0.9rem;
+  }
+
+  .sketch-flow-reads-row {
+    justify-content: center;
+  }
+
+  .sketch-flow-reads-caption {
+    position: static;
+    transform: none;
+    margin-top: 0.4rem;
+  }
+
+  .sketch-flow-footnote {
+    position: static;
+    margin-top: 0.75rem;
+    text-align: center;
+  }
+
+  .sketch-flow-taper-left,
+  .sketch-flow-fan,
+  .sketch-flow-divider {
+    display: none;
+  }
+
+  .sketch-flow-server-body {
+    padding: 0.25rem 1rem 0.9rem;
+  }
+}
