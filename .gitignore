@@ -34,3 +34,6 @@ db/
 
 # npm dependencies of the browser tests
 node_modules/
+
+# Demo video generator scripts and raw captures
+demo-videos/

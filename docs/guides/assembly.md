@@ -1,18 +1,45 @@
 # Identifying an assembly
 
-`sylphd assembly` finds the closest database genomes to one assembly — GTDB genomes on a GTDB
-server, and viral, fungal or MAG genomes too when the server holds several databases with a
-format 3 metadata file. It is the command-line twin of the [web app](https://abrinca.github.io/sylphd/): both **sketch the assembly locally** with the
-database's `c` and `k` and send only the sketch to
-[`POST /assembly`](../reference/http-api.md#post-assembly), where the server runs sylph and
-classifies the hits. The sequence never leaves your machine (the command line sketches with
-pysylph, the web app in the browser with WebAssembly), and the command line has no size limit on the assembly (the web app takes up to 2 GB).
-A sketch of a bacterial genome is 100–500 kB.
+`sylphd` finds the closest database genomes to one assembly — GTDB genomes on a GTDB server, and
+viral, fungal or MAG genomes too when the server holds several databases with a format 3 metadata
+file. Both the [web app](https://abrinca.github.io/sylphd/#assembly) and the command line
+(`sylphd assembly`) **sketch the assembly locally** with the database's `c` and `k` and send only
+the sketch to [`POST /assembly`](../reference/http-api.md#post-assembly), where the server runs
+sylph and classifies the hits. The sequence never leaves your machine (WebAssembly in the browser,
+pysylph on the command line), and a sketch of a bacterial genome is only 100–500 kB.
 
-That works on every server, and the sequence is never sent, which is what you want when the assembly
-is confidential. A server started with the optional `--allow-sequences` (the public instance is) also
-takes raw FASTA, for scripts and local use: `--no-local-sketch` uploads the file as it is (limited by
-`--max-sequence-mb`, 20 MB by default) and gives the same hits, but then the sequence does reach the server.
+## Sketching in the browser { #sketching-in-the-browser }
+
+<figure class="demo-frame">
+  <img src="../img/demo-assembly.webp" alt="Demo of identifying a genome assembly in the browser with sylphd (species call at 95 % ANI and closest GTDB genomes)" loading="lazy">
+  <figcaption>Identifying a bacterial genome assembly (<code>.fna.gz</code>) in the browser against <code>sylphd.abrinca.com</code>.</figcaption>
+</figure>
+
+In the [web app](https://abrinca.github.io/sylphd/#assembly) the sketching happens in your browser
+(WebAssembly, the same code as for [reads](profiling-in-browser.md)). Paste FASTA or drop a file of
+up to 2 GB (gzip is fine); only the sketch is sent, and the result shows a *sketched locally* badge.
+You can also upload a sketch you made earlier (`.sylsp`, for example from `sylph sketch` or
+pysylph, or downloaded from the [Reads tab](profiling-in-browser.md#reupload)): it is sent as it
+is, after the page has checked its `c` and `k` against the server. Records, length and GC are
+then unknown and shown as "–".
+
+A browser without WebAssembly SIMD and module workers (Chrome/Edge 91, Firefox 114, Safari 16.4 or
+newer have them) cannot use the page and says so; use `sylphd assembly` there. See
+[Running a public server](public-server.md#sketches-only-or-raw-sequences-too-allow-sequences).
+
+[Per-contig mode](#per-contig) in the browser keeps at most the 100 longest contigs (largest first)
+and sends them in batches of the server's `limits.max_contigs`. It reads at most 1,000,000 records
+per run and refuses any single record longer than 50 Mbp, with a message saying so: those are
+tab-memory guards, and `sylphd assembly FILE --per-contig` has neither limit.
+
+## Command line
+
+`sylphd assembly` is the command-line twin of the web app and has no size limit on the assembly. It
+works on every server without sending the sequence, which is what you want when the assembly is
+confidential. A server started with the optional `--allow-sequences` (the public instance is) also
+takes raw FASTA, for scripts and local use: `--no-local-sketch` uploads the file as it is (limited
+by `--max-sequence-mb`, 20 MB by default) and gives the same hits, but then the sequence does reach
+the server.
 
 ```bash
 sylphd assembly assembly.fasta
@@ -159,25 +186,6 @@ Cost is per contig but small: against a 200 000-genome database, 236 short conti
 38 contigs totalling 1.87 Mb took 0.4 s, i.e. a few milliseconds per contig on the server plus
 0.1-0.3 ms of local sketching. The full column and JSON reference is in
 [`sylphd assembly`](../commands/assembly.md#per-contig-mode).
-
-## Sketching in the browser { #sketching-in-the-browser }
-
-In the [web app](https://abrinca.github.io/sylphd/#assembly) the sketching happens in your browser
-(WebAssembly, the same code as for [reads](profiling-in-browser.md)). Paste FASTA or drop a file of
-up to 2 GB (gzip is fine); only the sketch is sent, and the result shows a *sketched locally* badge.
-You can also upload a sketch you made earlier (`.sylsp`, for example from `sylph sketch` or
-pysylph, or downloaded from the [Reads tab](profiling-in-browser.md#reupload)): it is sent as it
-is, after the page has checked its `c` and `k` against the server. Records, length and GC are
-then unknown and shown as "–".
-
-A browser without WebAssembly SIMD and module workers (Chrome/Edge 91, Firefox 114, Safari 16.4 or
-newer have them) cannot use the page and says so; use `sylphd assembly` there. See
-[Running a public server](public-server.md#sketches-only-or-raw-sequences-too-allow-sequences).
-
-Per-contig mode in the browser keeps at most the 100 longest contigs (largest first) and sends them
-in batches of the server's `limits.max_contigs`. It reads at most 1,000,000 records per run and
-refuses any single record longer than 50 Mbp, with a message saying so: those are tab-memory
-guards, and `sylphd assembly FILE --per-contig` has neither limit.
 
 ## Why the ANI is not adjusted { #why-the-ani-is-not-adjusted }
 

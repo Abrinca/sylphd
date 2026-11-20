@@ -12,6 +12,11 @@ sketch leaves your computer.
     server's [`POST /profile`](../reference/http-api.md#post-query-and-post-profile). It contains no
     sequences, read names or qualities. The server does not store or log it.
 
+<figure class="demo-frame">
+  <img src="../img/demo-reads.webp" alt="Demo of profiling sequencing reads in the browser with sylphd (Bars, Sunburst, and Treemap views)" loading="lazy">
+  <figcaption>Profiling a 445 MB <code>FASTQ.gz</code> file in the browser against <code>sylphd.abrinca.com</code> (upload/profiling wait sped up 4&times;).</figcaption>
+</figure>
+
 ## How to use it
 
 1. Open the **Reads** tab (or `#reads` in the address) and wait for the server status to turn

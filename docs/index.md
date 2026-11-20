@@ -10,6 +10,20 @@ A [web app](https://abrinca.github.io/sylphd/) built on the same server needs no
 modes: it finds the closest GTDB genomes of an assembly, and it profiles sequencing reads. Both are
 sketched [in your browser](guides/profiling-in-browser.md), so the sequences never leave your computer.
 
+=== "Profile reads"
+
+    <figure class="demo-frame">
+      <img src="img/demo-reads.webp" alt="Demo of profiling sequencing reads in the browser with sylphd (Bars, Sunburst, and Treemap views)" loading="lazy">
+      <figcaption>Sketched locally in WebAssembly (445 MB <code>FASTQ.gz</code> &rarr; 18.8 MB sketch); Bars, Sunburst &amp; Treemap views. <a href="guides/profiling-in-browser/">Read the guide &rarr;</a></figcaption>
+    </figure>
+
+=== "Identify an assembly"
+
+    <figure class="demo-frame">
+      <img src="img/demo-assembly.webp" alt="Demo of identifying a genome assembly in the browser with sylphd (species call at 95 % ANI and closest GTDB genomes)" loading="lazy">
+      <figcaption>Sketched locally in WebAssembly; species call at 95 % ANI &amp; closest GTDB genomes. <a href="guides/assembly/#sketching-in-the-browser">Read the guide &rarr;</a></figcaption>
+    </figure>
+
 ## The idea
 
 `sylphd` grew out of three steps:

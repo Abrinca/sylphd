@@ -1,3 +1,25 @@
+/* Full-width web app demo animations (index.md tabs + guides) */
+.demo-frame {
+  margin: 0.75rem 0 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.demo-frame img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 6px;
+}
+
+.demo-frame figcaption {
+  font-size: 0.8rem;
+  color: var(--md-default-fg-color--light);
+  text-align: center;
+}
+
 /* "Only the sketch travels" proportional diagram (docs/index.md) */
 :root {
   --sketch-flow-size-color: #e11d48;
