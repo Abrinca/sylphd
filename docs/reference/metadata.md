@@ -263,7 +263,13 @@ the deepest rank upwards. For each GTDB clade (`g__Thiobacillus`, matched by `ra
 renamed parent does not hide it) the `ncbi_taxid`s of the GTDB metadata rows in that clade are
 collected, merged taxids are followed through `merged.dmp`, and each is lifted to its nearest
 ancestor with a major rank (a strain votes as its species); members below NCBI's *unclassified
-sequences*, *other sequences* or *environmental samples* do not vote. The clade's consensus is the
+sequences*, *other sequences* or *environmental samples* do not vote. An NCBI species that has no
+formal name — the taxdump's `nodes.dmp` `specified_species` is 0, as for *Clostridia bacterium*,
+*uncultured Collinsella sp.* or *Tepidiphilus sp.* — is **not** a placement: the lift continues to
+the genus, family, class, … above it (the genus of *uncultured Collinsella sp.*, the class of
+*Clostridia bacterium*). This is a structural flag from the taxdump, not a pattern on names; a
+species with a binomial (`specified_species` 1) stays. The same lift is applied to the consensus
+node, so a result is never such an informal species. The clade's consensus is the
 deepest NCBI node that **strictly more than half** of the members have as ancestor-or-self, lifted
 to a major rank again. A strict LCA would be dragged to the root by one misclassified genome; the
 majority rule tolerates a minority up to just under half, and when no node has a majority the

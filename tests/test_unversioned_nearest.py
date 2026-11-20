@@ -248,48 +248,71 @@ def test_ncbi_enrichment_accepts_unversioned_keys(
 # 2b: the nearest NCBI taxon
 # ---------------------------------------------------------------------------
 
-#: taxid, parent, rank, name -- a tiny NCBI tree.
+#: taxid, parent, rank, name, specified_species -- a tiny NCBI tree.
+#: ``specified_species`` is ``nodes.dmp``'s own flag: 1 when a species in the
+#: node's lineage has a formal name.  ``"Tepidiphilus sp."``, ``"Bacillus sp."``,
+#: ``"uncultured Collinsella sp."`` and ``"Clostridia bacterium"`` are NCBI's
+#: informal species; the rest are binomials (or not species).
 NODES = [
-    (1, 1, "no rank", "root"),
-    (131567, 1, "no rank", "cellular organisms"),
-    (2, 131567, "superkingdom", "Bacteria"),
-    (10, 2, "phylum", "Pseudomonadota"),
-    (11, 2, "phylum", "Bacillota"),
-    (20, 10, "class", "Gammaproteobacteria"),
-    (30, 20, "order", "Burkholderiales"),
-    (40, 30, "family", "Hydrogenophilaceae"),
-    (50, 40, "genus", "Thiobacillus"),
-    (51, 50, "species", "Thiobacillus denitrificans"),
-    (52, 51, "no rank", "Thiobacillus denitrificans ATCC 25259"),
-    (60, 40, "genus", "Tepidiphilus"),
-    (61, 60, "species", "Tepidiphilus margaritifer"),
-    (62, 60, "species", "Tepidiphilus thermophilus"),
-    (63, 60, "species", "Tepidiphilus sp."),
-    (70, 11, "species", "Bacillus sp."),
-    (48479, 1, "no rank", "environmental samples"),
-    (77133, 48479, "species", "uncultured bacterium"),
+    (1, 1, "no rank", "root", 0),
+    (131567, 1, "no rank", "cellular organisms", 0),
+    (2, 131567, "superkingdom", "Bacteria", 0),
+    (10, 2, "phylum", "Pseudomonadota", 0),
+    (11, 2, "phylum", "Bacillota", 0),
+    (12, 11, "class", "Clostridia", 0),
+    (13, 12, "species", "Clostridia bacterium", 0),
+    (20, 10, "class", "Gammaproteobacteria", 0),
+    (30, 20, "order", "Burkholderiales", 0),
+    (40, 30, "family", "Hydrogenophilaceae", 0),
+    (41, 92, "family", "Coriobacteriaceae", 0),
+    (50, 40, "genus", "Thiobacillus", 0),
+    (51, 50, "species", "Thiobacillus denitrificans", 1),
+    (52, 51, "no rank", "Thiobacillus denitrificans ATCC 25259", 1),
+    (60, 40, "genus", "Tepidiphilus", 0),
+    (61, 60, "species", "Tepidiphilus margaritifer", 1),
+    (62, 60, "species", "Tepidiphilus thermophilus", 1),
+    (63, 60, "species", "Tepidiphilus sp.", 0),
+    (70, 11, "species", "Bacillus sp.", 0),
+    (80, 41, "genus", "Collinsella", 0),
+    (81, 80, "species", "uncultured Collinsella sp.", 0),
+    (82, 81, "no rank", "uncultured Collinsella sp. SC03", 0),
+    (90, 2, "phylum", "Actinomycetota", 0),
+    (91, 90, "class", "Coriobacteriia", 0),
+    (92, 91, "order", "Coriobacteriales", 0),
+    (48479, 1, "no rank", "environmental samples", 0),
+    (77133, 48479, "species", "uncultured bacterium", 0),
 ]
 
 #: rankedlineage.dmp columns after the name: species genus family order class phylum kingdom superkingdom.
 RANKED = {
     2: ("", "", "", "", "", "", "", ""),
     10: ("", "", "", "", "", "", "", "Bacteria"),
+    12: ("", "", "", "", "Clostridia", "Bacillota", "", "Bacteria"),
     20: ("", "", "", "", "", "Pseudomonadota", "", "Bacteria"),
     30: ("", "", "", "", "Gammaproteobacteria", "Pseudomonadota", "", "Bacteria"),
     40: ("", "", "", "Burkholderiales", "Gammaproteobacteria", "Pseudomonadota", "", "Bacteria"),
     50: ("", "", "Hydrogenophilaceae", "Burkholderiales", "Gammaproteobacteria", "Pseudomonadota", "", "Bacteria"),
     51: ("", "Thiobacillus", "Hydrogenophilaceae", "Burkholderiales", "Gammaproteobacteria", "Pseudomonadota", "", "Bacteria"),
     60: ("", "", "Hydrogenophilaceae", "Burkholderiales", "Gammaproteobacteria", "Pseudomonadota", "", "Bacteria"),
+    80: ("", "Collinsella", "Coriobacteriaceae", "Coriobacteriales", "Coriobacteriia", "Actinomycetota", "", "Bacteria"),
 }
+
+
+def _node_line(taxid: int, parent: int, rank: str, specified: int) -> str:
+    """One ``nodes.dmp`` row with the 18 documented fields."""
+    fields = ["", "", rank, "", "0", "0", "11", "0", "0", "0", "0", "0", "", "", "",
+              str(specified), "0", "1"]
+    fields[0], fields[1] = str(taxid), str(parent)
+    return "\t|\t".join(fields) + "\t|\n"
 
 
 @pytest.fixture()
 def taxdump(tmp_path: Path) -> tuple[Path, Path, Path]:
     nodes = tmp_path / "nodes.dmp"
-    nodes.write_text("".join(f"{t}\t|\t{p}\t|\t{r}\t|\t\t|\n" for t, p, r, _ in NODES))
+    nodes.write_text("".join(_node_line(t, p, r, s) for t, p, r, _, s in NODES))
     merged = tmp_path / "merged.dmp"
     merged.write_text("999\t|\t51\t|\n")
-    names = {t: n for t, _, _, n in NODES}
+    names = {t: n for t, _, _, n, _ in NODES}
     ranked = tmp_path / "rankedlineage.dmp"
     lines = []
     for taxid, columns in RANKED.items():
@@ -301,8 +324,14 @@ def taxdump(tmp_path: Path) -> tuple[Path, Path, Path]:
 def test_tree_lift_and_consensus(taxdump: tuple[Path, Path, Path]) -> None:
     tree = NcbiTree.from_files(taxdump[1], taxdump[2])
     assert tree.rank(51) == "species" and tree.rank(2) == "domain" and tree.rank(52) is None
+    assert tree.lift(51) == 51  # a formal (binomial) species is a placement
     assert tree.lift(52) == 51  # a strain votes as its species
     assert tree.lift(999) == 51  # merged
+    # An informal species (specified_species 0) is not a placement: lift past it.
+    assert tree.lift(63) == 60  # "Tepidiphilus sp." -> its genus
+    assert tree.lift(81) == 80  # "uncultured Collinsella sp." -> its genus
+    assert tree.lift(82) == 80  # a strain below it -> its genus
+    assert tree.lift(13) == 12  # "Clostridia bacterium" -> its class
     assert tree.lift(77133) is None  # environmental samples
     assert tree.lift(123456) is None  # not in the taxdump
     assert tree.lift(131567) is None  # nothing with a major rank above it
@@ -316,7 +345,27 @@ def test_tree_lift_and_consensus(taxdump: tuple[Path, Path, Path]) -> None:
     assert consensus(tree, {51: 2, 61: 1, 70: 1}) == (40, 3, 4)
     # nothing in common below the domain
     assert consensus(tree, {51: 1, 70: 1}) == (2, 2, 2)
+    # a consensus that is an informal species is lifted too (belt and braces:
+    # members never vote there, see lift)
+    assert consensus(tree, {81: 4}) == (80, 4, 4)
+    assert consensus(tree, {13: 2}) == (12, 2, 2)
     assert consensus(tree, {}) is None
+
+
+def test_a_taxdump_without_the_specified_species_column_keeps_species(
+    tmp_path: Path,
+) -> None:
+    # 4-field rows (nothing says "informal"): a species stays a placement
+    nodes = tmp_path / "nodes.dmp"
+    nodes.write_text(
+        "1\t|\t1\t|\tno rank\t|\t\t|\n"
+        "2\t|\t1\t|\tsuperkingdom\t|\t\t|\n"
+        "3\t|\t2\t|\tspecies\t|\t\t|\n"
+    )
+    merged = tmp_path / "merged.dmp"
+    merged.write_text("")
+    tree = NcbiTree.from_files(nodes, merged)
+    assert tree.lift(3) == 3
 
 
 def test_lineage_clades() -> None:
@@ -336,12 +385,18 @@ def nearest_db(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, taxdump: tuple[Path, Path, Path]
 ) -> Path:
     prefix = "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Burkholderiales;f__Hydrogenophilaceae;"
+    collinsella = "d__Bacteria;p__Actinomycetota;c__Coriobacteriia;o__Coriobacteriales;f__Coriobacteriaceae;"
+    clostridia = "d__Bacteria;p__Bacillota;c__Clostridia;o__O;f__F;"
     rows = [
         *_members("GCF_100000", prefix + "g__Thiobacillus;s__Thiobacillus denitrificans", [52, 51, 51, 61]),
         *_members("GCF_200000", prefix + "g__Tepidiphilus;s__Tepidiphilus a", [61, 62, 63]),
         *_members("GCF_300000", prefix + "g__Envgenus;s__Env a", [77133]),
         # other phyla keep the domain from having a majority node
         *_members("GCF_400000", "d__Bacteria;p__Bacillota;c__C;o__O;f__Fam;g__G;s__S", [70] * 7),
+        # NCBI only knows these species informally, so they vote at the genus ...
+        *_members("GCF_600000", collinsella + "g__Collinsella;s__Collinsella sp", [81, 81, 82]),
+        # ... or at the class ("Clostridia bacterium" hangs directly below it).
+        *_members("GCF_700000", clostridia + "g__Placeholder;s__Placeholder sp", [13, 13]),
         # a GTDB genome without an NCBI taxid is a target too (virtual source)
         _row("GB_GCA_500000001.1", prefix + "g__Thiobacillus;s__Thiobacillus sp"),
     ]
@@ -357,6 +412,8 @@ def nearest_db(
             "MAG6\td__Archaea;p__Nothing",  # no member at all
             "UHGV-1\tvFAM-1;root",  # not a GTDB-style lineage
             f"GCF_110000000\t{prefix}g__Thiobacillus;s__x",  # a real accession GTDB lacks, unmapped
+            f"MAG7\t{collinsella}g__Collinsella;s__MOTU_7",  # informal species: genus 80
+            f"MAG8\t{clostridia}g__Placeholder;s__MOTU_8",  # informal species: class 12
         ],
     )
     _patch_ncbi(monkeypatch, taxdump)
@@ -385,6 +442,10 @@ def test_nearest_taxa_of_keys_without_a_record(nearest_db: Path) -> None:
     assert rows[("Mags", "MAG4")][:4] == [60, "genus", "Tepidiphilus", "f__Hydrogenophilaceae"]
     assert rows[("Mags", "MAG5")][1] == "domain"
     assert ("Mags", "MAG6") not in rows and ("Mags", "UHGV-1") not in rows
+    # NCBI's informal species are not a placement: "uncultured Collinsella sp."
+    # (under a genus) gives the genus, "Clostridia bacterium" (under a class) the class
+    assert rows[("Mags", "MAG7")][:5] == [80, "genus", "Collinsella", "g__Collinsella", 3]
+    assert rows[("Mags", "MAG8")][:5] == [12, "class", "Clostridia", "g__Placeholder", 2]
     # the virtual GTDB source: a genome without a taxid
     assert rows[("GTDB_r232", "GCA_500000001.1")][3] == "g__Thiobacillus"
     # ncbi_taxid itself is untouched: only real assembly taxids are stored
@@ -398,9 +459,9 @@ def test_nearest_counts_by_source_and_rank(nearest_db: Path) -> None:
     with MetadataDB(nearest_db) as db:
         sources = {s["name"]: s for s in db.taxonomy_sources()}
     mags = sources["Mags"]["ncbi_nearest"]
-    # MAG1..MAG6 and GCF_110000000 are GTDB-style without a record; UHGV-1 is not
-    assert mags["keys"] == 7 and mags["assigned"] == 6
-    assert mags["ranks"] == {"domain": 1, "genus": 3, "species": 2}
+    # MAG1..MAG8 and GCF_110000000 are GTDB-style without a record; UHGV-1 is not
+    assert mags["keys"] == 9 and mags["assigned"] == 8
+    assert mags["ranks"] == {"domain": 1, "class": 1, "genus": 4, "species": 2}
     assert sources["GTDB_r232"]["ncbi_nearest"]["assigned"] == 1
 
 

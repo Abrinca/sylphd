@@ -116,7 +116,10 @@ A key with a GTDB-Tk lineage but no assembly in NCBI at all — a GlobDB MAG (`M
 gets a place in the NCBI view: the **nearest NCBI taxon** of its deepest GTDB clade that has one. The
 clade's GTDB members' NCBI taxids vote, and the deepest NCBI node that strictly more than half of
 them have as ancestor-or-self wins (a documented majority rule, not a strict LCA: one misclassified
-genome cannot drag a genus to the root). It is stored as `ncbi_nearest_taxid`, `ncbi_nearest_rank`,
+genome cannot drag a genus to the root). An NCBI species without a formal name (`nodes.dmp`
+`specified_species` 0: *Clostridia bacterium*, *uncultured Collinsella sp.*) does not count as a
+placement: the vote, and the result, are lifted to the genus, class, … above it, so a
+`g__Collinsella` MAG gets *Collinsella* at genus rank rather than an informal species. It is stored as `ncbi_nearest_taxid`, `ncbi_nearest_rank`,
 `ncbi_nearest_name`, `ncbi_nearest_clade` and `ncbi_nearest_lineage`, never as `ncbi_taxid` (which
 stays `null` for an assembly NCBI does not know), and the NCBI profile and the web NCBI view place
 such hits at that node. See [nearest NCBI taxa](../reference/metadata.md#nearest-ncbi-taxa).
@@ -129,7 +132,7 @@ e.g.:
 ```text
   GlobDB_r232: 346,233 keys (sylphtax)
     NCBI lineage: 0 mapped, 146,310 without an assembly accession, 0 not in the summaries, 0 without a lineage, 199,923 with GTDB's NCBI data
-    nearest NCBI taxon: 146,310 of 146,310 keys without an NCBI record (domain 6,201, kingdom 2,234, phylum 9,998, class 17,119, order 22,718, family 22,055, genus 21,958, species 44,027)
+    nearest NCBI taxon: 146,310 of 146,310 keys without an NCBI record (domain 7,023, kingdom 2,288, phylum 20,616, class 24,928, order 28,447, family 31,459, genus 28,059, species 3,490)
   FungiRefSeq-latest: 661 keys (sylphtax)
     NCBI lineage: 659 mapped, 0 without an assembly accession, 2 not in the summaries, 0 without a lineage
 ```

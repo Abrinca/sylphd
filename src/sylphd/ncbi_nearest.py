@@ -12,22 +12,31 @@ only ever an assembly's real taxid):
    ancestor-or-self with a major rank (species ... domain), so strains and
    no-rank nodes vote as their species; members under NCBI's *unclassified
    sequences*, *other sequences* and *environmental samples* are ignored;
-3. the clade's **consensus** is the deepest NCBI node that **more than half**
+3. a species NCBI *only* names informally (``specified_species`` 0 in
+   ``nodes.dmp``: *Clostridia bacterium*, *uncultured Collinsella sp.*,
+   *… sp.*) is **not** a placement: the lift of a member, and of the consensus
+   itself, skips such a node and continues to the next ancestor with a major
+   rank (the genus of *uncultured Collinsella sp.*, the class of *Clostridia
+   bacterium*).  This is a structural rule from the taxdump, not a name
+   pattern; ``specified_species`` is the taxdump's own *1 if species in the
+   node's lineage has formal name*;
+4. the clade's **consensus** is the deepest NCBI node that **more than half**
    of the members (counted per genome) have as ancestor-or-self.  A strict LCA
    would be pulled up by one misclassified genome; this ignores any minority
    up to just under half, and when no node has a majority the members'
    common ancestors still have all of them, so a split clade still yields the
-   nearest node they share.  The consensus is then lifted to a major rank again
-   and the walk stops at the first (deepest) clade that has one;
-4. the result is stored as the taxid, its rank (``species``, ``genus``,
+   nearest node they share.  The consensus is then lifted again
+   (:meth:`NcbiTree.lift`) and the walk stops at the first (deepest) clade that
+   has one;
+5. the result is stored as the taxid, its rank (``species``, ``genus``,
    ``family``, ``order``, ``class``, ``phylum``, ``kingdom``, ``domain``), its
    name and ranked lineage, the GTDB clade it came from and how many members
    supported it (``members``, ``support`` = the share).
 
 Clades are matched by ``rank__name`` (``g__Thiobacillus``), not by the whole
 path, so a phylum renamed between GTDB releases does not hide a genus whose
-name did not change.  The code only reads GTDB rows (``gtdb_taxonomy`` set);
-nothing is matched by organism name.
+name did not change.  The code only reads GTDB rows (``gtdb_taxonomy`` set) and
+``nodes.dmp``'s structural flags; nothing is matched by organism name.
 """
 
 from __future__ import annotations
@@ -75,29 +84,46 @@ UNINFORMATIVE_ANCESTORS: frozenset[int] = frozenset({12908, 28384, 48479})
 #: The share of the members that must agree (strictly more than this).
 CONSENSUS = 0.5
 
+#: Index of ``specified_species`` in a ``nodes.dmp`` row (field 16 of 18).
+SPECIFIED_SPECIES = 15
+
+#: Code of the ``species`` rank in the ``ranks`` array.
+_SPECIES = _RANK_CODES["species"]
+
 #: GTDB rank prefixes in lineage order.
 GTDB_RANKS: tuple[str, ...] = ("d", "p", "c", "o", "f", "g", "s")
 
 
 class NcbiTree:
-    """``nodes.dmp`` parents and major ranks, and ``merged.dmp``, in flat arrays.
+    """``nodes.dmp`` parents, major ranks and formal species, and ``merged.dmp``.
 
-    A taxid indexes the arrays directly (the largest is a few million), which
-    keeps the 2.7 million nodes of the taxdump to a few tens of megabytes.
+    Three flat arrays indexed by taxid (the largest is a few million), which
+    keeps the 3 million nodes of the taxdump to a few tens of megabytes, plus
+    the merged-taxid mapping.
     """
 
-    def __init__(self, parents: array[int], ranks: array[int], merged: Mapping[int, int]):
+    def __init__(
+        self,
+        parents: array[int],
+        ranks: array[int],
+        specified: array[int],
+        merged: Mapping[int, int],
+    ):
         self._parents = parents
         self._ranks = ranks
+        #: ``nodes.dmp``'s ``specified_species``: 1 when a species in the node's
+        #: lineage has a formal name (see :meth:`lift`).
+        self._specified = specified
         self.merged = merged
 
     @classmethod
     def from_files(cls, nodes_path: Path, merged_path: Path) -> NcbiTree:
         parents: array[int] = array("i")
         ranks: array[int] = array("B")
+        specified: array[int] = array("B")
         with open(nodes_path, encoding="utf-8", errors="replace") as handle:
             for line in handle:
-                parts = line.split("|", 3)
+                parts = line.split("\t|\t")
                 if len(parts) < 3:
                     continue
                 try:
@@ -109,12 +135,17 @@ class NcbiTree:
                     grow = taxid + 1 - len(parents)
                     parents.extend([0] * grow)
                     ranks.extend([0] * grow)
+                    specified.extend([0] * grow)
                 parents[taxid] = parent
                 name = MAJOR_RANKS.get(parts[2].strip().lower())
                 ranks[taxid] = _RANK_CODES[name] if name else 0
+                # A row without the documented column (an older or a test
+                # taxdump) means "unknown": keep a species rather than lift it.
+                flag = parts[SPECIFIED_SPECIES].strip() if len(parts) > SPECIFIED_SPECIES else "1"
+                specified[taxid] = 0 if flag == "0" else 1
         with open(merged_path, encoding="utf-8", errors="replace") as handle:
             merged = dict(ncbi_taxonomy.iter_merged(handle))
-        return cls(parents, ranks, merged)
+        return cls(parents, ranks, specified, merged)
 
     def current(self, taxid: int) -> int:
         """``taxid`` with merged taxids followed (bounded, a loop stops)."""
@@ -146,7 +177,14 @@ class NcbiTree:
         return chain
 
     def lift(self, taxid: int) -> int | None:
-        """The nearest ancestor-or-self with a major rank, or ``None``.
+        """The nearest ancestor-or-self that is a real placement, or ``None``.
+
+        That is the nearest node with a major rank (species ... domain) that is
+        not an **informal species**: NCBI gives a species node without a formal
+        name (``specified_species`` 0: *Clostridia bacterium*, *uncultured
+        Collinsella sp.*) no placement of its own, so the lift continues to the
+        genus, family, class, ... above it.  A formal species (a binomial) is
+        returned as it is.
 
         ``None`` for a taxid the taxdump does not have, one below an
         uninformative node (``UNINFORMATIVE_ANCESTORS``), or one whose
@@ -155,7 +193,14 @@ class NcbiTree:
         chain = self.ancestors(self.current(taxid))
         if not chain or UNINFORMATIVE_ANCESTORS.intersection(chain):
             return None
-        return next((node for node in chain if self._ranks[node]), None)
+        for node in chain:
+            rank = self._ranks[node]
+            if not rank:
+                continue
+            if rank == _SPECIES and not self._specified[node]:
+                continue
+            return node
+        return None
 
 
 def consensus(
@@ -165,8 +210,9 @@ def consensus(
 
     ``weights`` maps an already lifted taxid to the number of genomes that have
     it.  The consensus is the deepest node that strictly more than
-    ``threshold`` of the genomes have as ancestor-or-self, lifted to a major
-    rank; ``None`` when no informative node qualifies.
+    ``threshold`` of the genomes have as ancestor-or-self, lifted with
+    :meth:`NcbiTree.lift` (so an informal species never wins); ``None`` when no
+    informative node qualifies.
     """
     total = sum(weights.values())
     if total <= 0:
