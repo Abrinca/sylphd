@@ -874,7 +874,7 @@
       el('ul', null,
         el('li', { text: 'The sample contains no bacteria or archaea that are close to a GlobDB genome (GlobDB covers mostly those), or they are present at very low coverage.' }),
         el('li', { text: 'The sample is small: sylph needs enough reads to see a genome’s k-mers (about 0.1x coverage or more).' }),
-        el('li', { text: 'Try a lower minimum ANI or fewer required k-mers under Options (below the default, results get less reliable).' })));
+        el('li', { text: 'Try a lower minimum ANI or fewer required k-mers (below the default, results get less reliable).' })));
   }
 
   /* ---------------------------------------------------- abundance chart */

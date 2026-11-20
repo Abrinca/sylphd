@@ -512,7 +512,8 @@ def add_setup_parser(subparsers: argparse._SubParsersAction) -> None:
         "--ncbi-taxonomy",
         action="store_true",
         help=(
-            "give the sylph-tax keys that GTDB does not cover an NCBI lineage "
+            "give the sylph-tax keys that GTDB does not cover an NCBI lineage, "
+            "and those with no NCBI assembly (GlobDB MAGs) a nearest NCBI taxon "
             "(streams the assembly summaries and downloads NCBI's taxdump each run; "
             "nothing is kept in --cache-dir afterwards)"
         ),
