@@ -39,6 +39,7 @@ from starlette.routing import Route
 
 from . import __version__, per_contig
 from .about import About
+from .messages import Messages
 from .assembly import INTERPRETATION_THRESHOLDS
 from .limits import (
     TOKEN_SCOPE_KEY,
@@ -158,6 +159,8 @@ class ServerConfig:
     #: The operator's about text (``/info`` ``about``); the caller builds it,
     #: so a bad file fails before the database is loaded.
     about: About = field(default_factory=lambda: About(None))
+    #: The operator's messages (``GET /messages``); built by the caller, like ``about``.
+    messages: Messages = field(default_factory=lambda: Messages(None))
     #: Set when serving on a Unix socket, so the app can adjust its mode.
     socket_path: Path | None = None
     #: Contigs accepted in one ``POST /contigs`` request (``--max-contigs``);
@@ -244,6 +247,11 @@ async def _info(request: Request) -> JSONResponse:
     )
 
 
+async def _messages(request: Request) -> JSONResponse:
+    """The operator's messages (``--messages``), an empty list without the option."""
+    return JSONResponse({"messages": request.app.state.messages.items})
+
+
 def _usage_info(usage: Usage | None) -> dict[str, Any]:
     if usage is None:
         return {"enabled": False}
@@ -273,7 +281,7 @@ def _taxonomy_info(state: Any) -> dict[str, Any]:
 
 
 def _endpoints(state: Any) -> list[str]:
-    endpoints = ["/health", "/info", "/profile", "/query", "/assembly", "/contigs"]
+    endpoints = ["/health", "/info", "/messages", "/profile", "/query", "/assembly", "/contigs"]
     if state.usage is not None:
         endpoints.append("/usage")
     if state.taxdb is not None:
@@ -757,6 +765,7 @@ def create_app(
         Route("/", _index, methods=["GET"]),
         Route("/health", _health, methods=["GET"]),
         Route("/info", _info, methods=["GET"]),
+        Route("/messages", _messages, methods=["GET"]),
         Route("/profile", _profile, methods=["POST"]),
         Route("/query", _query, methods=["POST"]),
         Route("/assembly", _assembly, methods=["POST"]),
@@ -787,6 +796,7 @@ def create_app(
     app.state.max_queue = config.max_queue
     app.state.name = config.name
     app.state.about = config.about
+    app.state.messages = config.messages
     app.state.usage = config.usage
     app.state.taxdb = taxdb
     app.state.require_token = config.require_token

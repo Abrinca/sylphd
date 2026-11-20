@@ -38,6 +38,7 @@ from .assembly import (
     is_gzip,
     parse_assembly,
 )
+from .catalog import DATABASES
 from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
 from .protocol import ProfileParams, result_row
 from .sketchcheck import SketchFormatError, SketchHeader, parse_sketch_header
@@ -189,7 +190,20 @@ class LoadedDatabase:
             "screen_c": self.screen_c,
             "two_stage": self.two_stage,
             "gtdb": self.gtdb,
+            "licence": self.licence(),
         }
+
+    def licence(self) -> dict[str, str] | None:
+        """The data licence the catalogue knows for this file name, else ``None``.
+
+        Matched on the file name, not the ``--db`` alias, so a renamed alias
+        keeps its licence and an unknown file reports no licence (never a guess).
+        """
+        entry = DATABASES.get(self.path.name)
+        if entry is None or entry.licence is None:
+            return None
+        name, url = entry.licence
+        return {"name": name, "url": url}
 
     def genome_names(self, limit: int) -> list[str]:
         """Up to ``limit`` genome names, spread evenly over the database.

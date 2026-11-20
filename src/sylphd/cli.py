@@ -7,6 +7,7 @@ import csv
 import json
 import logging
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -23,6 +24,7 @@ import httpx
 
 from . import per_contig_client
 from .about import About, check_name
+from .messages import Messages
 from .assembly import gtdb_species, hit_lineage, species_caveat
 from .cli_parser import PROG, build_parser
 from .client import ClientError, TokenWarning, connect
@@ -145,6 +147,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     name = check_name(args.name)
     about = About(Path(args.about) if args.about else None)
     try:
+        messages = Messages(Path(args.messages) if args.messages else None)
         specs = parse_db_specs(args.db)
         usage = Usage(Path(args.usage_db)) if args.usage_db else None
         tokens = (
@@ -177,6 +180,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         cors_origins=tuple(args.cors_origin or ()),
         name=name,
         about=about,
+        messages=messages,
         usage=usage,
     )
     socket_path = None
@@ -271,6 +275,8 @@ def _log_startup(
         extras.append(f"cors={','.join(config.cors_origins)}")
     if config.about.path:
         extras.append(f"about={config.about.path}")
+    if config.messages.path:
+        extras.append(f"messages={config.messages.path}")
     if config.usage is not None:
         extras.append(f"usage-db={config.usage.path}")
     print(
@@ -517,6 +523,7 @@ def _run_contain(
         requested_taxonomies = None
     with _client_from_args(args) as client:
         info = client.info()
+        _note_messages(client, quiet=getattr(args, "quiet", False))
         _note_usage(client, info)
         database = info["database"]
         metadata = info.get("metadata")
@@ -604,6 +611,34 @@ def _profile_caveats(samples: Sequence[dict[str, Any]]) -> list[str]:
             if note and note not in notes:
                 notes.append(note)
     return notes
+
+
+_MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
+
+
+def _plain_text(markdown: str) -> str:
+    """Markdown as plain text for a terminal: links as ``text (url)``, emphasis dropped."""
+    text = _MARKDOWN_LINK.sub(
+        lambda m: m.group(2) if m.group(1) == m.group(2) else f"{m.group(1)} ({m.group(2)})",
+        markdown,
+    )
+    return re.sub(r"(\*\*|__|`)", "", text)
+
+
+def _note_messages(client: Any, *, quiet: bool = False) -> None:
+    """Print the server's warning and danger messages on stderr, once per run.
+
+    ``info`` messages are for the web page only.  Never fails a run: a server
+    without ``/messages`` (or a slow one) simply prints nothing.
+    """
+    if quiet:
+        return
+    for item in client.messages():
+        if item["level"] == "info":
+            continue
+        label = "DANGER" if item["level"] == "danger" else "warning"
+        body = " ".join(_plain_text(item["message"]).split())
+        print(f"{PROG}: {label}: {item['title']}: {body}", file=sys.stderr)
 
 
 def _note_usage(client: Any, info: dict[str, Any], *, quiet: bool = False) -> None:
@@ -829,6 +864,7 @@ def cmd_assembly(args: argparse.Namespace) -> int:
     _check_output_file(args.output)
     with _client_from_args(args) as client:
         info = client.info()
+        _note_messages(client, quiet=args.quiet)
         _note_usage(client, info, quiet=args.quiet or args.json)
         if args.local_sketch:
             # The assembly is sketched here and only the sketch is uploaded: the sequence
@@ -957,6 +993,7 @@ def _cmd_assembly_per_contig(args: argparse.Namespace, path: Path) -> int:
     _check_output_file(args.output)
     with _client_from_args(args) as client:
         info = client.info()
+        _note_messages(client, quiet=args.quiet)
         _note_usage(client, info, quiet=args.quiet or args.json)
         metadata = info.get("metadata")
         options = per_contig_client.PerContigOptions(

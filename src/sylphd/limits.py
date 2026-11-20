@@ -202,7 +202,7 @@ TOKEN_SCOPE_KEY = "sylphd.token_valid"
 
 #: Paths a server that requires a token still answers without one, so a
 #: client can find out that it needs one.
-OPEN_PATHS = frozenset({"/", "/health", "/info"})
+OPEN_PATHS = frozenset({"/", "/health", "/info", "/messages"})
 
 
 class TokenMiddleware:

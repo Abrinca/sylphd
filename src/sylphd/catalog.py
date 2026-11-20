@@ -13,6 +13,12 @@ from dataclasses import dataclass
 # ---------------------------------------------------------------------------
 
 
+#: GTDB and GlobDB both license their data CC BY-SA 4.0.  Every other catalogue
+#: entry (UHGV, RefSeq fungi, OceanDNA, SMAG, UHGG) stays ``None``: we have not
+#: verified a licence from its publisher, and a guess would be worse than "unknown".
+CC_BY_SA_4 = ("CC BY-SA 4.0", "https://creativecommons.org/licenses/by-sa/4.0/")
+
+
 @dataclass(frozen=True)
 class Database:
     """A pre-built sylph database and where to get it.
@@ -33,6 +39,8 @@ class Database:
     description: str = ""
     taxonomy: str | None = None
     taxonomy_alternatives: tuple[str, ...] = ()
+    #: The data licence as ``(name, url)``; ``None`` when not verified.
+    licence: tuple[str, str] | None = None
 
 
 _FAUST = "http://faust.compbio.cs.cmu.edu/sylph-stuff/"
@@ -70,6 +78,7 @@ DATABASES: dict[str, Database] = {
             c=200,
             description="GTDB r232 species representatives, two-stage (recommended)",
             taxonomy="GTDB_r232",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "gtdb-r232-c200-dbv1.syldb",
@@ -79,6 +88,7 @@ DATABASES: dict[str, Database] = {
             c=200,
             description="GTDB r232 species representatives, c200",
             taxonomy="GTDB_r232",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "gtdb-r232-c1000-dbv1.syldb",
@@ -88,6 +98,7 @@ DATABASES: dict[str, Database] = {
             c=1000,
             description="GTDB r232 species representatives, c1000",
             taxonomy="GTDB_r232",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "gtdb-r226-c200-dbv2.syl2db",
@@ -97,6 +108,7 @@ DATABASES: dict[str, Database] = {
             c=200,
             description="GTDB r226 species representatives, two-stage",
             taxonomy="GTDB_r226",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "gtdb-r226-c200-dbv1.syldb",
@@ -106,6 +118,7 @@ DATABASES: dict[str, Database] = {
             c=200,
             description="GTDB r226 species representatives, c200",
             taxonomy="GTDB_r226",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "gtdb-r226-c1000-dbv1.syldb",
@@ -115,6 +128,7 @@ DATABASES: dict[str, Database] = {
             c=1000,
             description="GTDB r226 species representatives, c1000",
             taxonomy="GTDB_r226",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "gtdb-r220-c200-dbv1.syldb",
@@ -123,6 +137,7 @@ DATABASES: dict[str, Database] = {
             c=200,
             description="GTDB r220 species representatives, c200",
             taxonomy="GTDB_r220",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "gtdb-r220-c1000-dbv1.syldb",
@@ -131,6 +146,7 @@ DATABASES: dict[str, Database] = {
             c=1000,
             description="GTDB r220 species representatives, c1000",
             taxonomy="GTDB_r220",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "v0.3-c200-gtdb-r214.syldb",
@@ -139,6 +155,7 @@ DATABASES: dict[str, Database] = {
             c=200,
             description="GTDB r214 species representatives, c200",
             taxonomy="GTDB_r214",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "v0.3-c1000-gtdb-r214.syldb",
@@ -147,6 +164,7 @@ DATABASES: dict[str, Database] = {
             c=1000,
             description="GTDB r214 species representatives, c1000",
             taxonomy="GTDB_r214",
+            licence=CC_BY_SA_4,
         ),
         # -- other prokaryotes -----------------------------------------
         _hosted(
@@ -163,6 +181,7 @@ DATABASES: dict[str, Database] = {
             c=200,
             description="GlobDB r232, two-stage (no Google mirror)",
             taxonomy="GlobDB_r232",
+            licence=CC_BY_SA_4,
         ),
         _hosted(
             "OceanDNA-c200-v0.3.syldb",

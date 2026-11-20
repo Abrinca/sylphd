@@ -110,6 +110,10 @@ class ClientError(RuntimeError):
         self.status_code = status_code
 
 
+#: Seconds ``GET /messages`` may take; a client must not wait on an optional extra.
+MESSAGES_TIMEOUT = 3.0
+
+
 def default_timeout() -> httpx.Timeout:
     """No read timeout (profiling can be slow), 30 s to connect."""
     return httpx.Timeout(None, connect=30.0)
@@ -357,6 +361,31 @@ class SylphClient:
 
     def info(self) -> dict[str, Any]:
         return self._request("GET", "info").json()
+
+    def messages(self, timeout: float = MESSAGES_TIMEOUT) -> list[dict[str, str]]:
+        """The operator's messages (``GET /messages``); ``[]`` when they cannot be had.
+
+        Best effort by design: an older server (404), a timeout, a connection
+        error or an odd document all give an empty list, never an exception, and
+        the request is neither retried nor counted for the token note.
+        """
+        try:
+            response = self._client.get("messages", timeout=timeout)
+            if response.status_code != 200:
+                return []
+            items = response.json()["messages"]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return []
+        if not isinstance(items, list):
+            return []
+        return [
+            item
+            for item in items
+            if isinstance(item, dict)
+            and item.get("level") in ("info", "warning", "danger")
+            and isinstance(item.get("title"), str)
+            and isinstance(item.get("message"), str)
+        ]
 
     def profile(
         self,

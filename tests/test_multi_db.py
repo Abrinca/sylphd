@@ -236,7 +236,7 @@ class TestPooledMatchesPysylph:
         assert entry["file"] == "ecoli.syl2db"
         # /info is public: file names only, never absolute paths.
         assert "path" not in entry and "path" not in info["database"]
-        assert {key: value for key, value in entry.items() if key not in {"file", "kind", "gtdb"}} == info["database"]
+        assert {key: value for key, value in entry.items() if key not in {"file", "kind", "gtdb", "licence"}} == info["database"]
         assert entry["kind"] == "two-stage"
         assert entry["gtdb"] is False  # this server has no metadata file
 
@@ -564,6 +564,7 @@ class TestSingleDatabaseGoldens:
         # limits.  The web app reads none of them, so the shape it depends on
         # is unchanged.
         info["endpoints"].remove("/contigs")
+        info["endpoints"].remove("/messages")
         info["limits"].pop("max_params_bytes")
         info["limits"].pop("max_contigs")
         info.pop("usage")

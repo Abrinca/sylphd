@@ -247,6 +247,17 @@ def add_serve_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     serve_parser.add_argument(
+        "--messages",
+        metavar="FILE",
+        default=None,
+        help=(
+            "JSON file (at most 64 KiB) with operator messages: a list of "
+            '{"level": "info|warning|danger", "title": ..., "message": Markdown}; '
+            "served at GET /messages, shown by the web page and, for warning and "
+            "danger, printed by the client commands; re-read when the file changes"
+        ),
+    )
+    serve_parser.add_argument(
         "--usage-db",
         metavar="FILE",
         default=None,
