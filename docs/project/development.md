@@ -38,7 +38,24 @@ only needed for manual runs.
 | `test_web_about_browser.py`, `test_web_reads_taxprof.py` | the page in headless Chromium: the operator text from `/info`, and the Reads chart from the server's `taxprof` |
 | `test_web_contigs_js.py`, `test_web_contigs_download.py` | browser per-contig sketching against pysylph, and its TSV/JSON against `sylphd assembly --per-contig` |
 | `test_web_sylsp_js.py` | `readSylspHeader` against `sylphd.sketchcheck` |
+| `test_sylph_compat.py` | byte-identical TSV against the real `sylph` binary (skipped without one), and pysylph's sketches against `sylph sketch` |
 | `web_golden.py` | helper (not a test): the single-database `/info` and `/assembly` goldens |
+
+### Checking against a new sylph release
+
+`tests/test_sylph_compat.py` runs the real `sylph` binary and sylphd on the same sylph-made
+sketches and requires the TSV of `query`, `profile` and `profile -u` to be byte-identical (only
+`Sample_file` and sylphd's extra `accession` column are dropped). A separate class compares
+pysylph's sketches with `sylph sketch` (single-end identical, paired with a small tolerance). Run it
+before and after bumping sylph or pysylph:
+
+```bash
+SYLPH_BIN=/path/to/sylph uv run pytest tests/test_sylph_compat.py -v -rs   # or sylph on PATH
+```
+
+Without a binary the module is skipped with the reason. With `SYLPH_COMPAT_REQUIRED=1` a missing
+binary is an error. In CI it is the optional "sylph compatibility" workflow, which installs
+sylph from bioconda; it is run by hand (`workflow_dispatch`) and weekly, not on every push.
 
 ## Source layout
 

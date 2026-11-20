@@ -248,6 +248,10 @@ appear only for `profile`; with `estimate_read_counts`, `Sequence_abundance` hol
 number of reads per genome (a rounded float) instead of a relative abundance. Metadata columns
 follow `accession`. Rows keep sylph's column names; in JSON `Eff_cov` is never renamed to
 `True_cov` (that is a TSV header), and `Lambda_status` is an extra field not present in the TSV.
+The TSV renders missing values as sylph does: `Eff_lambda` is `HIGH` or `LOW` according to
+`Lambda_status` when it is `null`, a missing interval is `NA-NA`, and for a sketch without read
+statistics under `estimate_unknown` `True_cov` is `inf` and the abundances are `NaN` (in JSON all of
+these are `null`).
 With `no_adjust`, `Adjusted_ANI` is the naive containment ANI and `ANI_5-95_percentile` is `null`:
 the interval still describes the disabled adjustment.
 

@@ -175,8 +175,9 @@ stock sylph 1.0.0 and sylph-tax 1.9.2 on GlobDB alone, with four samples: soil (
   identical sketches on repeated runs.
 - **Taxonomic profiles.** They differ only by rounding, because sylph-tax sums the already rounded
   values of the TSV.
-- **TSV formatting.** sylph writes `HIGH` and `NA-NA` in `Eff_lambda` and the interval columns where
-  `sylphd` currently leaves them empty; a fix is planned.
+- **TSV formatting.** sylph writes `HIGH`/`LOW` in `Eff_lambda` and `NA-NA` in the interval columns
+  where `sylphd` used to leave them empty. Fixed: the TSV is now byte-identical to sylph's for the
+  sylph columns (see `tests/test_sylph_compat.py`).
 
 ## Metadata for genomes without an NCBI record
 

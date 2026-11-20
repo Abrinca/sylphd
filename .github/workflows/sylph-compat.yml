@@ -1,0 +1,40 @@
+name: Sylph compatibility
+
+# Optional: runs tests/test_sylph_compat.py against the latest sylph from bioconda, to notice a new
+# sylph release that formats its TSV or sketches differently. Not run on push; start it by hand or
+# wait for the weekly run. To pin a release, set SYLPH_SPEC (e.g. "sylph=1.0.0").
+on:
+  workflow_dispatch:
+    inputs:
+      sylph_spec:
+        description: "bioconda spec of sylph (default: latest)"
+        default: "sylph"
+  schedule:
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.2
+      - name: Install sylph from bioconda
+        env:
+          SYLPH_SPEC: ${{ inputs.sylph_spec || 'sylph' }}
+        run: |
+          set -euo pipefail
+          curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xj bin/micromamba
+          ./bin/micromamba create -y -p "$RUNNER_TEMP/sylph-env" -c conda-forge -c bioconda "$SYLPH_SPEC"
+          "$RUNNER_TEMP/sylph-env/bin/sylph" --version
+          echo "SYLPH_BIN=$RUNNER_TEMP/sylph-env/bin/sylph" >> "$GITHUB_ENV"
+      # pysylph is built from source (Rust is preinstalled on the runner).
+      - run: uv sync
+      - name: Run the compatibility tests
+        env:
+          SYLPH_COMPAT_REQUIRED: "1"
+        run: uv run pytest tests/test_sylph_compat.py -v -rs

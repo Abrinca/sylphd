@@ -693,6 +693,11 @@ class TestFormatting:
         assert format_value("Containment_ind", [6208, 21899]) == "6208/21899"
         assert format_value("Taxonomic_abundance", 100.0) == "100.0000"
         assert format_value("Eff_lambda", None) == ""
+        assert format_value("Eff_lambda", "HIGH") == "HIGH"
+        assert format_value("ANI_5-95_percentile", None) == "NA-NA"
+        assert format_value("Adjusted_ANI", 100.4) == "100.00"
+        row = {"Eff_lambda": None, "Lambda_status": "HIGH"}
+        assert format_row(row, ["Eff_lambda"]) == "HIGH"
         assert format_value("Sample_file", "x") == "x"
         assert format_value("kmers_reassigned", 0) == "0"
 
@@ -820,7 +825,8 @@ def test_unknown_estimate_of_a_contig_sketch_is_null(tiny_database) -> None:
 
     ``sylph profile -u`` reports ``True_cov`` inf and NaN abundances for a sketch
     made from contigs; JSON has no such numbers, so they are ``null`` (and the
-    TSV cells empty) instead of failing the JSON encoding.
+    TSV cells ``inf``/``NaN``, as sylph prints them) instead of failing the
+    JSON encoding.
     """
     sketch = pysylph.Sketcher(c=200, k=31).sketch_single("clodf13", _reads(CLODF13_FASTA))
     app = create_app(ServerConfig(db_path=tiny_database))
@@ -834,7 +840,10 @@ def test_unknown_estimate_of_a_contig_sketch_is_null(tiny_database) -> None:
     assert row["Adjusted_ANI"] == pytest.approx(100.0)
     header = columns_for_mode("profile", ProfileParams(estimate_unknown=True))
     cells = dict(zip(header, format_row(row, header).split("\t")))
-    assert cells["True_cov"] == "" and cells["Sequence_abundance"] == ""
+    assert cells["True_cov"] == "inf"
+    assert cells["Sequence_abundance"] == cells["Taxonomic_abundance"] == "NaN"
+    assert cells["Eff_lambda"] == "LOW"
+    assert cells["ANI_5-95_percentile"] == cells["Lambda_5-95_percentile"] == "NA-NA"
 
 
 class TestPrivilegedToken:

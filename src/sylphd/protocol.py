@@ -452,16 +452,35 @@ def _format_float(value: float, digits: int) -> str:
 
 
 def format_value(column: str, value: Any) -> str:
-    """Format one cell of the TSV output, mirroring sylph's formatting."""
+    """Format one cell of the TSV output, mirroring sylph's formatting.
+
+    ``None`` stands for what sylph prints in that column: ``NA-NA`` for a
+    missing confidence interval, ``inf`` for ``True_cov`` and ``NaN`` for the
+    abundances of a sketch without read statistics (``-u``).  ``Eff_lambda``
+    is ``HIGH``/``LOW`` in sylph when lambda cannot be estimated; that needs
+    ``Lambda_status``, so :func:`format_row` handles it.  Metadata columns
+    and anything else unknown stay empty.
+    """
     if value is None:
+        if column in {"ANI_5-95_percentile", "Lambda_5-95_percentile"}:
+            return "NA-NA"
+        if column in {"Eff_cov", "True_cov"}:
+            return "inf"
+        if column in {"Taxonomic_abundance", "Sequence_abundance"}:
+            return "NaN"
         return ""
     if column in {"Sample_file", "Genome_file", "Contig_name", "accession"}:
         return str(value)
-    if column == "Adjusted_ANI" or column == "Naive_ANI":
+    if column == "Adjusted_ANI":
+        # sylph caps the adjusted ANI at 100; the naive ANI is not capped.
+        return _format_float(min(float(value), 100.0), 2)
+    if column == "Naive_ANI":
         return _format_float(float(value), 2)
     if column in {"Eff_cov", "True_cov", "Mean_cov_geq1"}:
         return _format_float(float(value), 3)
     if column == "Eff_lambda":
+        if isinstance(value, str):  # "HIGH" / "LOW"
+            return value
         return _format_float(float(value), 3)
     if column in {"ANI_5-95_percentile", "Lambda_5-95_percentile"}:
         low, high = value  # type: ignore[misc]
@@ -508,6 +527,11 @@ def format_row(row: Mapping[str, Any], header: Sequence[str]) -> str:
         value = row.get(column)
         if column == "True_cov" and "True_cov" not in row and "Eff_cov" in row:
             value = row["Eff_cov"]
+        if column == "Eff_lambda" and value is None:
+            # sylph: HIGH (median coverage too high) or LOW (not estimable).
+            status = row.get("Lambda_status")
+            if status in ("HIGH", "LOW"):
+                value = status
         cells.append(format_value(column, value))
     return "\t".join(cells)
 
