@@ -1,7 +1,7 @@
 [project]
 site_name = "sylphd"
 site_url = "https://abrinca.github.io/sylphd/docs/"
-site_description = "A long-running sylph server that keeps a GTDB database in memory, with a sketching client, a metadata database and a small web app."
+site_description = "A long-running sylph server that keeps a sylph database (GlobDB on the public server) in memory, with a sketching client, a metadata database and a small web app."
 site_author = "Abrinca"
 copyright = "AGPL-3.0-or-later &middot; Abrinca"
 docs_dir = "docs"

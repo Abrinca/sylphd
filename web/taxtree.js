@@ -134,6 +134,12 @@
   // for the other ranked names. Catalogue IDs (vOTU-171526) have no public page.
   function taxonLinks(data) {
     if (!data.token || !/__/.test(data.token)) return [];
+    // GlobDB uses GTDB's names; its extra species are named after a catalogue id (`Arthrobacter
+    // MOTU40_060779`) that GTDB does not know, so only the higher ranks link to GTDB.
+    if (/^GlobDB/i.test(data.source || '')) {
+      if (/\s[A-Z][A-Z0-9]*_?\d+$/.test(parseToken(data.token).name)) return [];
+      return [['Open in GTDB', `https://gtdb.ecogenomic.org/tree?r=${encodeURIComponent(data.token)}`]];
+    }
     if (/^GTDB/i.test(data.source || '')) return [['Open in GTDB', `https://gtdb.ecogenomic.org/tree?r=${encodeURIComponent(data.token)}`]];
     return [['Search NCBI Taxonomy', `https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?name=${encodeURIComponent(parseToken(data.token).name)}`]];
   }

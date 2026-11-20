@@ -872,7 +872,7 @@
       el('h2', { text: 'No genomes detected' }),
       el('p', null, `No database genome passed the thresholds${min != null ? ` (minimum ANI ${min} %)` : ''}. Likely reasons:`),
       el('ul', null,
-        el('li', { text: 'The sample contains no bacteria or archaea that are close to a GTDB genome (GTDB covers only those), or they are present at very low coverage.' }),
+        el('li', { text: 'The sample contains no bacteria or archaea that are close to a GlobDB genome (GlobDB covers mostly those), or they are present at very low coverage.' }),
         el('li', { text: 'The sample is small: sylph needs enough reads to see a genome’s k-mers (about 0.1x coverage or more).' }),
         el('li', { text: 'Try a lower minimum ANI or fewer required k-mers under Options (below the default, results get less reliable).' })));
   }
@@ -1310,6 +1310,12 @@
     const tv = { sortKey: 'rank', sortDir: 'asc', open: new Set(), all: false };
     const td = (label, cls, ...content) => el('td', { class: cls, 'data-label': label }, el('div', { class: 'cv' }, content));
     const dash = () => el('span', { class: 'dash', text: '–' });
+    // No accession: a GlobDB genome of another catalogue is named by its file, without a link.
+    function accessionCell(r) {
+      if (has(r.accession)) return S.accessionLinks(r.accession, S.hitSource(r));
+      const id = S.genomeFileId(r);
+      return id ? el('span', { class: 'mono', title: r.Genome_file, text: id }) : S.accessionLinks(null);
+    }
     function row({ r, i, lin, tax, species }) {
       const key = r.accession || r.Genome_file || `#${i}`;
       const ci = Array.isArray(r['ANI_5-95_percentile']) ? r['ANI_5-95_percentile'] : null;
@@ -1345,7 +1351,7 @@
               ? el('div', { class: 'sub', title: `no NCBI assembly record: the consensus NCBI taxon of the GTDB clade ${r.ncbi_nearest_clade}` },
                 'nearest taxid ', S.taxidLink(r.ncbi_nearest_taxid))
               : has(r.ncbi_taxid) ? el('div', { class: 'sub' }, 'taxid ', S.taxidLink(r.ncbi_taxid)) : null) : dash()),
-        td('Accession', null, S.accessionLinks(r.accession, S.hitSource(r))));
+        td('Accession', null, accessionCell(r)));
     }
 
     const table = S.sortableTable({

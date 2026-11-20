@@ -12,7 +12,14 @@ You are using sylphd. If it helps your research, please cite the chain of work i
   containment estimation with sylph (2024). *Nature Biotechnology*.
   [doi:10.1038/s41587-024-02412-y](https://doi.org/10.1038/s41587-024-02412-y).
   [GitHub](https://github.com/bluenote-1577/sylph), [Docs](https://sylph-docs.github.io/)
-- **GTDB**: taxonomy and genome metadata (<https://gtdb.ecogenomic.org/>), as GTDB recommends:
+- **GlobDB**: the genome database of the public server (<https://globdb.org/>), release 232.
+  Licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); GlobDB integrates many
+  source catalogues, please cite those as appropriate ([list](https://globdb.org/citations)).
+    - Speth DR, Pullen N, Aroney STN, Coltman BL, Osvatic J, Woodcroft BJ, Rattei T, Wagner M.
+      GlobDB: a comprehensive species-dereplicated microbial genome resource (2025).
+      *Bioinformatics Advances* 5(1):vbaf280.
+      [doi:10.1093/bioadv/vbaf280](https://doi.org/10.1093/bioadv/vbaf280)
+- **GTDB**: cited for the taxonomy (GlobDB uses GTDB lineages) and the genome metadata (<https://gtdb.ecogenomic.org/>), as GTDB recommends:
     - Parks DH, Chaumeil P-A, Mussig AJ, Rinke C, Chuvochina M, Hugenholtz P. GTDB release 10: a
       complete and systematic taxonomy for 715 230 bacterial and 17 245 archaeal genomes (2025).
       *Nucleic Acids Research*.

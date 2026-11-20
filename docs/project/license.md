@@ -10,6 +10,10 @@ The metadata database that `sylphd setup` builds is derived from GTDB data, and 
 terms; see <https://gtdb.ecogenomic.org/>. sylph and pysylph, on which sylphd depends, are MIT
 licensed.
 
+The public server's database [GlobDB](https://globdb.org/) is licensed
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) (and propagates the licences of
+its source catalogues); UHGV and RefSeq fungi come with their own terms. See [Citing](citing.md).
+
 ## Third-party code
 
 The web page vendors three libraries, unmodified, in `web/vendor/` (with their licenses and

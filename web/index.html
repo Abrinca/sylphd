@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>sylphd – identify assemblies and profile reads against GTDB</title>
-  <meta name="description" content="Find the closest GTDB genomes to a bacterial or archaeal assembly, or profile sequencing reads (sketched locally in your browser) with sylph k-mer ANI.">
+  <title>sylphd – identify assemblies and profile reads against GlobDB</title>
+  <meta name="description" content="Find the closest GlobDB genomes (GTDB taxonomy) to a bacterial or archaeal assembly, or profile sequencing reads (sketched locally in your browser) with sylph k-mer ANI.">
   <link rel="icon" type="image/svg+xml" href="img/sylphd-icon-tile.svg">
   <link rel="stylesheet" href="style.css">
   <script src="config.js"></script>
@@ -26,7 +26,7 @@
       <div class="header-row">
         <div class="brand">
           <h1><a href="#" id="home-link" title="Back to the start"><picture class="logo"><source media="(prefers-color-scheme: dark)" srcset="img/sylphd-icon-tile.svg"><img src="img/sylphd-icon.svg" alt="" width="44" height="44"></picture>sylphd</a></h1>
-          <p class="tagline">Identify bacterial and archaeal genomes against <a href="https://gtdb.ecogenomic.org/" rel="noopener">GTDB</a> with <a href="https://github.com/bluenote-1577/sylph" rel="noopener">sylph</a> k-mer ANI: the closest genomes of an assembly, or a taxonomic profile of your reads. <a href="./docs/">Docs</a>.</p>
+          <p class="tagline">Identify bacterial and archaeal genomes against <a href="https://globdb.org/" rel="noopener">GlobDB</a> (GTDB taxonomy) with <a href="https://github.com/bluenote-1577/sylph" rel="noopener">sylph</a> k-mer ANI: the closest genomes of an assembly, or a taxonomic profile of your reads. <a href="./docs/">Docs</a>.</p>
         </div>
       </div>
       <section id="server-panel" class="server-panel" data-state="checking" aria-label="Server">
@@ -117,7 +117,7 @@
         <a class="mode-card" href="#assembly" id="card-assembly">
           <span class="mode-icon"><svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><use href="#i-assembly"/></svg></span>
           <h3>Identify an assembly</h3>
-          <p class="mode-lead">Find the closest GTDB genomes of a bacterial or archaeal genome and get a species call.</p>
+          <p class="mode-lead">Find the closest GlobDB genomes of a bacterial or archaeal genome and get a species call.</p>
           <ul class="mode-facts">
             <li>Paste FASTA or upload a file (gzip is fine, up to <strong>2&nbsp;GB</strong>), or a <code>.sylsp</code> sketch you made earlier</li>
             <li>Species call at 95&nbsp;% ANI, with the lineage relation of every hit</li>
@@ -259,7 +259,13 @@
         <span class="cite-links"><a href="https://github.com/bluenote-1577/sylph" rel="noopener">GitHub</a> &middot; <a href="https://sylph-docs.github.io/" rel="noopener">Docs</a></span>
       </li>
       <li>
-        <b>GTDB</b> &mdash; taxonomy and genome metadata.
+        <b>GlobDB</b> &mdash; the genome database searched (release 232, with UHGV and RefSeq fungi).
+        Speth DR, Pullen N, Aroney STN, Coltman BL, Osvatic J, Woodcroft BJ, Rattei T, Wagner M. GlobDB: a comprehensive species-dereplicated microbial genome resource (2025). <cite>Bioinformatics Advances</cite> 5(1):vbaf280. <a href="https://doi.org/10.1093/bioadv/vbaf280" rel="noopener">doi:10.1093/bioadv/vbaf280</a><br>
+        GlobDB data: <a href="https://creativecommons.org/licenses/by-sa/4.0/" rel="noopener">CC BY-SA 4.0</a>. GlobDB integrates many source catalogues; please cite those as appropriate (<a href="https://globdb.org/citations" rel="noopener">list</a>).
+        <span class="cite-links"><a href="https://globdb.org/" rel="noopener">globdb.org</a></span>
+      </li>
+      <li>
+        <b>GTDB</b> &mdash; cited for the taxonomy (GlobDB uses GTDB lineages) and the genome metadata.
         Parks DH, Chaumeil P-A, Mussig AJ, Rinke C, Chuvochina M, Hugenholtz P. GTDB release 10: a complete and systematic taxonomy for 715&#8239;230 bacterial and 17&#8239;245 archaeal genomes (2025). <cite>Nucleic Acids Research</cite>. <a href="https://doi.org/10.1093/nar/gkaf1040" rel="noopener">doi:10.1093/nar/gkaf1040</a><br>
         Parks DH, Chuvochina M, Rinke C, Mussig AJ, Chaumeil P-A, Hugenholtz P. GTDB: an ongoing census of bacterial and archaeal diversity through a phylogenetically consistent, rank normalized and complete genome-based taxonomy (2022). <cite>Nucleic Acids Research</cite> 50(D1):D785&#8211;D794. <a href="https://doi.org/10.1093/nar/gkab776" rel="noopener">doi:10.1093/nar/gkab776</a>
         <span class="cite-links"><a href="https://gtdb.ecogenomic.org/" rel="noopener">gtdb.ecogenomic.org</a></span>

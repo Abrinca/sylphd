@@ -48,15 +48,15 @@ speed. **Cancel** stops the workers immediately.
   fraction*, on by default).
 - **Abundance:** three charts, switched with **Chart** (the choice is kept in this browser).
   *Bars* (the default) is described below. *Sunburst* and *Treemap* show every taxonomy source in
-  one chart: one bin per source (e.g. `GTDB_r232`, `UHGV_default`), subdivided by that source's own
+  one chart: one bin per source (e.g. `GlobDB_r232`, `UHGV_default`), subdivided by that source's own
   ranks down to species (or vOTU), from the server's *All sources* profile (sylph-tax's merged
   tree, the `.sylphmpa` of the download button); a chain of single children is one node, e.g.
-  *GTDB_r232 › Bacteria*. In the sequence view the reads in no database are their own bin (plain grey), so a
+  *GlobDB_r232 › Bacteria*. In the sequence view the reads in no database are their own bin (plain grey), so a
   poorly covered sample shows its dark matter at a glance. Click a sector or box to zoom in; the
   sunburst zooms out with its centre (its rings widen as you zoom in, labels that do not fit are
   hidden); the treemap zooms out with the path below it, pans by dragging and zooms with the mouse wheel
   (*Reset view* or Escape lays it out again). Right click a sector or box (or press and hold it
-  on a touch screen) for its rank, value, lineage and a link (GTDB's tree browser for GTDB clades,
+  on a touch screen) for its rank, value, lineage and a link (GTDB's tree browser for GTDB and GlobDB clades, except GlobDB's own species,
   an NCBI Taxonomy search for other ranked names). **Download SVG** saves the chart as drawn,
   zoom included. **Unknown reads: Hide** (in every chart) leaves the unknown
   share out and rescales the rest to shares of the reads found in the databases, as `sylph
@@ -80,7 +80,7 @@ speed. **Cancel** stops the workers immediately.
   copies, which small, abundant phages dominate when viral catalogs are profiled with GTDB.
 - **Detected genomes:** a sortable table with both abundances, the adjusted ANI (and its 5–95 %
   interval), the effective coverage, the GTDB species and lineage, the NCBI organism and taxid, and
-  links to NCBI plus, for a GTDB hit, GTDB (otherwise a badge naming the hit's taxonomy source).
+  links to NCBI plus, for a GTDB genome, GTDB (otherwise a badge naming the hit's taxonomy source). A GlobDB genome that is not in GTDB (`MOTU…`, `SPIREOTU_…`, …) has no public genome page and is shown by its ID without a link.
 - **Downloads:** the table as TSV (the same columns as `sylphd profile`), the response as JSON, the
   taxonomic profile as `.sylphmpa` (the same file as `sylphd profile --taxprof`, for the selected
   taxonomy; a source's file is `sylph-tax taxprof -t <source>`), the merged sylph-tax profile of

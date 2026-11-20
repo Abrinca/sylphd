@@ -10,6 +10,10 @@ authoritative version; this is a summary.
   use (your own samples, scripts and pipelines), through the API.
 - Commercial use and heavy or bulk programmatic use (also if you regularly hit the rate limit)
   need an agreement with us first.
+- The service searches [GlobDB](https://globdb.org/) r232 (Speth et al. 2025,
+  [doi:10.1093/bioadv/vbaf280](https://doi.org/10.1093/bioadv/vbaf280)), UHGV and RefSeq fungi.
+  GlobDB data is licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/);
+  taxonomy is [GTDB](https://gtdb.ecogenomic.org/)'s. Please attribute them when you publish.
 - Through the API you can send a sketch (preferred) or a raw FASTA/FASTQ file to `/assembly`. The
   server sketches raw sequences in memory and neither stores nor logs them, but unlike a sketch
   they do reach the server. The web page sketches in your browser, so your sequences stay on your

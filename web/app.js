@@ -110,7 +110,7 @@
   // One page, views selected by the hash: '' (landing), '#assembly', and '#reads'.
   const MODES = { assembly: 'Assembly', reads: 'Reads' };
   const TITLES = {
-    landing: 'sylphd – identify assemblies and profile reads against GTDB',
+    landing: 'sylphd – identify assemblies and profile reads against GlobDB',
     assembly: 'sylphd – identify an assembly',
     reads: 'sylphd – profile reads',
   };
@@ -1328,7 +1328,7 @@
       el('ul', null,
         el('li', { text: isNum(min) && Number(min) > 70 ? `All genomes are below the minimum ANI. Try lowering it (the lowest allowed value is 70%).` : 'No genome reaches even the lowest allowed ANI (70%).' }),
         el('li', { text: `The sequence is too small or fragmentary${isNum(q.length) ? ` (${fmtBp(q.length)}, ${fmtInt(q.sketch_kmers)} sketch k-mers)` : ''}: a handful of k-mers cannot be matched reliably. A full assembly works best.` }),
-        el('li', { text: 'The organism is novel, or not a bacterium or archaeon (GTDB covers only those), so nothing in the database is close.' })));
+        el('li', { text: 'The organism is novel, or not a bacterium or archaeon (GlobDB covers mostly those), so nothing in the database is close.' })));
   }
 
   /* gauge */
@@ -1559,6 +1559,14 @@
         ? el('a', { href: `https://gtdb.ecogenomic.org/genome?gid=${e}`, rel: 'noopener', title: 'View in GTDB', class: 'badge badge-plain', text: 'GTDB' })
         : el('span', { class: 'badge badge-plain', title: `Taxonomy source: ${source}`, text: String(source) }));
   }
+  // The genome id of a hit without an accession, from its file name (`genomes/MOTU40_002958.fa.gz`):
+  // only for GlobDB, whose genomes are one file each (UHGV hits share one `votus_full.fna.gz`).
+  function genomeFileId(h) {
+    const file = h.genome_file ?? h.Genome_file;
+    const source = h.taxonomy_source ?? h.tax_source;
+    if (!has(file) || !/^GlobDB/i.test(String(source ?? ''))) return null;
+    return String(file).split('/').pop().replace(/\.(fa|fna|fasta)(\.gz)?$/i, '') || null;
+  }
   function taxidLink(id) {
     const n = Number(id);
     if (!has(id) || !Number.isInteger(n) || n <= 0) return el('span', { class: 'dash', text: '–' });
@@ -1671,7 +1679,10 @@
     // UHGV/ICTV/genome hits have no NCBI accession: show the server's genome_id
     // (taxonomy key, or the first contig id) instead of an empty dash.
     if (has(h.genome_id)) return el('span', { class: 'mono', title: h.genome_file || h.genome_id, text: String(h.genome_id) });
-    return dash();
+    // A GlobDB genome from another catalogue (MOTU40_…, SPIREOTU_…): it has no GTDB or NCBI page,
+    // so it is named by its file, without a link.
+    const id = genomeFileId(h);
+    return id ? el('span', { class: 'mono', title: h.genome_file || h.Genome_file, text: id }) : dash();
   }
 
   function hitRow(h) {
@@ -1720,7 +1731,7 @@
   window.Sylphd = {
     el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtPct, fmtSecs, fmtDur, isNum, has, notice,
     readChoice, writeChoice, choiceModal, stem, fileStem, exportName, download, downloadJson,
-    RANK_NAMES, DEPTH, rankTitle, parseLineage, lineageName, genericRanks, genericTaxon, hitSource, relClass,
+    RANK_NAMES, DEPTH, rankTitle, parseLineage, lineageName, genericRanks, genericTaxon, hitSource, genomeFileId, relClass,
     exportButtons, seg, barRow, sortableTable,
     accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal, updateSubmit,
     assemblyInput: () => input,

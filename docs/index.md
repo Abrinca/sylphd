@@ -7,7 +7,7 @@ taxonomic profiles back as TSV or JSON, joined with GTDB metadata or another tax
 (sylph-tax).
 
 A [web app](https://abrinca.github.io/sylphd/) built on the same server needs no install and has two
-modes: it finds the closest GTDB genomes of an assembly, and it profiles sequencing reads. Both are
+modes: it finds the closest GlobDB genomes of an assembly, and it profiles sequencing reads. Both are
 sketched [in your browser](guides/profiling-in-browser.md), so the sequences never leave your computer.
 
 === "Profile reads"
@@ -20,8 +20,8 @@ sketched [in your browser](guides/profiling-in-browser.md), so the sequences nev
 === "Identify an assembly"
 
     <figure class="demo-frame">
-      <img src="img/demo-assembly.webp" alt="Demo of identifying a genome assembly in the browser with sylphd (species call at 95 % ANI and closest GTDB genomes)" loading="lazy">
-      <figcaption>Sketched locally in WebAssembly; species call at 95 % ANI &amp; closest GTDB genomes. <a href="guides/assembly/#sketching-in-the-browser">Read the guide &rarr;</a></figcaption>
+      <img src="img/demo-assembly.webp" alt="Demo of identifying a genome assembly in the browser with sylphd (species call at 95 % ANI and closest GlobDB genomes)" loading="lazy">
+      <figcaption>Sketched locally in WebAssembly; species call at 95 % ANI &amp; closest GlobDB genomes. <a href="guides/assembly/#sketching-in-the-browser">Read the guide &rarr;</a></figcaption>
     </figure>
 
 ## The idea
@@ -30,7 +30,7 @@ sketched [in your browser](guides/profiling-in-browser.md), so the sequences nev
 
 ### 1. The process was cumbersome
 
-Running `sylph` requires a bash shell, downloading ~20 GB of reference databases, enough RAM to
+Running `sylph` requires a bash shell, downloading ~20–30 GB of reference databases, enough RAM to
 hold them, and learning both `sylph` and `sylph-tax` syntax. This takes at least 30 min to 1 h for
 a bioinformatician (even with an LLM agent) and is out of reach for most biologists — and even that
 still leaves you with plain TSV files and no visualisation. Moreover, if there are many separate
@@ -63,12 +63,12 @@ flowchart LR
 Once sketching and database processes were separated, a second consequence stood out: **sketches
 are small**. Sketching a 1.2 GB `FASTQ.gz` read file produces a ~74.5 MB sketch (**16× smaller**),
 and a bacterial assembly sketches down to ~0.1 MB. Because a sketch holds only k-mer hashes and
-counts — never raw reads or file paths — neither gigabytes of reads nor ~21 GB of reference
+counts — never raw reads or file paths — neither gigabytes of reads nor ~32 GB of reference
 databases have to move across the network. That made it practical to run a **free public server**
 (`sylphd.abrinca.com`) and pair it with a WebAssembly sketcher and interactive visualisations in
 the browser — no shell, no database download, no install, and your reads never leave your computer.
 
-<div class="sketch-flow" role="figure" aria-label="Only the sketch travels: 1.2 GB FASTQ.gz reads stay in your browser or machine, only a 74.5 MB sketch crosses the internet to query 21 GB of reference databases on sylphd.abrinca.com">
+<div class="sketch-flow" role="figure" aria-label="Only the sketch travels: 1.2 GB FASTQ.gz reads stay in your browser or machine, only a 74.5 MB sketch crosses the internet to query 32 GB of reference databases on sylphd.abrinca.com">
   <div class="sketch-flow-zone sketch-flow-local">
     <div class="sketch-flow-heading">Local<br><code>sylphd client</code><br><small>your browser / machine</small></div>
     <div class="sketch-flow-local-body">
@@ -105,10 +105,10 @@ the browser — no shell, no database download, no install, and your reads never
       <div class="sketch-flow-fan" aria-hidden="true"></div>
       <div class="sketch-flow-dbs">
         <div class="sketch-flow-db">
-          <div class="sketch-flow-db-bar sketch-flow-db-gtdb" title="20.0 GB"></div>
+          <div class="sketch-flow-db-bar sketch-flow-db-globdb" title="31.19 GB"></div>
           <div>
-            <div class="sketch-flow-label">GTDB r232</div>
-            <div class="sketch-flow-meta"><strong class="sketch-flow-size">20.0 GB</strong> <small>(199k genomes)</small></div>
+            <div class="sketch-flow-label">GlobDB r232</div>
+            <div class="sketch-flow-meta"><strong class="sketch-flow-size">31.19 GB</strong> <small>(346k genomes)</small></div>
           </div>
         </div>
         <div class="sketch-flow-db">
@@ -130,6 +130,10 @@ the browser — no shell, no database download, no install, and your reads never
   </div>
 </div>
 
+The public server (`sylphd.abrinca.com`) holds **GlobDB r232** (346,232 genomes, GTDB taxonomy),
+**UHGV** and **RefSeq fungi**. GlobDB data is licensed
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); see [Citing](project/citing.md).
+
 Assemblies are sketched locally too (`sylphd assembly`, and the web app in the browser), so a server
 started without `--allow-sequences` never receives a sequence. The optional flag adds raw FASTA
 uploads for `curl` and scripts; the public instance runs with it.
@@ -142,7 +146,7 @@ uploads for `curl` and scripts; the public instance runs with it.
 - **[Profile reads in the browser](guides/profiling-in-browser.md).** Drop FASTQ files on the web
   page: they are sketched locally (WebAssembly) and only the sketch is uploaded. Abundance by rank,
   GTDB or NCBI taxonomy, downloads.
-- **[Identify an assembly](guides/assembly.md).** The closest GTDB genomes, a species assignment at
+- **[Identify an assembly](guides/assembly.md).** The closest GlobDB genomes, a species assignment at
   95 % ANI and the lineage relation of every hit.
 - **[Taxonomic profiles](guides/taxonomic-profiles.md).** `.sylphmpa` files and clade × sample
   matrices in the format of `sylph-tax`, aggregated on the server and written by the client.

@@ -6,8 +6,33 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The public server switches from GTDB r232 to GlobDB r232** (346,232 genomes, GTDB taxonomy),
+  with UHGV and RefSeq fungi (32.2 GB in total). The web page, the README and the docs say so: the
+  "idea" figure and size table are redrawn to scale (GlobDB 31.19 GB, 432× the 74.5 MB sketch), the
+  web "How to cite" list and the terms page credit GlobDB (CC BY-SA 4.0), and the GTDB entry is
+  worded as the taxonomy citation.
+- **GlobDB genomes that are not in GTDB** (`MOTU40_…`, `SPIREOTU_…`, `CRBC_…`) are named by their ID
+  without a link in the reads table (they have no GTDB, NCBI or GlobDB genome page), and the
+  taxonomy chart offers a GTDB link for GlobDB clades except for their catalogue-named species.
+  GTDB genomes in GlobDB keep their NCBI and GTDB links.
+
+- **TSV output now matches sylph's, byte for byte.** This changes the TSV (not the JSON). Where
+  `sylphd` wrote an empty cell, it now writes what sylph 1.0.0 writes: `HIGH` or `LOW` in
+  `Eff_lambda` when lambda cannot be estimated (taken from `Lambda_status`), `NA-NA` in
+  `ANI_5-95_percentile` and `Lambda_5-95_percentile` when there is no interval, and, for a sketch
+  without read statistics under `-u`, `inf` in `True_cov` and `NaN` in the abundances. `Adjusted_ANI`
+  is capped at 100 as in sylph. Scripts that tested for empty cells need updating. Metadata columns
+  still use empty cells for missing values.
+
 ### Added
 
+- **A compatibility test against the real `sylph` binary** (`tests/test_sylph_compat.py`, run with
+  `SYLPH_BIN=/path/to/sylph uv run pytest tests/test_sylph_compat.py`; skipped when no binary is
+  found). It compares `query`, `profile` and `profile -u` TSV byte for byte on shared sylph-made
+  sketches, and, separately, pysylph's sketches against `sylph sketch`. An optional CI job runs it
+  against bioconda's sylph.
 - **Web: all options visible, and an ANI slider in Reads mode.** The "Options" section of Reads mode
   and the "Consensus options" of the per-contig assembly form are no longer collapsed: every field is
   shown in a compact row (the consensus fields now share the per-contig row). Reads mode has a small

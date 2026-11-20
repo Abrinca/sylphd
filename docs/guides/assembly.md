@@ -1,6 +1,6 @@
 # Identifying an assembly
 
-`sylphd` finds the closest database genomes to one assembly — GTDB genomes on a GTDB server, and
+`sylphd` finds the closest database genomes to one assembly — GTDB or GlobDB genomes on a server with such a database, and
 viral, fungal or MAG genomes too when the server holds several databases with a format 3 metadata
 file. Both the [web app](https://abrinca.github.io/sylphd/#assembly) and the command line
 (`sylphd assembly`) **sketch the assembly locally** with the database's `c` and `k` and send only
@@ -11,7 +11,7 @@ pysylph on the command line), and a sketch of a bacterial genome is only 100–5
 ## Sketching in the browser { #sketching-in-the-browser }
 
 <figure class="demo-frame">
-  <img src="../img/demo-assembly.webp" alt="Demo of identifying a genome assembly in the browser with sylphd (species call at 95 % ANI and closest GTDB genomes)" loading="lazy">
+  <img src="../img/demo-assembly.webp" alt="Demo of identifying a genome assembly in the browser with sylphd (species call at 95 % ANI and closest GlobDB genomes)" loading="lazy">
   <figcaption>Identifying a bacterial genome assembly (<code>.fna.gz</code>) in the browser against <code>sylphd.abrinca.com</code>.</figcaption>
 </figure>
 

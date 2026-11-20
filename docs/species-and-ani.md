@@ -1,6 +1,6 @@
 # What does "same species" mean?
 
-sylphd tells you which GTDB genomes are closest to your assembly and, when the
+sylphd tells you which genomes (GTDB or GlobDB, with GTDB taxonomy) are closest to your assembly and, when the
 best hit is close enough, which species your assembly belongs to. This page
 explains what that call is based on, where it is solid, and where it needs
 care. It is background for interpreting results, not a taxonomic ruling. A
@@ -127,7 +127,7 @@ dedicated tools on the closest genomes sylphd identifies.
 
 ## Outside prokaryotes { #outside-prokaryotes }
 
-Everything above is about bacteria and archaea, the scope of GTDB. A server can
+Everything above is about bacteria and archaea, the scope of GTDB and GlobDB. A server can
 also hold viral (UHGV), fungal (RefSeq) or MAG databases, and then a species
 call may come from a taxonomy where the 95 % rule means something else.
 

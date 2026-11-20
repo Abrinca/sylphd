@@ -20,12 +20,12 @@ machine you trust, or behind a reverse proxy.
 
 ### 1. The process was cumbersome
 
-Running `sylph` requires a bash shell, downloading ~20 GB of reference databases, enough RAM to
+Running `sylph` requires a bash shell, downloading ~20–30 GB of reference databases, enough RAM to
 hold them, and learning both `sylph` and `sylph-tax` syntax. That takes at least 30 min to 1 h for
 a bioinformatician (even with an LLM agent) and is out of reach for most biologists — and still
 leaves you with plain TSV files and no visualisation. Moreover, if you make many separate `sylph`
 calls, every call has to deserialise the reference database and load it into memory (~2 s and
-~2 GB of RAM per process for GTDB r232 `c=200`, plus the 20 GB second stage on disk), which is slow
+~2 GB of RAM per process for GTDB r232 `c=200`, plus the second stage (20 GB for GTDB) on disk), which is slow
 and inefficient.
 
 ### 2. Split sylph into two processes
@@ -50,7 +50,7 @@ flowchart LR
 
 Once sketching and database lookup were split, it became clear how small sketches are (for example,
 74.5 MB for a 1.2 GB `FASTQ.gz` — 16× smaller — and ~0.1 MB for a bacterial assembly), and that
-they contain only k-mer hashes and counts, never raw reads. Because neither the reads nor ~21 GB of
+they contain only k-mer hashes and counts, never raw reads. Because neither the reads nor ~32 GB of
 reference databases need to move across the network, a free public server (`sylphd.abrinca.com`)
 with an in-browser WebAssembly sketcher and interactive visualisations became practical.
 
@@ -66,7 +66,7 @@ flowchart LR
 
     subgraph srv["Free public server: sylphd.abrinca.com"]
         direction TB
-        DB1[("<b>GTDB r232</b><br/>20.0 GB · 199,923 genomes")]
+        DB1[("<b>GlobDB r232</b><br/>31.19 GB · 346,232 genomes")]
         DB2[("<b>RefSeq fungi</b><br/>0.78 GB · 661 genomes")]
         DB3[("<b>UHGV gut viruses</b><br/>0.23 GB · 168,536 genomes")]
     end
@@ -84,7 +84,7 @@ flowchart LR
 |---|---|---:|---:|
 | Your browser / machine (stays local) | Sequencing reads (`FASTQ.gz`) | 1.2 GB | 16× larger |
 | **Over the internet (sent)** | **Sketch (k-mer hashes & counts)** | **74.5 MB** | **1×** |
-| Public server (`sylphd.abrinca.com`) | GTDB r232 (199,923 genomes) + RefSeq fungi (661) + UHGV gut viruses (168,536) | 21.0 GB | 282× larger |
+| Public server (`sylphd.abrinca.com`) | GlobDB r232 (346,232 genomes) + RefSeq fungi (661) + UHGV gut viruses (168,536) | 32.2 GB | 432× larger |
 
 ## Install
 
