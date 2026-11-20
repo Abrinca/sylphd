@@ -71,20 +71,67 @@ Keep a copy wherever you keep operational notes.
 
 The database files are not part of this repository. Put them on the host before
 running `setup-server.sh` (re-run it after adding a database) under
-`/srv/sylphd/db/`, named as `SYLPH_DB` / `SYLPH_META` say
-(`gtdb-r232-c200-dbv2.syl2db` and `meta-r232-reps.sqlite` by default), owned by
+`/srv/sylphd/db/`, named as `SYLPH_DB` / `SYLPH_META` say, owned by
 `sylphd:sylphd`. The script checks that every database named in `SYLPH_DB`
 exists and stops with the missing path otherwise.
 
-For a pooled server, list the databases in `site.env`:
+`NAME=FILE` is optional; without it the file name is the display name. One
+database is written as `SYLPH_DB=single.syldb`. `site.env.example` shows both
+configurations below.
+
+### GlobDB configuration (the public instance)
+
+```bash
+SYLPH_DB="globdb=globdb_r232_sylph_v2_c200.syl2db uhgv=uhgv_c200_dbv1.syldb fungi=fungi-refseq-2025-10-11-c200-dbv1.syldb"
+SYLPH_META=meta-globdb-r232.sqlite
+SYLPH_SERVE_ARGS="--allow-sequences --max-jobs 2 --max-contigs 100 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin *"
+```
+
+Build the metadata file once, anywhere (it is a few hundred MB, and needs the network for
+`--ncbi-taxonomy`), then copy it to `/srv/sylphd/db/`:
+
+```bash
+sylphd setup -m bac120_metadata_r232.tsv.gz ar53_metadata_r232.tsv.gz \
+    --taxonomy GlobDB_r232 --taxonomy UHGV_default --taxonomy FungiRefSeq-latest \
+    --ncbi-taxonomy --release 232 -o meta-globdb-r232.sqlite
+```
+
+Do **not** add `--reps-only` here. It drops every GTDB row whose `gtdb_representative` is not
+true, and this configuration needs the full table: GlobDB names its genomes without an assembly
+version (`GCA_041167105`), and an unversioned name resolves to the GTDB row of the *only* version
+of that base. With the non-representative rows gone, a base that GTDB has in two versions looks
+unique, so a genome can be given the wrong version's row, and a genome whose GTDB row was dropped
+looks "not covered by GTDB", so `--ncbi-taxonomy` replaces its GTDB lineage with an NCBI-only
+row (GTDB columns empty). The GlobDB_r232 ↔ GTDB_r232 overlap (199,923 keys, all of which must
+get GTDB metadata and NCBI taxids) is the check after the build: `setup` prints it. (That
+`--reps-only` would break the GlobDB case is read off the code and the unversioned-name rules; it
+was not built and compared.)
+
+**Memory.** The GlobDB configuration needs **8 GiB recommended, 7.5 GiB minimum** (the lowest
+limit under which the server starts at all; below it the server is killed while loading and
+systemd would loop on `Restart=`). It is measured in
+[the GlobDB evaluation](../docs/project/globdb-evaluation.md#memory). `sylphd.service` ships
+`MemoryMax=8G` and `MemorySwapMax=0`, which is the recommended value exactly and leaves no
+margin above it: raise it (10 GiB is comfortable; a 12 GB host has room) in a drop-in if requests
+get killed. That limit is not changed by `setup-server.sh`. Host: Oracle Ampere A1, 2 cores,
+12 GB; `--max-jobs 2` is one job per core.
+
+### GTDB configuration (alternative)
 
 ```bash
 SYLPH_DB="gtdb=gtdb-r232-c200-dbv2.syl2db uhgv=uhgv_c200_dbv1.syldb fungi=fungi-refseq-2025-10-11-c200-dbv1.syldb"
 SYLPH_META=meta-r232-reps.sqlite
 ```
 
-`NAME=FILE` is optional; without it the file name is the display name. One
-database is written exactly as before (`SYLPH_DB=single.syldb`).
+```bash
+sylphd setup -m bac120_metadata_r232.tsv.gz ar53_metadata_r232.tsv.gz \
+    --taxonomy UHGV_default --taxonomy FungiRefSeq-latest \
+    --ncbi-taxonomy --release 232 --reps-only -o meta-r232-reps.sqlite
+```
+
+Here only species representatives are in the sylph database, so `--reps-only` (about 80 MB instead
+of about 200 MB) is enough. Memory: **6 GiB recommended, 5.25 GiB minimum**, so the shipped
+`MemoryMax=8G` has headroom.
 
 1. Open TCP 80 and 443 in the cloud firewall / security list. Caddy needs them
    for the ACME HTTP-01 challenge and for HTTPS.
