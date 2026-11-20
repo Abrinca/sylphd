@@ -982,9 +982,18 @@
     const valueOf = metric === 'sequence' ? 'sequence_abundance' : 'relative_abundance';
     const lineageColumn = TAXONOMY_COLUMNS[taxonomy];
     const ownSource = sourceOf(taxonomy);
+    // A hit without an NCBI lineage may carry its nearest NCBI taxon (a genome with no NCBI record):
+    // the server places it at that node, so it is not "outside" this taxonomy.
+    const nearestDepth = (row) => {
+      if (taxonomy !== 'ncbi' || has(row.ncbi_taxonomy) || !has(row.ncbi_nearest_lineage) || !has(row.ncbi_nearest_name)) return 0;
+      const tokens = String(row.ncbi_nearest_lineage).split(';');
+      let depth = 0;
+      tokens.forEach((token, i) => { if (/__\S/.test(token)) depth = i + 1; });
+      return depth;
+    };
     const outside = (row) => (ownSource
       ? has(row.tax_source) && String(row.tax_source) !== ownSource
-      : !!lineageColumn && !has(row[lineageColumn]) && has(row.tax_source));
+      : !!lineageColumn && !has(row[lineageColumn]) && has(row.tax_source) && !nearestDepth(row));
     const bySource = new Map();
     let total = 0;
     for (const row of sample.rows || []) {
@@ -994,6 +1003,17 @@
         const source = String(row.tax_source);
         bySource.set(source, (bySource.get(source) || 0) + value);
       }
+    }
+    // Rows placed at a nearest node above this rank have no clade here: they get a group of their
+    // own at their nearest node, named as such ("Thiobacillus (nearest NCBI genus)").
+    const nearest = new Map();
+    for (const row of sample.rows || []) {
+      const at = nearestDepth(row);
+      if (!at || at >= depth) continue;
+      const value = Number((metric === 'sequence' ? row.Sequence_abundance : row.Taxonomic_abundance) || 0);
+      const label = `${row.ncbi_nearest_name} (nearest NCBI ${row.ncbi_nearest_rank})`;
+      const key = `nearest:${row.ncbi_nearest_taxid}`;
+      nearest.set(key, { key, name: label, value: ((nearest.get(key) || {}).value || 0) + value, nearest: true });
     }
     const sources = [...bySource].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
     const sourced = sources.reduce((n, src) => n + src.value, 0);
@@ -1005,6 +1025,10 @@
       const value = Number(clade[valueOf] || 0);
       groups.push({ key: clade.clade_name, name: tokenName(lastToken(clade.clade_name)), value });
       classified += value;
+    }
+    for (const group of nearest.values()) {
+      groups.push(group);
+      classified += group.value;
     }
     groups.sort((a, b) => b.value - a.value);
     return { groups, sources, none: Math.max(0, total - classified - sourced), total };
@@ -1136,7 +1160,7 @@
     const listRow = (name, value, cls, italic) => S.barRow({ swatch: `seg-${cls}`, name, value, max: maxV, text: fmtVal(value), italic });
     const listed = [...shown.map((g, i) => ({ g, cls: `cat-${(i % 10) + 1}` })), ...rest.map((g) => ({ g, cls: 'cat-other' }))];
     const limit = view.showAll ? listed.length : 15;
-    for (const { g, cls } of listed.slice(0, limit)) rowsEl.push(listRow(g.name, g.value, cls, italicRank(view.rank, g.name)));
+    for (const { g, cls } of listed.slice(0, limit)) rowsEl.push(listRow(g.name, g.value, cls, italicRank(view.rank, g.name) && !g.nearest));
     for (const src of srcs) rowsEl.push(listRow(src.label, src.value, src.cls));
     if (none > 0.0005) rowsEl.push(listRow(`Not classified at ${level} level`, none, 'cat-none'));
     if (unknown > 0.0005) rowsEl.push(listRow(UNKNOWN_LABEL, unknown, 'cat-unknown'));
@@ -1264,6 +1288,10 @@
       const cont = Array.isArray(r.Containment_ind) ? r.Containment_ind : null;
       const lineage = lin.length ? lin : tax;
       const source = S.hitSource(r);
+      // A hit without an NCBI record may be placed at its nearest NCBI taxon (setup --ncbi-taxonomy):
+      // say so, with the GTDB clade the taxon was derived from.
+      const nearest = !has(r.ncbi_taxid) && has(r.ncbi_nearest_name);
+      const nearestLabel = `${r.ncbi_nearest_name} (nearest NCBI ${r.ncbi_nearest_rank})`;
       return el('tr', { class: i === 1 ? 'top-row' : null },
         td('#', 'num rank', String(i)),
         td(taxonLabel, null, lineage.length ? el('details', { class: 'lineage', 'data-key': key, open: tv.open.has(key) ? '' : null },
@@ -1282,10 +1310,14 @@
           ci && ci.every(isNum) ? el('div', { class: 'sub', title: '5–95 % confidence interval of the adjusted ANI', text: `${ci[0].toFixed(1)}–${ci[1].toFixed(1)}` }) : null),
         td(covLabel, 'num', isNum(covOf(r)) ? covOf(r).toFixed(covOf(r) < 10 ? 2 : 1) : dash(),
           cont ? el('div', { class: 'sub', title: 'Contained k-mers / genome k-mers', text: `${fmtInt(cont[0])}/${fmtInt(cont[1])} k-mers` }) : null),
-        td('NCBI organism', null, has(r.ncbi_organism_name) || has(r.ncbi_taxid)
-          ? el('div', null, has(r.ncbi_organism_name) ? r.ncbi_organism_name : dash(),
+        td('NCBI organism', null, has(r.ncbi_organism_name) || has(r.ncbi_taxid) || nearest
+          ? el('div', null,
+            has(r.ncbi_organism_name) ? r.ncbi_organism_name : (nearest ? nearestLabel : dash()),
             has(r.ncbi_strain_identifiers) ? el('div', { class: 'sub', text: `strain ${r.ncbi_strain_identifiers}` }) : null,
-            has(r.ncbi_taxid) ? el('div', { class: 'sub' }, 'taxid ', S.taxidLink(r.ncbi_taxid)) : null) : dash()),
+            nearest
+              ? el('div', { class: 'sub', title: `no NCBI assembly record: the consensus NCBI taxon of the GTDB clade ${r.ncbi_nearest_clade}` },
+                'nearest taxid ', S.taxidLink(r.ncbi_nearest_taxid))
+              : has(r.ncbi_taxid) ? el('div', { class: 'sub' }, 'taxid ', S.taxidLink(r.ncbi_taxid)) : null) : dash()),
         td('Accession', null, S.accessionLinks(r.accession, S.hitSource(r))));
     }
 

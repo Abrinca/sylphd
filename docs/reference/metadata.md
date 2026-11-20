@@ -11,6 +11,16 @@ The key is the genome **accession**. The `RS_`/`GB_` prefix of GTDB accessions i
 `.../GCA_964372435.1_genomic.fna.gz` maps to `GCA_964372435.1`. Names without a recognisable
 accession get no metadata, and the lookup returns `null` for each column.
 
+Some catalogues name genomes without the assembly version: GlobDB r232 has
+`genomes/GCA_041167105.fa.gz`, and its sylph-tax keys are `GCA_041167105`. Such an **unversioned**
+accession is looked up as the row whose accession base (`GCA_041167105`) it is, when exactly one
+version of that base counts — a GTDB row decides first (GTDB has at most one version of a base),
+then an NCBI enrichment row, then any row. `GCA_041167105` therefore finds
+`GCA_041167105.1`, while two versions of a base are **ambiguous**: the lookup finds nothing and the
+row keeps `null` metadata rather than guessing a species. The same rule applies to
+`contains_accessions` (a database is GTDB's) and to the key overlap between a sylph-tax source and
+the [virtual GTDB source](#overlapping-sources).
+
 ## Columns
 
 | Group | Columns |
@@ -52,6 +62,12 @@ The file contains:
 - an **`info`** table with the source files and row counts, the GTDB release, the build date, the
   `sylphd` version, the format version and whether the file is representatives-only
   (`reps_only`).
+
+With `--ncbi-taxonomy` a file also has the [nearest NCBI taxa](#nearest-ncbi-taxa):
+**`taxonomy_nearest`** (`source_id`, `key` → `taxid`, the GTDB `clade` and the member `support`) and
+**`ncbi_nearest_taxon`** (`taxid` → `rank`, `name`, `lineage`). They are optional tables, not a
+format change: a file without them (an older file, or one built without the flag) is read exactly
+as before, and its rows simply have no `ncbi_nearest_*` columns.
 
 Dictionary-encoding the repetitive text brings the full release down to about **198 MiB** instead
 of about 630 MiB, while lookups stay in the low milliseconds. The file uses 8 KiB pages.
@@ -142,6 +158,11 @@ and reported once per pair, in setup order, as
 and `GET /info` (an empty list when the sources are disjoint), with `b` the later source that wins
 for those keys and up to five shared keys in `examples`.
 
+A key without an assembly version counts as the GTDB accession of the single version of its base
+(the rule of [accessions](#accessions)), so GlobDB r232 (`GCF_003697165`) shares its 199,923
+`GCA_/GCF_` keys with `GTDB_r232` (`GCF_003697165.1`); a base with two GTDB versions counts for
+neither.
+
 ### Resolving a hit { #resolving-a-hit }
 
 The server gives every hit of `query`, `profile` and `/assembly` four extra columns, and lists
@@ -182,18 +203,40 @@ name) and GlobDB (`GCF_003697165` without the version) resolve from the same tab
 in one function, `sylphd.metadata.sylphtax_probes`, and `tests/test_sylphtax_parity.py` compares
 the whole path with the real sylph-tax.
 
+A file built with `--ncbi-taxonomy` and a key without an NCBI record also carries the
+[nearest NCBI taxon](#nearest-ncbi-taxa) in five more virtual columns, likewise listed in
+`metadata.columns`:
+
+| Column | Meaning |
+|---|---|
+| `ncbi_nearest_taxid` | the consensus NCBI taxid of the key's GTDB clade, or `null` |
+| `ncbi_nearest_rank` | its rank (`species`, `genus`, ..., `domain`) |
+| `ncbi_nearest_name` | its scientific name |
+| `ncbi_nearest_clade` | the GTDB clade it came from (`g__Thiobacillus`) |
+| `ncbi_nearest_lineage` | its `d__…;p__…;…;s__…` lineage, for the NCBI profile |
+
+They are **never** a substitute for `ncbi_taxid`: that one stays `null` unless the key's assembly
+has a real NCBI taxid. `--fields` selects them like any other column (a file without the tables
+does not have them; requesting one is an error that lists the columns it does have).
+
 ### NCBI lineages { #ncbi-lineages }
 
 `setup --ncbi-taxonomy` fills the NCBI columns of the sylph-tax genomes that GTDB's metadata does
 not cover, so the NCBI taxonomy view, the NCBI Taxonomy links and the `ncbi_*` TSV columns work for
-them too (e.g. a `FungiRefSeq-latest` genome keyed `GCF_000002495.2_MG8`):
+them too (e.g. a `FungiRefSeq-latest` genome keyed `GCF_000002495.2_MG8`, or a GlobDB key
+`GCA_000002495` without a version):
 
-1. the assembly accession is extracted from the key (`GC[AF]_\d+\.\d+`, so the `_MG8` suffix does
-   not matter);
-2. the accession is matched **exactly** (version included) against NCBI's RefSeq and GenBank
-   assembly summaries; when the version is not in the summaries, the same accession base is taken
-   only if the sources request a single version of it, otherwise the key is skipped;
-3. the summary's taxid is looked up in the taxdump's `rankedlineage.dmp`; `nodes.dmp` fills the
+1. the assembly accession is extracted from the key (`GC[AF]_\d+(?:\.\d+)?`, so the `_MG8` suffix
+   does not matter and the version may be absent);
+2. a key GTDB's metadata covers (`gtdb_taxonomy` set for its accession, exactly or as the single
+   version of its base) needs no lookup: GTDB's own NCBI columns are used, and it is counted as
+   `gtdb`;
+3. otherwise the accession is matched against NCBI's RefSeq and GenBank assembly summaries: an
+   **unversioned** accession takes the single version of its base that the summary lists (the
+   current one), a **versioned** one is matched exactly, and, when the version is not in the
+   summaries, its base is taken only if the sources request a single version of it; otherwise the
+   key is skipped. The row is stored under the versioned accession;
+4. the summary's taxid is looked up in the taxdump's `rankedlineage.dmp`; `nodes.dmp` fills the
    rank the node itself has (species, genus, ..., superkingdom/domain), since `rankedlineage.dmp`
    only lists its ancestors. Nothing is matched by organism name.
 
@@ -201,17 +244,56 @@ The data is stored as ordinary rows of `metadata_data` keyed by the accession, w
 `NULL` and `ncbi_taxid`, `ncbi_taxonomy` and `ncbi_organism_name` filled, so the metadata lookup,
 `/assembly`, `/profile` and the web tables need no special case and GTDB rows keep their own NCBI
 data. `ncbi_taxonomy` uses the seven ranks above; NCBI's kingdom is not one of them and is omitted.
-The `info` key `ncbi_taxonomy` keeps the per-source counts (`mapped`, `no_accession`,
+The `info` key `ncbi_taxonomy` keeps the per-source counts (`gtdb`, `mapped`, `no_accession`,
 `not_in_summary`, `no_lineage`), which `GET /info` reports as each source's `ncbi` object, and the same counts
 are printed by `setup` and `sylphd info`. The taxdump (downloaded per run into a temporary directory and removed afterwards;
 `merged.dmp` resolves merged taxids) and the summary a prefix needs (RefSeq for `GCF_`, GenBank for
 `GCA_`; streamed and filtered, never stored) are only read at `setup` time, so serving and requests
 do no extra work. GTDB rows are never replaced, and each run rebuilds the enrichment rows.
 
+### Nearest NCBI taxa { #nearest-ncbi-taxa }
+
+Many sylph-tax keys have no assembly in NCBI at all: a GlobDB MAG (`MOTU40_002958`) has a GTDB-Tk
+lineage but no accession, so no NCBI taxid. `--ncbi-taxonomy` still places it, at the **nearest
+NCBI taxon** of its GTDB clade, which is kept apart from `ncbi_taxid` (that column stays `null`:
+only an assembly's real taxid is ever written there).
+
+For every key with a GTDB-style lineage (`d__…`) and no real NCBI taxid, the lineage is walked from
+the deepest rank upwards. For each GTDB clade (`g__Thiobacillus`, matched by `rank__name`, so a
+renamed parent does not hide it) the `ncbi_taxid`s of the GTDB metadata rows in that clade are
+collected, merged taxids are followed through `merged.dmp`, and each is lifted to its nearest
+ancestor with a major rank (a strain votes as its species); members below NCBI's *unclassified
+sequences*, *other sequences* or *environmental samples* do not vote. The clade's consensus is the
+deepest NCBI node that **strictly more than half** of the members have as ancestor-or-self, lifted
+to a major rank again. A strict LCA would be dragged to the root by one misclassified genome; the
+majority rule tolerates a minority up to just under half, and when no node has a majority the
+members' shared ancestors still do, so a split clade yields the nearest node they have in common.
+The first (deepest) clade with a consensus wins, so a genus with no informative members falls back
+to its family.
+
+The result is `ncbi_nearest_taxid`, `ncbi_nearest_rank`, `ncbi_nearest_name`,
+`ncbi_nearest_clade` and `ncbi_nearest_lineage` on the key's rows (see
+[resolving a hit](#resolving-a-hit)), the tables `taxonomy_nearest` and `ncbi_nearest_taxon`, and
+the `info` key `ncbi_nearest`: per source, the number of keys without an NCBI record (`keys`), how
+many got a taxon (`assigned`) and the count per rank. `GET /info` reports it as each source's
+`ncbi_nearest` object, `setup` and `sylphd info` print it, and the `ncbi` profile and the web NCBI
+view place such hits at that node (the web labels the group, e.g. *Thiobacillus (nearest NCBI
+genus)*, and the `/profile` JSON marks the strain row with a `nearest` object). Profiles of a file
+without nearest taxa are byte for byte what they were before.
+
+The nearest step needs the taxdump, which the NCBI enrichment already downloads; it is fetched once
+for both and removed when the run ends. It runs **after** the enrichment, so a key whose assembly
+NCBI knows has its real taxid and gets no nearest taxon. A rerun rebuilds both tables.
+
 ### Format version and `--update`
 
 Only format version 3 is read or updated; a file of any other version is refused with a message
-to rebuild it with `sylphd setup`. `--update` adds sources to an existing file without the GTDB
+to rebuild it with `sylphd setup`. The [nearest NCBI taxa](#nearest-ncbi-taxa) did **not** bump the
+version: they are two optional tables and five virtual columns, a file without them reads exactly
+as before, and nothing about an existing column changed, so every format-3 file stays valid. (A
+file built with `--ncbi-taxonomy` by an older `sylphd` has no nearest taxa; `--update
+--ncbi-taxonomy` adds them.)
+`--update` adds sources to an existing file without the GTDB
 TSV files:
 
 ```bash

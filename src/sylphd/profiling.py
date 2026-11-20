@@ -42,6 +42,7 @@ from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
 from .protocol import ProfileParams, result_row
 from .sketchcheck import SketchFormatError, SketchHeader, parse_sketch_header
 from .taxonomy import (
+    NEAREST_PROFILE_COLUMNS,
     SYLPHTAX_PROFILE_COLUMNS,
     TAXONOMY_COLUMNS,
     build_taxprof,
@@ -777,6 +778,12 @@ def _taxprof_fields(
         for column in needed:
             if column in available and column not in selected:
                 selected.append(column)
+        if taxonomy == "ncbi":
+            selected.extend(
+                column
+                for column in NEAREST_PROFILE_COLUMNS
+                if column in available and column not in selected
+            )
     return selected
 
 

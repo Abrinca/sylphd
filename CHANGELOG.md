@@ -6,6 +6,36 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **GlobDB r232, and genomes named without an assembly version.** The catalogue lists
+  `globdb_r232_sylph_v2_c200.syl2db` (346,232 genomes) with the sylph-tax source `GlobDB_r232`
+  (346,233 keys: `QXLSG_01327` is in no genome). GlobDB names its genomes `GCA_041167105` and its
+  contigs `GCA_041167105_000000000001`, with no `.N` anywhere, while GTDB's metadata is keyed
+  `GCA_041167105.1`. An unversioned `GCA_`/`GCF_` accession now resolves to the metadata row of its
+  base **when exactly one version of that base counts** (GTDB's row first, then an NCBI enrichment
+  row); two versions are ambiguous and resolve to nothing — never a guess. This applies to the
+  hit-level metadata lookup (`genomes/GCA_041167105.fa.gz` finds its GTDB row and real `ncbi_taxid`),
+  the "covered by GTDB" check of `--ncbi-taxonomy`, `--update`'s pruning of enrichment rows and the
+  key overlap between a source and the virtual GTDB source. `--ncbi-taxonomy` also accepts an
+  unversioned key GTDB does not cover, matching the single version in NCBI's assembly summary. All
+  199,923 GlobDB `GCA_/GCF_` keys get GTDB metadata and their NCBI taxids, and `setup` reports the
+  GlobDB_r232 ↔ GTDB_r232 overlap (199,923 keys).
+- **The nearest NCBI taxon of genomes with no NCBI record.** `setup --ncbi-taxonomy` now also places
+  a key that has a GTDB-style lineage but no NCBI taxid (a GlobDB MAG, `MOTU40_002958`): for each GTDB
+  clade from the deepest rank up, its GTDB members' NCBI taxids vote, and the deepest NCBI node that
+  **strictly more than half** of them have as ancestor-or-self (using `nodes.dmp`, following
+  `merged.dmp`) is the nearest taxon. The majority rule replaces a strict LCA, which one misclassified
+  genome would drag to the root. Stored as `ncbi_nearest_taxid`, `ncbi_nearest_rank`,
+  `ncbi_nearest_name`, `ncbi_nearest_clade` and `ncbi_nearest_lineage` — always apart from
+  `ncbi_taxid`, which stays an assembly's real taxid or `null` — in the new `taxonomy_nearest` and
+  `ncbi_nearest_taxon` tables, and reported per source (`keys`, `assigned`, and the counts per rank)
+  by `setup`, `sylphd info` and `GET /info` as `metadata.taxonomy_sources[].ncbi_nearest`. The `ncbi`
+  profile and the web NCBI view use it as a fallback (the web labels the group, e.g. *Thiobacillus
+  (nearest NCBI genus)*; the `/profile` JSON marks the strain row with a `nearest` object). Profiles
+  of a file without nearest taxa are byte for byte unchanged. No format bump: the tables are
+  optional, format 3 stays, and an older file reads exactly as before.
+
 ### Changed
 
 - **Dependency refresh.** `uv lock --upgrade` moves anyio 4.15.1 → 4.16.0, click 8.5.0 → 8.5.1,

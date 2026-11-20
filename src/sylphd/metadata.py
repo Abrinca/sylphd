@@ -37,11 +37,30 @@ import re
 import sqlite3
 import threading
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import IO, Self
 
 from .taxonomy import available_taxonomies
+
+#: SQL: ``{c}`` is an unversioned assembly accession (``GCF_003697165``).
+_UNVERSIONED_SQL = "{c} GLOB 'GC[AF]_[0-9]*' AND {c} NOT GLOB 'GC[AF]_*[^0-9]*'"
+_UNVERSIONED_RE = re.compile(r"^GC[AF]_\d+$")
+
+
+def unversioned_sql(column: str) -> str:
+    """SQL testing that ``column`` is ``GCA_``/``GCF_`` plus digits and no version."""
+    return _UNVERSIONED_SQL.format(c=column)
+
+
+def is_unversioned(accession: str) -> bool:
+    """``GCF_003697165`` (no ``.N``) as GlobDB keys and names are written.
+
+    >>> is_unversioned("GCF_003697165"), is_unversioned("GCF_003697165.1")
+    (True, False)
+    """
+    return _UNVERSIONED_RE.match(accession) is not None
+
 
 #: Schema version of the generated SQLite file.  Bump when the column layout
 #: or the meaning of the ``info`` table changes.
@@ -327,27 +346,75 @@ HIT_TAXONOMY_COLUMNS: tuple[str, ...] = (
 )
 
 
+#: The columns of the *nearest* NCBI taxon of a key without an NCBI record
+#: (``setup --ncbi-taxonomy``).  Like ``tax_*`` they are virtual, and only exist
+#: in a file that has the ``taxonomy_nearest`` table; they never replace
+#: ``ncbi_taxid``, which is an assembly's real taxid.
+NEAREST_COLUMNS: tuple[str, ...] = (
+    "ncbi_nearest_taxid",
+    "ncbi_nearest_rank",
+    "ncbi_nearest_name",
+    "ncbi_nearest_clade",
+    "ncbi_nearest_lineage",
+)
+
+
+@dataclass(frozen=True)
+class NearestTaxon:
+    """The nearest NCBI taxon of a resolved key (see :mod:`sylphd.ncbi_nearest`)."""
+
+    taxid: int
+    rank: str
+    name: str
+    clade: str
+    lineage: str | None
+
+
 @dataclass(frozen=True)
 class HitTaxonomy:
-    """The taxonomy ``resolve`` found for one hit (all ``None`` for a miss)."""
+    """The taxonomy ``resolve`` found for one hit (all ``None`` for a miss).
+
+    ``nearest`` is the nearest NCBI taxon of the matched key when the file has
+    them (``has_nearest``); then :meth:`columns` also carries the
+    ``ncbi_nearest_*`` values.
+    """
 
     source: str | None = None
     key: str | None = None
     lineage: str | None = None
     host: str | None = None
+    nearest: NearestTaxon | None = None
+    has_nearest: bool = False
 
-    def columns(self) -> dict[str, str | None]:
-        """The four ``tax_*`` values, keyed like the metadata columns."""
-        return {
+    def columns(self) -> dict[str, object]:
+        """The ``tax_*`` values (and ``ncbi_nearest_*`` when the file has them)."""
+        columns: dict[str, object] = {
             "tax_source": self.source,
             "tax_key": self.key,
             "tax_lineage": self.lineage,
             "tax_host": self.host,
         }
+        if self.has_nearest:
+            nearest = self.nearest
+            columns.update(
+                zip(
+                    NEAREST_COLUMNS,
+                    (
+                        (nearest.taxid, nearest.rank, nearest.name, nearest.clade,
+                         nearest.lineage)
+                        if nearest is not None
+                        else (None,) * len(NEAREST_COLUMNS)
+                    ),
+                )
+            )
+        return columns
 
 
 #: What ``resolve`` returns for a hit without any taxonomy.
 NO_HIT_TAXONOMY = HitTaxonomy()
+
+#: The same for a file with nearest taxa: the ``ncbi_nearest_*`` columns exist, empty.
+_NO_NEAREST_TAXONOMY = HitTaxonomy(has_nearest=True)
 
 
 def open_text(path: str | os.PathLike[str]) -> IO[str]:
@@ -430,6 +497,10 @@ class MetadataDB:
                 "rebuild the file with `sylphd setup`"
             )
         self.format_version: str = version
+        #: Whether the file has the nearest NCBI taxon of keys without an NCBI
+        #: record (``setup --ncbi-taxonomy``); older files simply do not, and
+        #: then the ``ncbi_nearest_*`` columns do not exist at all.
+        self.has_nearest: bool = "taxonomy_nearest" in tables
         #: The sources, in ``ord`` order.
         self._sources: tuple[TaxonomySourceRow, ...] = self._read_sources()
         #: The de-duplicated overlap pairs, in ``ord`` order.
@@ -517,10 +588,17 @@ class MetadataDB:
         with self._lock:
             if first.kind == "metadata" or second.kind == "metadata":
                 other = second if first.kind == "metadata" else first
+                # A key is a GTDB accession verbatim or, unversioned, the single
+                # GTDB version of its base (the same rule as setup's count).
                 rows = self._connection.execute(
-                    "SELECT DISTINCT e.key AS key FROM taxonomy_entry AS e "
-                    "JOIN metadata_data AS m ON m.accession = e.key "
-                    "WHERE e.source_id = ? AND m.gtdb_taxonomy IS NOT NULL "
+                    "SELECT e.key AS key FROM taxonomy_entry AS e "
+                    "WHERE e.source_id = ? AND ("
+                    "EXISTS (SELECT 1 FROM metadata_data AS m "
+                    "WHERE m.accession = e.key AND m.gtdb_taxonomy IS NOT NULL) "
+                    f"OR ({unversioned_sql('e.key')} AND (SELECT COUNT(*) FROM "
+                    "(SELECT 1 FROM metadata_data AS m "
+                    "WHERE m.accession >= e.key || '.' AND m.accession < e.key || '/' "
+                    "AND m.gtdb_taxonomy IS NOT NULL LIMIT 2)) = 1)) "
                     "ORDER BY e.key LIMIT ?",
                     (other.id, limit),
                 ).fetchall()
@@ -536,7 +614,9 @@ class MetadataDB:
     @property
     def taxonomy_columns(self) -> tuple[str, ...]:
         """The ``tax_*`` columns a row can carry (empty without sources)."""
-        return HIT_TAXONOMY_COLUMNS if self._sources else ()
+        if not self._sources:
+            return ()
+        return HIT_TAXONOMY_COLUMNS + (NEAREST_COLUMNS if self.has_nearest else ())
 
     @property
     def field_columns(self) -> tuple[str, ...]:
@@ -550,10 +630,13 @@ class MetadataDB:
         another source are reported once per pair at the metadata level
         (:meth:`taxonomy_overlaps`), not per source.  A source enriched by
         ``setup --ncbi-taxonomy`` carries its ``ncbi`` counts (mapped keys,
-        keys without an assembly accession, keys NCBI's summaries do not have
-        and keys whose taxid has no lineage).
+        keys GTDB's metadata covers, keys without an assembly accession, keys
+        NCBI's summaries do not have and keys whose taxid has no lineage) and
+        its ``ncbi_nearest`` counts (keys without an NCBI record, how many got a
+        nearest NCBI taxon and at which ranks).
         """
         counts = json.loads(self.info.get("ncbi_taxonomy") or "{}")
+        nearest = json.loads(self.info.get("ncbi_nearest") or "{}")
         sources = [
             {
                 "name": source.name,
@@ -568,6 +651,8 @@ class MetadataDB:
         for source in sources:
             if source["name"] in counts:
                 source["ncbi"] = counts[source["name"]]
+            if source["name"] in nearest:
+                source["ncbi_nearest"] = nearest[source["name"]]
         return sources
 
     def taxonomy_overlaps(self) -> list[dict[str, object]]:
@@ -579,6 +664,12 @@ class MetadataDB:
         return [source.name for source in self._sources]
 
     def _chunked_lookup(self, accessions: Sequence[str]) -> dict[str, dict[str, object]]:
+        """Metadata rows keyed by the *requested* accession.
+
+        An accession is looked up exactly; an unversioned one (``GCF_003697165``,
+        as GlobDB names its genomes) that has no exact row takes the row of its
+        base when exactly one version of it exists (:meth:`_unique_version`).
+        """
         unique = list(dict.fromkeys(accession for accession in accessions if accession))
         found: dict[str, dict[str, object]] = {}
         # 500 parameters per statement stays well below SQLite's variable limit.
@@ -590,10 +681,46 @@ class MetadataDB:
                 for row in self._connection.execute(query, chunk):
                     record = dict(row)
                     found[record.pop("accession")] = record
+        for accession in unique:
+            if accession not in found and is_unversioned(accession):
+                record = self._unique_version(accession)
+                if record is not None:
+                    found[accession] = record
         return found
 
+    def _unique_version(self, base: str) -> dict[str, object] | None:
+        """The row of the only version of an unversioned accession, else ``None``.
+
+        The versions of ``GCF_003697165`` are the rows in the primary-key range
+        ``['GCF_003697165.', 'GCF_003697165/')``.  Which of them counts is the
+        same preference the build's unversioned matches use: GTDB's rows first
+        (a genome GTDB has once is the one meant), then the NCBI enrichment
+        rows, then any.  Two versions are ambiguous: no match, never a guess --
+        a guess would put a genome in the wrong species.
+        """
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM metadata WHERE accession >= ? AND accession < ?",
+                (base + ".", base + "/"),
+            ).fetchall()
+        records = [dict(row) for row in rows]
+        pool = (
+            [r for r in records if r.get("gtdb_taxonomy") is not None]
+            or [r for r in records if r.get("ncbi_taxid") is not None]
+            or records
+        )
+        if len(pool) != 1:
+            return None
+        record = pool[0]
+        record.pop("accession")
+        return record
+
     def lookup(self, accessions: Iterable[str]) -> dict[str, dict[str, object]]:
-        """Return metadata rows keyed by accession, for the accessions found."""
+        """Return metadata rows keyed by accession, for the accessions found.
+
+        An unversioned accession resolves to the row whose accession has that
+        base when only one version exists; the result is keyed by what was asked.
+        """
         return self._chunked_lookup(list(accessions))
 
     def contains_accessions(self, accessions: Iterable[str]) -> bool:
@@ -603,7 +730,8 @@ class MetadataDB:
         like accessions (fungal RefSeq genomes are ``GCF_`` too, but they are
         not in GTDB's metadata; with ``--ncbi-taxonomy`` they do have a row,
         with a NULL ``gtdb_taxonomy``).  Stopping at the first match keeps the
-        query small even for a batch of sampled names.
+        query small even for a batch of sampled names.  An unversioned name
+        (``GCF_003697165``) counts when exactly one GTDB version of it exists.
         """
         unique = list(dict.fromkeys(value for value in accessions if value))
         for start in range(0, len(unique), 500):
@@ -616,6 +744,18 @@ class MetadataDB:
                     chunk,
                 ).fetchone()
             if row is not None:
+                return True
+        for accession in unique:
+            if not is_unversioned(accession):
+                continue
+            with self._lock:
+                row = self._connection.execute(
+                    "SELECT COUNT(*) FROM (SELECT 1 FROM metadata_data "
+                    "WHERE accession >= ? AND accession < ? "
+                    "AND gtdb_taxonomy IS NOT NULL LIMIT 2)",
+                    (accession + ".", accession + "/"),
+                ).fetchone()
+            if row[0] == 1:
                 return True
         return False
 
@@ -649,6 +789,7 @@ class MetadataDB:
             return []
         if not self._sources:
             return [NO_HIT_TAXONOMY] * len(pairs)
+        miss = _NO_NEAREST_TAXONOMY if self.has_nearest else NO_HIT_TAXONOMY
         allowed = None if sources is None else set(sources)
         probes = [sylphtax_probes(genome, contig) for genome, contig in pairs]
         keys = {key for probe in probes for key in probe.probe_keys()}
@@ -656,17 +797,60 @@ class MetadataDB:
 
         resolved: list[HitTaxonomy] = []
         for probe in probes:
-            taxonomy = NO_HIT_TAXONOMY
+            taxonomy = miss
             for pass_keys in (probe.pass0, probe.pass1):
                 for key in pass_keys:
                     entry = entries.get(key)
                     if entry is not None:
                         taxonomy = HitTaxonomy(
-                            source=entry[0], key=key, lineage=entry[1], host=entry[2]
+                            source=entry[0],
+                            key=key,
+                            lineage=entry[1],
+                            host=entry[2],
+                            has_nearest=self.has_nearest,
                         )
                         break
             resolved.append(taxonomy)
+        if self.has_nearest:
+            nearest = self._nearest_taxa(
+                {(t.source, t.key) for t in resolved if t.key is not None}
+            )
+            resolved = [
+                replace(t, nearest=nearest.get((t.source, t.key)))
+                if t.key is not None
+                else t
+                for t in resolved
+            ]
         return resolved
+
+    def _nearest_taxa(
+        self, pairs: set[tuple[str | None, str | None]]
+    ) -> dict[tuple[str | None, str | None], NearestTaxon]:
+        """``(source name, key) -> nearest NCBI taxon`` for the resolved keys."""
+        names = {source.id: source.name for source in self._sources}
+        keys = [key for _, key in pairs if key is not None]
+        found: dict[tuple[str | None, str | None], NearestTaxon] = {}
+        unique = list(dict.fromkeys(keys))
+        for start in range(0, len(unique), 500):
+            chunk = unique[start : start + 500]
+            placeholders = ", ".join("?" * len(chunk))
+            with self._lock:
+                rows = self._connection.execute(
+                    "SELECT n.source_id, n.key, n.taxid, n.clade, t.rank, t.name, "
+                    "t.lineage FROM taxonomy_nearest AS n "
+                    "JOIN ncbi_nearest_taxon AS t ON t.taxid = n.taxid "
+                    f"WHERE n.key IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+            for row in rows:
+                found[(names.get(int(row["source_id"])), str(row["key"]))] = NearestTaxon(
+                    taxid=int(row["taxid"]),
+                    rank=str(row["rank"]),
+                    name=str(row["name"]),
+                    clade=str(row["clade"]),
+                    lineage=row["lineage"],
+                )
+        return found
 
     def _taxonomy_entries(
         self, keys: Iterable[str], allowed: set[str] | None

@@ -32,7 +32,7 @@ the sketches to the server. For the ANI hits without abundances see [`query`](qu
 |---|---|---|
 | `-o, --output FILE` | stdout | write the table here |
 | `--format {tsv,json}` | `tsv` | output format |
-| `--fields COLUMNS` | `all` | metadata columns to add, comma-separated, or `all` / `none`; `all` is every column the server exposes, which on a server with sylph-tax sources **appends the four `tax_*` columns** after the existing ones (an explicit list is unchanged) |
+| `--fields COLUMNS` | `all` | metadata columns to add, comma-separated, or `all` / `none`; `all` is every column the server exposes, which on a server with sylph-tax sources **appends the four `tax_*` columns** after the existing ones, and on one built with `--ncbi-taxonomy` also the five `ncbi_nearest_*` columns (an explicit list is unchanged) |
 | `-v, --verbose` | off | progress messages on stderr |
 
 ## Thresholds

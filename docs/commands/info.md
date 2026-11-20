@@ -19,7 +19,9 @@ Prints what the server reports about itself:
   `metadata: none`; taxonomy sources show their base name or the catalogue URL they came from,
   never a local path; when it has taxonomy sources (format 3), `taxonomy sources:` with one line per
   source (name, number of keys, whether it is the virtual GTDB source or an imported file, whether
-  it carries virus hosts, MD5), then `taxonomy overlaps:` with one line per pair of sources that
+  it carries virus hosts, MD5), the `NCBI:` counts of a `--ncbi-taxonomy` build and the nearest
+  NCBI taxon counts (`nearest NCBI taxon: 146,310 of 146,310 keys without an NCBI record
+  (domain 6,201, ..., species 44,027)`), then `taxonomy overlaps:` with one line per pair of sources that
   share keys (`First and Second: 7 shared keys; examples: ...; the source imported later wins`) —
   see [`setup`](../reference/metadata.md#overlapping-sources);
 - versions of sylphd, pysylph and Python;

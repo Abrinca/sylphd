@@ -99,7 +99,9 @@ def test_assembly_accession() -> None:
 def test_exact_version_wins_and_an_ambiguous_base_is_skipped() -> None:
     # .1 is in the summary, .2 is not; one requested version falls back to the base.
     found = ncbi_taxonomy.read_assemblies(ASSEMBLIES, ["GCF_000002515.2"])
-    assert found["GCF_000002515.2"] == ncbi_taxonomy.Assembly(4932, "Saccharomyces cerevisiae")
+    assert found["GCF_000002515.2"] == ncbi_taxonomy.Assembly(
+        4932, "Saccharomyces cerevisiae", "GCF_000002515.2"
+    )
     # Two requested versions of one base: only the exact accession is used.
     found = ncbi_taxonomy.read_assemblies(
         ASSEMBLIES, ["GCF_000002515.1", "GCF_000002515.2"]
@@ -171,6 +173,7 @@ def test_build_stores_ncbi_data_for_the_sylphtax_keys(
     )
     sources = {source["name"]: source for source in stats["taxonomy_sources"]}
     assert sources["FungiRefSeq-latest"]["ncbi"] == {
+        "gtdb": 2,  # GCF_000005845.2 and GCF_000005845.2_ASM584v2
         "mapped": 4,
         "no_accession": 1,
         "not_in_summary": 1,

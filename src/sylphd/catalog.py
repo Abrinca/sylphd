@@ -153,7 +153,9 @@ DATABASES: dict[str, Database] = {
             "globdb_r232_sylph_v2_c200.syl2db",
             hosts=(_FAUST,),
             size=31194509116,
-            genomes=346233,
+            # Measured with len(TwoStageDatabase).  The taxonomy file below has
+            # 346,233 rows: one key (QXLSG_01327) is in no database genome.
+            genomes=346232,
             c=200,
             description="GlobDB r232, two-stage (no Google mirror)",
             taxonomy="GlobDB_r232",

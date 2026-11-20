@@ -21,7 +21,7 @@ stores and reports them. The layout and columns are in the
 | `-o, --output PATH` | required | SQLite file to write |
 | `--update` | off | add the sources to an existing file instead of building one |
 | `--cache-dir DIR` | `<output dir>/taxonomy` | where downloaded taxonomy files are kept |
-| `--ncbi-taxonomy` | off | give the sylph-tax genomes that GTDB does not cover an NCBI lineage |
+| `--ncbi-taxonomy` | off | give the sylph-tax genomes that GTDB does not cover an NCBI lineage, and those without an assembly a nearest NCBI taxon |
 | `--release N` | none | GTDB release to record in the file (and the name of the virtual source) |
 | `--reps-only` | off | store only species representatives (`gtdb_representative` true), `-m` only |
 | `--force` | off | replace the output file (only once the new one is built; a failure keeps the old one) |
@@ -99,9 +99,10 @@ and is not fetched when only RefSeq accessions are needed. The sizes are checked
 servers' `Content-Length`.
 
 For every key of every sylph-tax source whose assembly accession has no GTDB metadata row (a GTDB
-row is never replaced), the assembly accession in the key (`GC[AF]_\d+\.\d+`) is matched exactly (version included) against the summaries; if the
-version is missing there, the same accession base is used only when the source requests a single
-version of it, else the key is skipped. The taxid then comes from the summary and the lineage from
+row is never replaced), the assembly accession in the key (`GC[AF]_\d+(?:\.\d+)?`) is matched against the summaries; an
+unversioned key (GlobDB's `GCF_003697165`) takes the single version of its base that a summary lists,
+a versioned one is matched exactly, and if its version is missing there, the same accession base is
+used only when the source requests a single version of it, else the key is skipped. The taxid then comes from the summary and the lineage from
 `rankedlineage.dmp` (a merged taxid is followed through `merged.dmp`), with `nodes.dmp` filling the node's own rank (a species node's species
 column in `rankedlineage.dmp` holds its ancestors and is empty) — never from an organism name. `ncbi_taxonomy` keeps GTDB's
 `d__…;p__…;c__…;o__…;f__…;g__…;s__…` shape, with NCBI's superkingdom (or domain) as `d__`; NCBI's
@@ -111,13 +112,27 @@ their own NCBI data. Every `--ncbi-taxonomy` run deletes and rebuilds these rows
 `--update --ncbi-taxonomy` again is idempotent. `--update` without the flag keeps them, deletes the
 ones no source key refers to any more and drops the counts of the sources it replaced.
 
+A key with a GTDB-Tk lineage but no assembly in NCBI at all — a GlobDB MAG (`MOTU40_002958`) — still
+gets a place in the NCBI view: the **nearest NCBI taxon** of its deepest GTDB clade that has one. The
+clade's GTDB members' NCBI taxids vote, and the deepest NCBI node that strictly more than half of
+them have as ancestor-or-self wins (a documented majority rule, not a strict LCA: one misclassified
+genome cannot drag a genus to the root). It is stored as `ncbi_nearest_taxid`, `ncbi_nearest_rank`,
+`ncbi_nearest_name`, `ncbi_nearest_clade` and `ncbi_nearest_lineage`, never as `ncbi_taxid` (which
+stays `null` for an assembly NCBI does not know), and the NCBI profile and the web NCBI view place
+such hits at that node. See [nearest NCBI taxa](../reference/metadata.md#nearest-ncbi-taxa).
+
 The summary reports, per source, how many keys were mapped, how many carry no assembly accession,
-how many are not in the summaries and how many have a taxid without a lineage, e.g.:
+how many are not in the summaries, how many have a taxid without a lineage and how many GTDB's own
+NCBI data covers, and how many keys without an NCBI record got a nearest taxon and at which ranks,
+e.g.:
 
 ```text
+  GlobDB_r232: 346,233 keys (sylphtax)
+    NCBI lineage: 0 mapped, 146,310 without an assembly accession, 0 not in the summaries, 0 without a lineage, 199,923 with GTDB's NCBI data
+    nearest NCBI taxon: 146,310 of 146,310 keys without an NCBI record (domain 6,201, kingdom 2,234, phylum 9,998, class 17,119, order 22,718, family 22,055, genus 21,958, species 44,027)
   FungiRefSeq-latest: 661 keys (sylphtax)
-    NCBI lineage: 660 mapped, 0 without an assembly accession, 1 not in the summaries, 0 without a lineage
+    NCBI lineage: 659 mapped, 0 without an assembly accession, 2 not in the summaries, 0 without a lineage
 ```
 
-`GET /info` and `sylphd info` report the same counts (`metadata.taxonomy_sources[].ncbi`). The
-downloads happen only at `setup` time; serving does no extra work.
+`GET /info` and `sylphd info` report the same counts (`metadata.taxonomy_sources[].ncbi` and
+`.ncbi_nearest`). The downloads happen only at `setup` time; serving does no extra work.

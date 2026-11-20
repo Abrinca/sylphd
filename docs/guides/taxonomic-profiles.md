@@ -39,6 +39,13 @@ the default of `--taxonomy` gains `tax`, so a `--taxprof` run then writes `<samp
 set. The server must expose the four `tax_*` columns for `tax`; `--tax-source` then restricts which
 sources the profile is resolved against.
 
+A hit that has an NCBI **nearest** taxon but no NCBI lineage of its own (`setup
+--ncbi-taxonomy`; a GlobDB MAG, say) is placed in the `ncbi` profile at that node instead of in
+`unclassified`: its `t__` row hangs directly below the nearest clade, and the `/profile` JSON marks
+that clade with a `nearest` object (`taxid`, `rank`, `name`, `clade`). The web view labels such a
+placement, e.g. *Thiobacillus (nearest NCBI genus)*. The `gtdb` and `tax` profiles are untouched, and
+a metadata file without nearest taxa produces exactly the same profile as before.
+
 ## `--taxprof`: one file per sample and taxonomy
 
 Files are named `PREFIX<sample>.<gtdb|ncbi>.sylphmpa` and follow the format of `sylph-tax taxprof`:

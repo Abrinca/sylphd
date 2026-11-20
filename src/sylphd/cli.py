@@ -367,12 +367,10 @@ def _print_metadata(metadata: dict[str, Any] | None) -> None:
                 details.append(f"md5 {source['md5']}")
             ncbi = source.get("ncbi")
             if ncbi:
-                details.append(
-                    f"NCBI: {ncbi['mapped']:,} mapped, "
-                    f"{ncbi['no_accession']:,} without an assembly accession, "
-                    f"{ncbi['not_in_summary']:,} not in the summaries, "
-                    f"{ncbi['no_lineage']:,} without a lineage"
-                )
+                details.append(f"NCBI: {_ncbi_counts_text(ncbi)}")
+            nearest = source.get("ncbi_nearest")
+            if nearest:
+                details.append(_nearest_counts_text(nearest))
             print(f"    {source.get('name')}: " + ", ".join(details))
     overlaps = metadata.get("taxonomy_overlaps") or []
     if overlaps:
@@ -1217,14 +1215,35 @@ def cmd_setup(args: argparse.Namespace) -> int:
         )
         ncbi = source.get("ncbi")
         if ncbi:
-            print(
-                f"    NCBI lineage: {ncbi['mapped']:,} mapped, "
-                f"{ncbi['no_accession']:,} without an assembly accession, "
-                f"{ncbi['not_in_summary']:,} not in the summaries, "
-                f"{ncbi['no_lineage']:,} without a lineage",
-                file=sys.stderr,
-            )
+            print(f"    NCBI lineage: {_ncbi_counts_text(ncbi)}", file=sys.stderr)
+        nearest = source.get("ncbi_nearest")
+        if nearest:
+            print(f"    {_nearest_counts_text(nearest)}", file=sys.stderr)
     return 0
+
+
+def _ncbi_counts_text(ncbi: dict[str, Any]) -> str:
+    """The per-source ``setup --ncbi-taxonomy`` counts as one line."""
+    text = (
+        f"{ncbi['mapped']:,} mapped, "
+        f"{ncbi['no_accession']:,} without an assembly accession, "
+        f"{ncbi['not_in_summary']:,} not in the summaries, "
+        f"{ncbi['no_lineage']:,} without a lineage"
+    )
+    if ncbi.get("gtdb"):
+        text += f", {ncbi['gtdb']:,} with GTDB's NCBI data"
+    return text
+
+
+def _nearest_counts_text(nearest: dict[str, Any]) -> str:
+    """How many keys without an NCBI record got a nearest NCBI taxon, by rank."""
+    keys = int(nearest.get("keys") or 0)
+    assigned = int(nearest.get("assigned") or 0)
+    ranks = ", ".join(
+        f"{rank} {int(count):,}" for rank, count in (nearest.get("ranks") or {}).items()
+    )
+    text = f"nearest NCBI taxon: {assigned:,} of {keys:,} keys without an NCBI record"
+    return f"{text} ({ranks})" if ranks else text
 
 
 def cmd_taxdb(args: argparse.Namespace) -> int:

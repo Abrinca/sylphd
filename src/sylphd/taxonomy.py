@@ -104,6 +104,17 @@ TAXONOMIES: tuple[str, ...] = (*TAXONOMY_COLUMNS, SYLPHTAX)
 #: it is deliberately not requested.
 SYLPHTAX_PROFILE_COLUMNS: tuple[str, ...] = ("tax_source", "tax_key", "tax_lineage")
 
+#: Columns of the nearest NCBI taxon (``setup --ncbi-taxonomy``) the ``ncbi``
+#: profile uses for hits that have no NCBI lineage of their own.  They are
+#: optional: a metadata file without them just has no such fallback.
+NEAREST_PROFILE_COLUMNS: tuple[str, ...] = (
+    "ncbi_nearest_lineage",
+    "ncbi_nearest_taxid",
+    "ncbi_nearest_rank",
+    "ncbi_nearest_name",
+    "ncbi_nearest_clade",
+)
+
 #: Column headers written by ``sylph-tax taxprof`` (without virus annotation).
 TAXPROF_COLUMNS: tuple[str, ...] = (
     "clade_name",
@@ -137,6 +148,10 @@ class CladeAbundance:
     #: means "the last level is ``t__``", which is sylphd's rule; the ``tax``
     #: profile sets it from sylph-tax's own (substring) rule.
     strain_stats: bool | None = None
+    #: For the strain of a hit the ``ncbi`` profile placed at its *nearest* NCBI
+    #: taxon (it has no NCBI lineage of its own): ``taxid``, ``rank``, ``name``
+    #: and the GTDB ``clade`` it was derived from.  ``None`` for every other clade.
+    nearest: Mapping[str, Any] | None = None
 
     @property
     def depth(self) -> int:
@@ -298,6 +313,13 @@ def resolve_taxonomy_columns(
                 missing.append(f"{column} ({taxonomy})")
             elif column not in columns:
                 columns.append(column)
+        if taxonomy == "ncbi":
+            # Optional: only a file built with --ncbi-taxonomy has them.
+            columns.extend(
+                column
+                for column in NEAREST_PROFILE_COLUMNS
+                if column in available and column not in columns
+            )
     if missing:
         raise TaxonomyError(
             "the server metadata has no "
@@ -427,8 +449,13 @@ def aggregate_rows(
     sequence: dict[str, float] = {}
     strain_stats: dict[str, tuple[float | None, float | None]] = {}
 
+    nearest_of: dict[str, Mapping[str, Any]] = {}
+
     for row in rows:
         lineage = parse_lineage(row.get(column))
+        nearest = _nearest_placement(row) if not lineage and taxonomy == "ncbi" else None
+        if nearest is not None:
+            lineage = parse_lineage(row.get("ncbi_nearest_lineage"))
         strain = f"t__{strain_label(row)}"
         parts = (*lineage, strain) if lineage else (UNCLASSIFIED, strain)
         row_relative = _number(row.get("Taxonomic_abundance"))
@@ -447,6 +474,10 @@ def aggregate_rows(
             _optional_number(row.get("Adjusted_ANI")),
             _optional_number(coverage),
         )
+        if nearest is not None and lineage:
+            nearest_of[clade] = nearest
+        else:
+            nearest_of.pop(clade, None)
 
     clades = [
         CladeAbundance(
@@ -455,6 +486,7 @@ def aggregate_rows(
             sequence=sequence[clade],
             ani=strain_stats.get(clade, (None, None))[0],
             coverage=strain_stats.get(clade, (None, None))[1],
+            nearest=nearest_of.get(clade),
         )
         for clade, value in relative.items()
     ]
@@ -463,6 +495,24 @@ def aggregate_rows(
         key=lambda item: (len(RANKS) + 1 if item.is_strain else item.depth, -item.relative)
     )
     return clades
+
+
+def _nearest_placement(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The nearest NCBI taxon of a row that has no NCBI lineage, or ``None``.
+
+    The ``ncbi`` profile places such a hit at this node instead of lumping it
+    into "unclassified"; the strain hangs directly below it, and the returned
+    mapping marks the strain as a *nearest* placement.
+    """
+    lineage = row.get("ncbi_nearest_lineage")
+    if not isinstance(lineage, str) or not parse_lineage(lineage):
+        return None
+    return {
+        "taxid": row.get("ncbi_nearest_taxid"),
+        "rank": row.get("ncbi_nearest_rank"),
+        "name": row.get("ncbi_nearest_name"),
+        "clade": row.get("ncbi_nearest_clade"),
+    }
 
 
 def hit_taxonomy_string(row: Mapping[str, Any]) -> str:
@@ -715,13 +765,17 @@ def write_taxmatrix(
 
 def clade_dict(item: CladeAbundance) -> dict[str, Any]:
     """One clade as the ``/profile`` JSON carries it."""
-    return {
+    entry: dict[str, Any] = {
         "clade_name": item.clade,
         "relative_abundance": item.relative,
         "sequence_abundance": item.sequence,
         "ani": item.ani,
         "coverage": item.coverage,
     }
+    if item.nearest is not None:
+        # A strain of the ``ncbi`` profile placed at its nearest NCBI taxon.
+        entry["nearest"] = dict(item.nearest)
+    return entry
 
 
 def clades_from_dict(rows: Iterable[Mapping[str, Any]]) -> list[CladeAbundance]:

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .metadata import open_text
+from .metadata import open_text, unversioned_sql
 
 logger = logging.getLogger(__name__)
 # A plain library warning would vanish in a process that configures no logging
@@ -186,6 +186,12 @@ def _add_taxonomy_source(
         connection.execute(
             "DELETE FROM taxonomy_entry WHERE source_id = ?", (existing[0],)
         )
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'taxonomy_nearest'"
+        ).fetchone():
+            connection.execute(
+                "DELETE FROM taxonomy_nearest WHERE source_id = ?", (existing[0],)
+            )
         connection.execute(
             "DELETE FROM taxonomy_overlap WHERE source_id = ? OR other_id = ?",
             (existing[0], existing[0]),
@@ -334,6 +340,42 @@ class TaxonomyOverlap:
         )
 
 
+def match_accessions(
+    connection: sqlite3.Connection,
+    source_table: str,
+    target: str,
+    condition: str = "m.gtdb_taxonomy IS NOT NULL",
+) -> None:
+    """Fill the temp table ``target (key, accession)`` from ``source_table (key)``.
+
+    A key matches the ``metadata_data`` row (alias ``m``, restricted by
+    ``condition``) with that accession.  An *unversioned* key
+    (``GCF_003697165``) also matches the row whose accession has that base,
+    when exactly one version of it exists: ``GCF_003697165.1`` is a range
+    ``['GCF_003697165.', 'GCF_003697165/')`` of the primary key, so no scan and
+    no extra column.  Two versions are ambiguous and match nothing -- a guess
+    would put a genome in the wrong species.
+    """
+    connection.execute(f"DROP TABLE IF EXISTS temp.{target}")
+    connection.execute(
+        f"CREATE TEMP TABLE {target} "
+        "(key TEXT PRIMARY KEY, accession TEXT NOT NULL) WITHOUT ROWID"
+    )
+    connection.execute(
+        f"INSERT OR IGNORE INTO {target} (key, accession) "
+        f"SELECT k.key, m.accession FROM {source_table} AS k "
+        f"JOIN metadata_data AS m ON m.accession = k.key WHERE {condition}"
+    )
+    connection.execute(
+        f"INSERT OR IGNORE INTO {target} (key, accession) "
+        f"SELECT k.key, MIN(m.accession) FROM {source_table} AS k "
+        "JOIN metadata_data AS m ON m.accession >= k.key || '.' "
+        "AND m.accession < k.key || '/' "
+        f"WHERE {unversioned_sql('k.key')} AND {condition} "
+        "GROUP BY k.key HAVING COUNT(*) = 1"
+    )
+
+
 def _record_overlaps(
     connection: sqlite3.Connection, *, source_id: int, name: str, ord_value: int
 ) -> list[TaxonomyOverlap]:
@@ -365,14 +407,15 @@ def _record_overlaps(
                 (source_id,),
             ).fetchall()
         )
-        # One row per virtual source (there is at most one in a file).
+        # One row per virtual source (there is at most one in a file).  A key
+        # matches a GTDB accession verbatim or, unversioned (GlobDB's
+        # ``GCF_003697165``), as the single GTDB version of that base.
+        match_accessions(connection, "_overlap_keys", "_overlap_gtdb")
         counts.update(
             dict(
                 connection.execute(
-                    "SELECT s.id, COUNT(*) FROM metadata_data AS m "
-                    "JOIN _overlap_keys AS k ON k.key = m.accession "
-                    "JOIN taxonomy_source AS s ON s.kind = 'metadata' "
-                    "WHERE m.gtdb_taxonomy IS NOT NULL GROUP BY s.id"
+                    "SELECT s.id, COUNT(*) FROM _overlap_gtdb AS g "
+                    "JOIN taxonomy_source AS s ON s.kind = 'metadata' GROUP BY s.id"
                 ).fetchall()
             )
         )
@@ -394,10 +437,7 @@ def _record_overlaps(
                 examples = [
                     row[0]
                     for row in connection.execute(
-                        "SELECT DISTINCT k.key FROM _overlap_keys AS k "
-                        "JOIN metadata_data AS m ON m.accession = k.key "
-                        "WHERE m.gtdb_taxonomy IS NOT NULL "
-                        "ORDER BY k.key LIMIT ?",
+                        "SELECT key FROM _overlap_gtdb ORDER BY key LIMIT ?",
                         (OVERLAP_EXAMPLES,),
                     )
                 ]
@@ -427,6 +467,7 @@ def _record_overlaps(
             )
     finally:
         connection.execute("DROP TABLE IF EXISTS temp._overlap_keys")
+        connection.execute("DROP TABLE IF EXISTS temp._overlap_gtdb")
     logger.debug(
         "taxonomy overlap check for %s: %.2f s", name, time.perf_counter() - started
     )

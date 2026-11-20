@@ -86,13 +86,16 @@ Reports:
   `built`, `format_version`, `reps_only` and `sources`, or `null` without `--meta`. It also carries `taxonomy_sources` — one object per
   source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`
   (the catalogue URL it was downloaded from, or the **base name** of a local file — never a
-  local path), `md5`, `keys`, `has_host` — `taxonomy_overlaps` — the pairs of sources that share keys, each
+  local path), `md5`, `keys`, `has_host`, and the `ncbi` counts of a `--ncbi-taxonomy` build and
+  its `ncbi_nearest` counts (`keys` without an NCBI record, `assigned` nearest taxa, `ranks` per
+  rank) — `taxonomy_overlaps` — the pairs of sources that share keys, each
   pair once, in setup order: `{"sources": [a, b], "keys": n, "examples": [...]}`, where `b` is
   the later-imported source and wins for those keys — and `sylphtax_rules` (the sylph-tax version
   whose rules apply). `examples` holds up to five shared keys. `taxonomies` lists every
   taxonomy `/profile` `taxprof` accepts with this file: `gtdb`/`ncbi` when their column exists,
   then `tax` and one `tax:<source>` per taxonomy source (see [`taxprof`](#taxprof)).
-  Its `columns` also list the four `tax_*` columns, which `fields` can then select;
+  Its `columns` also list the four `tax_*` columns, which `fields` can then select, and on a file
+  built with `--ncbi-taxonomy` the five `ncbi_nearest_*` columns of the nearest NCBI taxon;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
   `name` is the string of `--name` (at most 80 characters, one line); `about` is
   `{"format": "markdown", "text": "..."}` with the contents of the `--about` file (UTF-8, at most
@@ -291,6 +294,11 @@ metadata columns of the same name; `tax` needs a metadata file with sylph-tax so
 server adds the taxonomy columns the requested taxonomies need to `rows` even when `fields` hides
 them. `taxprof` is `/profile` only (`/query` rejects it), and one requested taxonomy the metadata
 file cannot provide is a 400.
+
+In `ncbi`, a hit with no NCBI lineage of its own that the metadata file gave a nearest NCBI taxon
+(`ncbi_nearest_lineage`) is placed at that node, its strain directly below it, and the strain's
+clade object carries `"nearest": {"taxid": …, "rank": …, "name": …, "clade": "g__Thiobacillus"}`.
+A metadata file without nearest taxa profiles exactly as before.
 
 `tax:<source>` (for example `tax:UHGV_default`) is one taxonomy source alone, bit-exact
 `sylph-tax taxprof -t <source>`: the hits are resolved against that source only, so the hits of

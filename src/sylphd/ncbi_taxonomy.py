@@ -17,12 +17,13 @@ neither summary is stored.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shutil
 import tarfile
 import tempfile
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import IO
 
@@ -49,8 +50,9 @@ ASSEMBLY_SUMMARIES: dict[str, str] = {
     "GCA_": "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt",
 }
 
-#: ``GCF_000002515.2`` in a key such as ``GCF_000002495.2_MG8``.
-ACCESSION_RE = re.compile(r"GC[AF]_\d+\.\d+", re.IGNORECASE)
+#: ``GCF_000002515.2`` in a key such as ``GCF_000002495.2_MG8``; the version is
+#: optional (GlobDB keys are ``GCF_003697165``), see :func:`assembly_accession`.
+ACCESSION_RE = re.compile(r"GC[AF]_\d+(?:\.\d+)?", re.IGNORECASE)
 
 #: GTDB/NCBI rank prefixes, in lineage order.
 RANKS: tuple[str, ...] = ("d", "p", "c", "o", "f", "g", "s")
@@ -77,6 +79,9 @@ class Assembly:
 
     taxid: int
     organism: str
+    #: The summary's own (versioned) accession, or the requested one when a
+    #: requested version fell back to the base (see :func:`_pick`).
+    accession: str = ""
 
 
 @dataclass(frozen=True)
@@ -90,13 +95,21 @@ class NcbiGenome:
     taxid: int
     organism: str
     lineage: str | None
+    #: The accession the data is stored under: the requested one, or, for an
+    #: unversioned request, the summary's current version of that base.
+    accession: str = ""
 
 
 def assembly_accession(key: str) -> str | None:
     """The assembly accession in ``key``, or ``None`` when it has none.
 
+    The version is optional: an unversioned accession (``GCF_003697165``) is
+    returned as it is and later resolves to the single version NCBI lists.
+
     >>> assembly_accession("GCF_000002495.2_MG8")
     'GCF_000002495.2'
+    >>> assembly_accession("GCF_003697165")
+    'GCF_003697165'
     >>> assembly_accession("UHGV-0405173") is None
     True
     """
@@ -105,7 +118,12 @@ def assembly_accession(key: str) -> str | None:
 
 
 def _base(accession: str) -> str:
-    return accession.rpartition(".")[0]
+    """``GCF_000002515`` of ``GCF_000002515.2`` (and of ``GCF_000002515``)."""
+    return accession.partition(".")[0]
+
+
+def is_versioned(accession: str) -> bool:
+    return "." in accession
 
 
 def _versions(accessions: Iterable[str]) -> dict[str, set[str]]:
@@ -238,12 +256,12 @@ def _collect(
     exact: dict[str, Assembly],
     by_base: dict[str, Assembly],
 ) -> None:
+    assembly = Assembly(taxid, organism, accession)
     if accession in accessions:
-        exact.setdefault(accession, Assembly(taxid, organism))
-        return
+        exact.setdefault(accession, assembly)
     base = _base(accession)
     if base in versions:
-        by_base.setdefault(base, Assembly(taxid, organism))
+        by_base.setdefault(base, assembly)
 
 
 def _pick(
@@ -251,14 +269,26 @@ def _pick(
     by_base: Mapping[str, Assembly],
     versions: Mapping[str, set[str]],
 ) -> dict[str, Assembly]:
-    """Exact accessions first; a base only when the source has one version of it."""
+    """Resolve the requested accessions against what the summaries had.
+
+    Exact accessions first.  An *unversioned* request takes the summary's
+    version of its base (a summary lists one, the current one).  A *versioned*
+    request that is not in the summary falls back to the base only when the
+    sources request a single version of it, and stays stored under the
+    requested accession; with several requested versions it is skipped.
+    """
     found = dict(exact)
     for base, wanted in versions.items():
-        if len(wanted) != 1:
+        if base not in by_base:
             continue
-        accession = next(iter(wanted))
-        if accession not in found and base in by_base:
-            found[accession] = by_base[base]
+        versioned = [accession for accession in wanted if is_versioned(accession)]
+        for accession in wanted:
+            if accession in found:
+                continue
+            if not is_versioned(accession):
+                found[accession] = by_base[base]
+            elif len(versioned) == 1:
+                found[accession] = replace(by_base[base], accession=accession)
     return found
 
 
@@ -379,17 +409,82 @@ def fetch_taxdump(
     return ranked, nodes, merged
 
 
+class Taxdump:
+    """The taxdump files of one ``setup`` run, downloaded on first use.
+
+    ``with Taxdump(cache_dir) as dump`` gives the enrichment and the nearest-taxon
+    step one download between them: :meth:`files` fetches into a temporary
+    directory under ``cache_dir`` the first time it is called, and leaving the
+    block removes everything again (nothing is fetched when nothing asks).
+    """
+
+    def __init__(
+        self, cache_dir: Path | str, *, progress: ProgressCallback | None = None
+    ) -> None:
+        self.cache_dir = Path(cache_dir)
+        self.progress = progress
+        self._directory: tempfile.TemporaryDirectory[str] | None = None
+        self._files: tuple[Path, Path, Path] | None = None
+
+    def files(self) -> tuple[Path, Path, Path]:
+        """``(rankedlineage.dmp, nodes.dmp, merged.dmp)``."""
+        if self._files is None:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            self._directory = tempfile.TemporaryDirectory(
+                dir=self.cache_dir, prefix="taxdump-"
+            )
+            self._files = fetch_taxdump(
+                Path(self._directory.name), progress=self.progress
+            )
+        return self._files
+
+    def close(self) -> None:
+        if self._directory is not None:
+            self._directory.cleanup()
+        self._directory = None
+        self._files = None
+
+    def __enter__(self) -> Taxdump:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+
+def ranked_names(ranked_path: Path, taxids: Iterable[int]) -> dict[int, str]:
+    """``taxid -> scientific name`` (column 1 of ``rankedlineage.dmp``)."""
+    wanted = set(taxids)
+
+    def parse(lines: Iterator[str]) -> dict[int, str]:
+        names: dict[int, str] = {}
+        for line in lines:
+            parts = line.split("|", 2)
+            if len(parts) < 3:
+                continue
+            try:
+                taxid = int(parts[0])
+            except ValueError:
+                continue
+            if taxid in wanted:
+                names[taxid] = parts[1].strip()
+        return names
+
+    return _read(ranked_path, parse)
+
+
 def lookup(
     accessions: Iterable[str],
     cache_dir: Path,
     *,
     progress: ProgressCallback | None = None,
+    taxdump: Taxdump | None = None,
 ) -> dict[str, NcbiGenome]:
     """Resolve each accession to its taxid, organism and NCBI lineage.
 
     An accession NCBI's summaries do not know is absent from the result; one
     whose taxid has no ranked lineage has ``lineage=None``.  The taxdump goes
-    to a temporary directory in ``cache_dir`` that is removed before returning.
+    to a temporary directory in ``cache_dir`` that is removed before returning,
+    unless the caller passes its own ``taxdump`` (then the caller removes it).
     """
     accessions = list(accessions)
     if not accessions:
@@ -397,9 +492,9 @@ def lookup(
     found = fetch_assemblies(accessions, progress=progress)
     if not found:
         return {}
-    Path(cache_dir).mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=cache_dir, prefix="taxdump-") as name:
-        ranked, nodes, merged_path = fetch_taxdump(Path(name), progress=progress)
+    with contextlib.ExitStack() as stack:
+        dump = taxdump or stack.enter_context(Taxdump(cache_dir, progress=progress))
+        ranked, nodes, merged_path = dump.files()
         taxids = {assembly.taxid for assembly in found.values()}
         merged = merged_taxids(merged_path, taxids)
         current = {taxid: merged.get(taxid, taxid) for taxid in taxids}
@@ -409,6 +504,7 @@ def lookup(
             current[assembly.taxid],
             assembly.organism,
             lineages.get(current[assembly.taxid]),
+            assembly.accession or accession,
         )
         for accession, assembly in found.items()
     }
