@@ -49,6 +49,7 @@ nav = [
     { "Terms of the web service" = "project/terms.md" },
     { "Development" = "project/development.md" },
     { "Design notes" = "project/design-notes.md" },
+    { "GlobDB evaluation" = "project/globdb-evaluation.md" },
   ] },
 ]
 
