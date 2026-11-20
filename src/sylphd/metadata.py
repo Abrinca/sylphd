@@ -349,13 +349,19 @@ HIT_TAXONOMY_COLUMNS: tuple[str, ...] = (
 #: The columns of the *nearest* NCBI taxon of a key without an NCBI record
 #: (``setup --ncbi-taxonomy``).  Like ``tax_*`` they are virtual, and only exist
 #: in a file that has the ``taxonomy_nearest`` table; they never replace
-#: ``ncbi_taxid``, which is an assembly's real taxid.
+#: ``ncbi_taxid``, which is an assembly's real taxid.  The ``formal_*`` columns
+#: are the nearest ancestor of the raw taxon that NCBI names formally, for a raw
+#: taxon that is an informally named species (then they differ); otherwise they
+#: equal the raw values.
 NEAREST_COLUMNS: tuple[str, ...] = (
     "ncbi_nearest_taxid",
     "ncbi_nearest_rank",
     "ncbi_nearest_name",
     "ncbi_nearest_clade",
     "ncbi_nearest_lineage",
+    "ncbi_nearest_formal_taxid",
+    "ncbi_nearest_formal_rank",
+    "ncbi_nearest_formal_name",
 )
 
 
@@ -368,6 +374,9 @@ class NearestTaxon:
     name: str
     clade: str
     lineage: str | None
+    formal_taxid: int
+    formal_rank: str
+    formal_name: str
 
 
 @dataclass(frozen=True)
@@ -401,7 +410,8 @@ class HitTaxonomy:
                     NEAREST_COLUMNS,
                     (
                         (nearest.taxid, nearest.rank, nearest.name, nearest.clade,
-                         nearest.lineage)
+                         nearest.lineage, nearest.formal_taxid, nearest.formal_rank,
+                         nearest.formal_name)
                         if nearest is not None
                         else (None,) * len(NEAREST_COLUMNS)
                     ),
@@ -633,7 +643,8 @@ class MetadataDB:
         keys GTDB's metadata covers, keys without an assembly accession, keys
         NCBI's summaries do not have and keys whose taxid has no lineage) and
         its ``ncbi_nearest`` counts (keys without an NCBI record, how many got a
-        nearest NCBI taxon and at which ranks).
+        nearest NCBI taxon, how many of those are an informally named species
+        and the counts per raw rank).
         """
         counts = json.loads(self.info.get("ncbi_taxonomy") or "{}")
         nearest = json.loads(self.info.get("ncbi_nearest") or "{}")
@@ -836,9 +847,12 @@ class MetadataDB:
             placeholders = ", ".join("?" * len(chunk))
             with self._lock:
                 rows = self._connection.execute(
-                    "SELECT n.source_id, n.key, n.taxid, n.clade, t.rank, t.name, "
-                    "t.lineage FROM taxonomy_nearest AS n "
+                    "SELECT n.source_id, n.key, n.taxid, n.clade, n.formal_taxid, "
+                    "t.rank, t.name, t.lineage, "
+                    "f.rank AS formal_rank, f.name AS formal_name "
+                    "FROM taxonomy_nearest AS n "
                     "JOIN ncbi_nearest_taxon AS t ON t.taxid = n.taxid "
+                    "JOIN ncbi_nearest_taxon AS f ON f.taxid = n.formal_taxid "
                     f"WHERE n.key IN ({placeholders})",
                     chunk,
                 ).fetchall()
@@ -849,6 +863,9 @@ class MetadataDB:
                     name=str(row["name"]),
                     clade=str(row["clade"]),
                     lineage=row["lineage"],
+                    formal_taxid=int(row["formal_taxid"]),
+                    formal_rank=str(row["formal_rank"]),
+                    formal_name=str(row["formal_name"]),
                 )
         return found
 

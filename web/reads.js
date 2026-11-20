@@ -966,6 +966,16 @@
     return count === 1 ? 'taxon' : 'taxa';  // vOTU, vGENUS, …: named in the rank control
   }
 
+  // Label a row's nearest NCBI taxon: the raw node ("Thiobacillus (nearest NCBI genus)").  NCBI
+  // names some species only informally ("Clostridia bacterium", "uncultured Collinsella sp."); when
+  // the server's formal taxid differs, name the nearest formally named taxon above it as well.  The
+  // row keeps the raw node and taxid either way.
+  const nearestFormalAbove = (row) => has(row.ncbi_nearest_formal_taxid)
+    && String(row.ncbi_nearest_formal_taxid) !== String(row.ncbi_nearest_taxid);
+  const nearestLabel = (row) => (nearestFormalAbove(row)
+    ? `${row.ncbi_nearest_name} (nearest NCBI taxon; nearest formally named: ${row.ncbi_nearest_formal_rank} ${row.ncbi_nearest_formal_name})`
+    : `${row.ncbi_nearest_name} (nearest NCBI ${row.ncbi_nearest_rank})`);
+
   // Clades of this rank, summed per full path (each clade name is one path):
   // matched by depth in GTDB/NCBI, by the clade's `rank` in a one-source view
   // (its lineages skip ranks). `sources` are the rows outside this taxonomy,
@@ -1005,15 +1015,15 @@
       }
     }
     // Rows placed at a nearest node above this rank have no clade here: they get a group of their
-    // own at their nearest node, named as such ("Thiobacillus (nearest NCBI genus)").
+    // own at their nearest node, named as such ("Thiobacillus (nearest NCBI genus)", or
+    // "Clostridia bacterium (nearest NCBI taxon; nearest formally named: class Clostridia)").
     const nearest = new Map();
     for (const row of sample.rows || []) {
       const at = nearestDepth(row);
       if (!at || at >= depth) continue;
       const value = Number((metric === 'sequence' ? row.Sequence_abundance : row.Taxonomic_abundance) || 0);
-      const label = `${row.ncbi_nearest_name} (nearest NCBI ${row.ncbi_nearest_rank})`;
       const key = `nearest:${row.ncbi_nearest_taxid}`;
-      nearest.set(key, { key, name: label, value: ((nearest.get(key) || {}).value || 0) + value, nearest: true });
+      nearest.set(key, { key, name: nearestLabel(row), value: ((nearest.get(key) || {}).value || 0) + value, nearest: true });
     }
     const sources = [...bySource].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
     const sourced = sources.reduce((n, src) => n + src.value, 0);
@@ -1291,7 +1301,6 @@
       // A hit without an NCBI record may be placed at its nearest NCBI taxon (setup --ncbi-taxonomy):
       // say so, with the GTDB clade the taxon was derived from.
       const nearest = !has(r.ncbi_taxid) && has(r.ncbi_nearest_name);
-      const nearestLabel = `${r.ncbi_nearest_name} (nearest NCBI ${r.ncbi_nearest_rank})`;
       return el('tr', { class: i === 1 ? 'top-row' : null },
         td('#', 'num rank', String(i)),
         td(taxonLabel, null, lineage.length ? el('details', { class: 'lineage', 'data-key': key, open: tv.open.has(key) ? '' : null },
@@ -1312,7 +1321,7 @@
           cont ? el('div', { class: 'sub', title: 'Contained k-mers / genome k-mers', text: `${fmtInt(cont[0])}/${fmtInt(cont[1])} k-mers` }) : null),
         td('NCBI organism', null, has(r.ncbi_organism_name) || has(r.ncbi_taxid) || nearest
           ? el('div', null,
-            has(r.ncbi_organism_name) ? r.ncbi_organism_name : (nearest ? nearestLabel : dash()),
+            has(r.ncbi_organism_name) ? r.ncbi_organism_name : (nearest ? nearestLabel(r) : dash()),
             has(r.ncbi_strain_identifiers) ? el('div', { class: 'sub', text: `strain ${r.ncbi_strain_identifiers}` }) : null,
             nearest
               ? el('div', { class: 'sub', title: `no NCBI assembly record: the consensus NCBI taxon of the GTDB clade ${r.ncbi_nearest_clade}` },

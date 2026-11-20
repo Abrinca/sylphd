@@ -26,9 +26,11 @@ Containment_ind Naive_ANI Contig_name  accession <metadata...>
 `<metadata...>` is the server's metadata columns; with the default `--fields all` a server whose
 metadata file has sylph-tax taxonomy sources appends `tax_source`, `tax_key`, `tax_lineage` and
 `tax_host` after them (the existing columns keep their order, and an explicit `--fields` list is
-unchanged). A file built with `setup --ncbi-taxonomy` has five more virtual columns,
-`ncbi_nearest_taxid`, `ncbi_nearest_rank`, `ncbi_nearest_name`, `ncbi_nearest_clade` and
-`ncbi_nearest_lineage`: the nearest NCBI taxon of a key that has no NCBI record of its own (see
+unchanged). A file built with `setup --ncbi-taxonomy` has eight more virtual columns,
+`ncbi_nearest_taxid`, `ncbi_nearest_rank`, `ncbi_nearest_name`, `ncbi_nearest_clade`,
+`ncbi_nearest_lineage`, `ncbi_nearest_formal_taxid`, `ncbi_nearest_formal_rank` and
+`ncbi_nearest_formal_name`: the nearest NCBI taxon of a key that has no NCBI record of its own and,
+when NCBI only names that taxon informally, the nearest ancestor it names formally (see
 [nearest NCBI taxa](../reference/metadata.md#nearest-ncbi-taxa)). See
 [Profiling reads](../guides/profiling-reads.md) for what they mean.
 

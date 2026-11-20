@@ -105,14 +105,20 @@ TAXONOMIES: tuple[str, ...] = (*TAXONOMY_COLUMNS, SYLPHTAX)
 SYLPHTAX_PROFILE_COLUMNS: tuple[str, ...] = ("tax_source", "tax_key", "tax_lineage")
 
 #: Columns of the nearest NCBI taxon (``setup --ncbi-taxonomy``) the ``ncbi``
-#: profile uses for hits that have no NCBI lineage of their own.  They are
-#: optional: a metadata file without them just has no such fallback.
+#: profile uses for hits that have no NCBI lineage of their own.  The first five
+#: are the raw nearest node; the ``formal_*`` three name the nearest ancestor
+#: NCBI names formally (equal to the raw node unless it is an informal species),
+#: which the web view shows alongside the raw one.  They are optional: a file
+#: without them just has no such fallback.
 NEAREST_PROFILE_COLUMNS: tuple[str, ...] = (
     "ncbi_nearest_lineage",
     "ncbi_nearest_taxid",
     "ncbi_nearest_rank",
     "ncbi_nearest_name",
     "ncbi_nearest_clade",
+    "ncbi_nearest_formal_taxid",
+    "ncbi_nearest_formal_rank",
+    "ncbi_nearest_formal_name",
 )
 
 #: Column headers written by ``sylph-tax taxprof`` (without virus annotation).

@@ -12,26 +12,27 @@ only ever an assembly's real taxid):
    ancestor-or-self with a major rank (species ... domain), so strains and
    no-rank nodes vote as their species; members under NCBI's *unclassified
    sequences*, *other sequences* and *environmental samples* are ignored;
-3. a species NCBI *only* names informally (``specified_species`` 0 in
-   ``nodes.dmp``: *Clostridia bacterium*, *uncultured Collinsella sp.*,
-   *… sp.*) is **not** a placement: the lift of a member, and of the consensus
-   itself, skips such a node and continues to the next ancestor with a major
-   rank (the genus of *uncultured Collinsella sp.*, the class of *Clostridia
-   bacterium*).  This is a structural rule from the taxdump, not a name
-   pattern; ``specified_species`` is the taxdump's own *1 if species in the
-   node's lineage has formal name*;
-4. the clade's **consensus** is the deepest NCBI node that **more than half**
+3. the clade's **consensus** is the deepest NCBI node that **more than half**
    of the members (counted per genome) have as ancestor-or-self.  A strict LCA
    would be pulled up by one misclassified genome; this ignores any minority
    up to just under half, and when no node has a majority the members'
    common ancestors still have all of them, so a split clade still yields the
-   nearest node they share.  The consensus is then lifted again
-   (:meth:`NcbiTree.lift`) and the walk stops at the first (deepest) clade that
-   has one;
-5. the result is stored as the taxid, its rank (``species``, ``genus``,
+   nearest node they share.  The consensus is then lifted to a major rank and
+   the walk stops at the first (deepest) clade that has one;
+4. the result is stored as the taxid, its rank (``species``, ``genus``,
    ``family``, ``order``, ``class``, ``phylum``, ``kingdom``, ``domain``), its
    name and ranked lineage, the GTDB clade it came from and how many members
-   supported it (``members``, ``support`` = the share).
+   supported it (``members``, ``support`` = the share);
+5. NCBI names many species only informally (``nodes.dmp``'s
+   ``specified_species`` is 0: *Clostridia bacterium*, *uncultured Collinsella
+   sp.*, *… sp.*).  The raw consensus is reported as it is; alongside it, the
+   *formal* taxon is the nearest ancestor-or-self of that raw taxon that is not
+   such an informal species (:meth:`NcbiTree.lift_formal`) -- the class
+   *Clostridia* for *Clostridia bacterium*, the genus *Collinsella* for
+   *uncultured Collinsella sp.*.  For a formally named raw taxon the formal
+   taxon is the same node.  The formal taxon is extra information, never a
+   replacement: it is a structural flag from the taxdump, not a pattern on
+   names.
 
 Clades are matched by ``rank__name`` (``g__Thiobacillus``), not by the whole
 path, so a phylum renamed between GTDB releases does not hide a genus whose
@@ -177,18 +178,29 @@ class NcbiTree:
         return chain
 
     def lift(self, taxid: int) -> int | None:
-        """The nearest ancestor-or-self that is a real placement, or ``None``.
-
-        That is the nearest node with a major rank (species ... domain) that is
-        not an **informal species**: NCBI gives a species node without a formal
-        name (``specified_species`` 0: *Clostridia bacterium*, *uncultured
-        Collinsella sp.*) no placement of its own, so the lift continues to the
-        genus, family, class, ... above it.  A formal species (a binomial) is
-        returned as it is.
+        """The nearest ancestor-or-self with a major rank, or ``None``.
 
         ``None`` for a taxid the taxdump does not have, one below an
         uninformative node (``UNINFORMATIVE_ANCESTORS``), or one whose
-        ancestors have no major rank at all.
+        ancestors have no major rank at all.  An informal species
+        (``specified_species`` 0) is returned like any other major rank: this is
+        the raw placement the nearest taxon reports.
+        """
+        chain = self.ancestors(self.current(taxid))
+        if not chain or UNINFORMATIVE_ANCESTORS.intersection(chain):
+            return None
+        return next((node for node in chain if self._ranks[node]), None)
+
+    def lift_formal(self, taxid: int) -> int | None:
+        """The nearest ancestor-or-self that is a *formally named* placement.
+
+        Like :meth:`lift`, but skips a species-rank node with
+        ``specified_species`` 0 (*Clostridia bacterium*, *uncultured Collinsella
+        sp.*): NCBI gives such a node no formal name, so the answer is the
+        genus, family, class, ... above it.  A binomial species is returned as
+        it is, so for a formal taxid this equals :meth:`lift`.
+
+        ``None`` on the same conditions as :meth:`lift`.
         """
         chain = self.ancestors(self.current(taxid))
         if not chain or UNINFORMATIVE_ANCESTORS.intersection(chain):
@@ -210,9 +222,8 @@ def consensus(
 
     ``weights`` maps an already lifted taxid to the number of genomes that have
     it.  The consensus is the deepest node that strictly more than
-    ``threshold`` of the genomes have as ancestor-or-self, lifted with
-    :meth:`NcbiTree.lift` (so an informal species never wins); ``None`` when no
-    informative node qualifies.
+    ``threshold`` of the genomes have as ancestor-or-self, lifted to a major
+    rank; ``None`` when no informative node qualifies.
     """
     total = sum(weights.values())
     if total <= 0:
@@ -274,6 +285,7 @@ _SCHEMA = (
         "    clade TEXT NOT NULL,\n"
         "    members INTEGER NOT NULL,\n"
         "    support REAL NOT NULL,\n"
+        "    formal_taxid INTEGER NOT NULL,\n"
         "    PRIMARY KEY (source_id, key)\n"
         ") WITHOUT ROWID"
     ),
@@ -366,8 +378,11 @@ def compute_nearest(
     never downloads the taxdump.
 
     The tables are dropped and rebuilt on every call, so a rerun is idempotent.
-    The counts are ``{source: {"keys": n, "assigned": n, "ranks": {rank: n}}}``
-    where ``keys`` are the keys with a GTDB-style lineage and no real taxid.
+    The counts are
+    ``{source: {"keys": n, "assigned": n, "informal": n, "ranks": {rank: n}}}``
+    where ``keys`` are the keys with a GTDB-style lineage and no real taxid,
+    ``ranks`` counts the *raw* nearest taxa and ``informal`` how many of them
+    are a species NCBI only names informally (their formal taxon is above them).
     """
     targets = list(_targets(connection))
     if not targets:
@@ -396,27 +411,36 @@ def compute_nearest(
             results[clade] = consensus(tree, weights.pop(clade, Counter()))
         return results[clade]
 
-    assigned: list[tuple[int, str, int, str, int, float]] = []
+    assigned: list[tuple[int, str, int, str, int, float, int]] = []
     counts: dict[str, dict[str, object]] = {}
-    chosen: list[tuple[str, int]] = []
+    chosen: list[tuple[str, int, int]] = []
     for source_id, key, clades in plans:
         name = names.get(source_id, str(source_id))
-        count = counts.setdefault(name, {"keys": 0, "assigned": 0, "ranks": {}})
+        count = counts.setdefault(
+            name, {"keys": 0, "assigned": 0, "informal": 0, "ranks": {}}
+        )
         count["keys"] = int(count["keys"]) + 1  # type: ignore[call-overload]
         for clade in clades:
             result = of(clade)
             if result is None:
                 continue
             taxid, supporting, total = result
-            assigned.append((source_id, key, taxid, clade, total, supporting / total))
-            chosen.append((name, taxid))
+            # The formal taxon is the raw one lifted past an informal species,
+            # never a new vote (so it is always the raw taxon or an ancestor).
+            formal = tree.lift_formal(taxid) or taxid
+            assigned.append(
+                (source_id, key, taxid, clade, total, supporting / total, formal)
+            )
+            chosen.append((name, taxid, formal))
             break
-    taxids = {taxid for _, taxid in chosen}
+    taxids = {taxid for _, taxid, _ in chosen} | {formal for _, _, formal in chosen}
 
     rank_of = {taxid: tree.rank(taxid) or "" for taxid in taxids}
-    for name, taxid in chosen:
+    for name, taxid, formal in chosen:
         count = counts[name]
         count["assigned"] = int(count["assigned"]) + 1  # type: ignore[call-overload]
+        if formal != taxid:
+            count["informal"] = int(count["informal"]) + 1  # type: ignore[call-overload]
         ranks = count["ranks"]
         assert isinstance(ranks, dict)
         ranks[rank_of[taxid]] = ranks.get(rank_of[taxid], 0) + 1
@@ -435,7 +459,8 @@ def compute_nearest(
     )
     connection.executemany(
         "INSERT INTO taxonomy_nearest "
-        "(source_id, key, taxid, clade, members, support) VALUES (?, ?, ?, ?, ?, ?)",
+        "(source_id, key, taxid, clade, members, support, formal_taxid) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         assigned,
     )
     for count in counts.values():

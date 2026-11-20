@@ -288,6 +288,7 @@ RANKED = {
     2: ("", "", "", "", "", "", "", ""),
     10: ("", "", "", "", "", "", "", "Bacteria"),
     12: ("", "", "", "", "Clostridia", "Bacillota", "", "Bacteria"),
+    13: ("", "", "", "", "Clostridia", "Bacillota", "", "Bacteria"),
     20: ("", "", "", "", "", "Pseudomonadota", "", "Bacteria"),
     30: ("", "", "", "", "Gammaproteobacteria", "Pseudomonadota", "", "Bacteria"),
     40: ("", "", "", "Burkholderiales", "Gammaproteobacteria", "Pseudomonadota", "", "Bacteria"),
@@ -295,6 +296,7 @@ RANKED = {
     51: ("", "Thiobacillus", "Hydrogenophilaceae", "Burkholderiales", "Gammaproteobacteria", "Pseudomonadota", "", "Bacteria"),
     60: ("", "", "Hydrogenophilaceae", "Burkholderiales", "Gammaproteobacteria", "Pseudomonadota", "", "Bacteria"),
     80: ("", "Collinsella", "Coriobacteriaceae", "Coriobacteriales", "Coriobacteriia", "Actinomycetota", "", "Bacteria"),
+    81: ("", "Collinsella", "Coriobacteriaceae", "Coriobacteriales", "Coriobacteriia", "Actinomycetota", "", "Bacteria"),
 }
 
 
@@ -324,17 +326,27 @@ def taxdump(tmp_path: Path) -> tuple[Path, Path, Path]:
 def test_tree_lift_and_consensus(taxdump: tuple[Path, Path, Path]) -> None:
     tree = NcbiTree.from_files(taxdump[1], taxdump[2])
     assert tree.rank(51) == "species" and tree.rank(2) == "domain" and tree.rank(52) is None
-    assert tree.lift(51) == 51  # a formal (binomial) species is a placement
+    # lift() is the raw placement: the nearest node with a major rank, even an
+    # informally named species (that is what the nearest taxon reports).
+    assert tree.lift(51) == 51  # a formal species is a placement
     assert tree.lift(52) == 51  # a strain votes as its species
     assert tree.lift(999) == 51  # merged
-    # An informal species (specified_species 0) is not a placement: lift past it.
-    assert tree.lift(63) == 60  # "Tepidiphilus sp." -> its genus
-    assert tree.lift(81) == 80  # "uncultured Collinsella sp." -> its genus
-    assert tree.lift(82) == 80  # a strain below it -> its genus
-    assert tree.lift(13) == 12  # "Clostridia bacterium" -> its class
+    assert tree.lift(63) == 63  # "Tepidiphilus sp."
+    assert tree.lift(81) == 81  # "uncultured Collinsella sp."
+    assert tree.lift(82) == 81  # a strain below it
+    assert tree.lift(13) == 13  # "Clostridia bacterium"
     assert tree.lift(77133) is None  # environmental samples
     assert tree.lift(123456) is None  # not in the taxdump
     assert tree.lift(131567) is None  # nothing with a major rank above it
+    # lift_formal() is the extra information: the same node for a formal taxon,
+    # the genus/class above when NCBI only names the species informally.
+    assert tree.lift_formal(51) == 51
+    assert tree.lift_formal(52) == 51
+    assert tree.lift_formal(63) == 60  # "Tepidiphilus sp." -> its genus
+    assert tree.lift_formal(81) == 80  # "uncultured Collinsella sp." -> its genus
+    assert tree.lift_formal(82) == 80  # a strain below it -> its genus
+    assert tree.lift_formal(13) == 12  # "Clostridia bacterium" -> its class
+    assert tree.lift_formal(2) == 2  # a rank other than species is formal
     # a minority outlier is ignored: three of four agree on the species
     assert consensus(tree, {51: 3, 61: 1}) == (51, 3, 4)
     # different species of one genus: the genus
@@ -345,17 +357,17 @@ def test_tree_lift_and_consensus(taxdump: tuple[Path, Path, Path]) -> None:
     assert consensus(tree, {51: 2, 61: 1, 70: 1}) == (40, 3, 4)
     # nothing in common below the domain
     assert consensus(tree, {51: 1, 70: 1}) == (2, 2, 2)
-    # a consensus that is an informal species is lifted too (belt and braces:
-    # members never vote there, see lift)
-    assert consensus(tree, {81: 4}) == (80, 4, 4)
-    assert consensus(tree, {13: 2}) == (12, 2, 2)
+    # the consensus is the raw node: it may itself be an informal species, and
+    # the formal taxon is the lift_formal() of it (see lift_formal above)
+    assert consensus(tree, {81: 4}) == (81, 4, 4)
+    assert consensus(tree, {13: 2}) == (13, 2, 2)
     assert consensus(tree, {}) is None
 
 
 def test_a_taxdump_without_the_specified_species_column_keeps_species(
     tmp_path: Path,
 ) -> None:
-    # 4-field rows (nothing says "informal"): a species stays a placement
+    # 4-field rows (nothing says "informal"): lift_formal equals lift
     nodes = tmp_path / "nodes.dmp"
     nodes.write_text(
         "1\t|\t1\t|\tno rank\t|\t\t|\n"
@@ -365,7 +377,7 @@ def test_a_taxdump_without_the_specified_species_column_keeps_species(
     merged = tmp_path / "merged.dmp"
     merged.write_text("")
     tree = NcbiTree.from_files(nodes, merged)
-    assert tree.lift(3) == 3
+    assert tree.lift(3) == 3 and tree.lift_formal(3) == 3
 
 
 def test_lineage_clades() -> None:
@@ -429,12 +441,18 @@ def test_nearest_taxa_of_keys_without_a_record(nearest_db: Path) -> None:
         rows = {
             (source, key): rest
             for source, key, *rest in connection.execute(
-                "SELECT s.name, n.key, t.taxid, t.rank, t.name, n.clade, n.members "
+                "SELECT s.name, n.key, t.taxid, t.rank, t.name, n.clade, n.members, "
+                "f.taxid, f.rank, f.name "
                 "FROM taxonomy_nearest AS n JOIN taxonomy_source AS s ON s.id = n.source_id "
-                "JOIN ncbi_nearest_taxon AS t ON t.taxid = n.taxid"
+                "JOIN ncbi_nearest_taxon AS t ON t.taxid = n.taxid "
+                "JOIN ncbi_nearest_taxon AS f ON f.taxid = n.formal_taxid"
             )
         }
-    assert rows[("Mags", "MAG1")] == [51, "species", "Thiobacillus denitrificans", "g__Thiobacillus", 4]
+    # raw taxid, rank, name, clade, members, then formal taxid, rank, name
+    assert rows[("Mags", "MAG1")] == [
+        51, "species", "Thiobacillus denitrificans", "g__Thiobacillus", 4,
+        51, "species", "Thiobacillus denitrificans",  # formal == raw for a binomial
+    ]
     assert rows[("Mags", "MAG2")][:4] == [60, "genus", "Tepidiphilus", "g__Tepidiphilus"]
     # no genus clade, or only uninformative members: the family clade, whose members
     # (4 of 7 in Tepidiphilus) have the genus as consensus
@@ -442,10 +460,15 @@ def test_nearest_taxa_of_keys_without_a_record(nearest_db: Path) -> None:
     assert rows[("Mags", "MAG4")][:4] == [60, "genus", "Tepidiphilus", "f__Hydrogenophilaceae"]
     assert rows[("Mags", "MAG5")][1] == "domain"
     assert ("Mags", "MAG6") not in rows and ("Mags", "UHGV-1") not in rows
-    # NCBI's informal species are not a placement: "uncultured Collinsella sp."
-    # (under a genus) gives the genus, "Clostridia bacterium" (under a class) the class
-    assert rows[("Mags", "MAG7")][:5] == [80, "genus", "Collinsella", "g__Collinsella", 3]
-    assert rows[("Mags", "MAG8")][:5] == [12, "class", "Clostridia", "g__Placeholder", 2]
+    # The raw nearest taxon is NCBI's informal species; the formal one is above it.
+    assert rows[("Mags", "MAG7")] == [
+        81, "species", "uncultured Collinsella sp.", "g__Collinsella", 3,
+        80, "genus", "Collinsella",
+    ]
+    assert rows[("Mags", "MAG8")] == [
+        13, "species", "Clostridia bacterium", "g__Placeholder", 2,
+        12, "class", "Clostridia",
+    ]
     # the virtual GTDB source: a genome without a taxid
     assert rows[("GTDB_r232", "GCA_500000001.1")][3] == "g__Thiobacillus"
     # ncbi_taxid itself is untouched: only real assembly taxids are stored
@@ -459,16 +482,20 @@ def test_nearest_counts_by_source_and_rank(nearest_db: Path) -> None:
     with MetadataDB(nearest_db) as db:
         sources = {s["name"]: s for s in db.taxonomy_sources()}
     mags = sources["Mags"]["ncbi_nearest"]
-    # MAG1..MAG8 and GCF_110000000 are GTDB-style without a record; UHGV-1 is not
-    assert mags["keys"] == 9 and mags["assigned"] == 8
-    assert mags["ranks"] == {"domain": 1, "class": 1, "genus": 4, "species": 2}
+    # MAG1..MAG8 and GCF_110000000 are GTDB-style without a record; UHGV-1 is not.
+    # The ranks are the raw ones; MAG7 and MAG8 are informal species (their formal
+    # taxon is the genus/class above).
+    assert mags["keys"] == 9 and mags["assigned"] == 8 and mags["informal"] == 2
+    assert mags["ranks"] == {"domain": 1, "genus": 3, "species": 4}
     assert sources["GTDB_r232"]["ncbi_nearest"]["assigned"] == 1
+    assert sources["GTDB_r232"]["ncbi_nearest"]["informal"] == 0
 
 
 def test_resolved_hits_carry_the_nearest_taxon(nearest_db: Path) -> None:
     with MetadataDB(nearest_db) as db:
         assert db.has_nearest
         assert "ncbi_nearest_taxid" in db.field_columns and "ncbi_nearest_taxid" not in db.columns
+        assert "ncbi_nearest_formal_taxid" in db.field_columns
         hits = db.resolve([("genomes/MAG1.fa.gz", "MAG1_000000000001"), ("genomes/zzz.fa.gz", "zzz")])
         near = hits[0].columns()
         assert near["tax_key"] == "MAG1"
@@ -477,8 +504,12 @@ def test_resolved_hits_carry_the_nearest_taxon(nearest_db: Path) -> None:
         )
         assert near["ncbi_nearest_clade"] == "g__Thiobacillus"
         assert str(near["ncbi_nearest_lineage"]).startswith("d__Bacteria;p__Pseudomonadota;")
+        # a formally named raw taxon: the formal columns are the same node
+        assert (near["ncbi_nearest_formal_taxid"], near["ncbi_nearest_formal_rank"],
+                near["ncbi_nearest_formal_name"]) == (51, "species", "Thiobacillus denitrificans")
         # a miss has the columns, empty
         assert hits[1].columns()["ncbi_nearest_taxid"] is None
+        assert hits[1].columns()["ncbi_nearest_formal_taxid"] is None
         rows = result_rows(
             db,
             [_fake_result("genomes/MAG1.fa.gz", "MAG1_000000000001")],
@@ -522,9 +553,20 @@ def test_setup_reports_the_nearest_taxa(
     _patch_ncbi(monkeypatch, taxdump)
     gtdb = _tsv(
         tmp_path / "g.tsv",
-        _members("GCF_100000", "d__Bacteria;p__P;f__F;g__Thiobacillus;s__a", [51, 51]),
+        [
+            *_members("GCF_100000", "d__Bacteria;p__P;f__F;g__Thiobacillus;s__a", [51, 51]),
+            # NCBI only names this species informally (see the taxdump fixture)
+            *_members("GCF_200000", "d__Bacteria;p__P;f__F;g__Collinsella;s__c", [81, 81]),
+        ],
     )
-    tax = _taxonomy(tmp_path / "t.gz", ["MAG1\td__Bacteria;p__P;f__F;g__Thiobacillus;s__MOTU", "GCF_110000000\td__Bacteria;p__Q"])
+    tax = _taxonomy(
+        tmp_path / "t.gz",
+        [
+            "MAG1\td__Bacteria;p__P;f__F;g__Thiobacillus;s__MOTU",
+            "MAG2\td__Bacteria;p__P;f__F;g__Collinsella;s__MOTU",
+            "GCF_110000000\td__Bacteria;p__Q",
+        ],
+    )
     code = cli.main(
         [
             "setup", "-m", str(gtdb), "--taxonomy", f"Mags={tax}", "--ncbi-taxonomy",
@@ -533,9 +575,13 @@ def test_setup_reports_the_nearest_taxa(
     )
     err = capsys.readouterr().err
     assert code == 0, err
-    assert "nearest NCBI taxon: 2 of 2 keys without an NCBI record (species 2)" in err
+    assert (
+        "nearest NCBI taxon: 3 of 3 keys without an NCBI record "
+        "(domain 1, species 2; 1 informal, formally named above)"
+    ) in err
     assert list((tmp_path / "cache" / "ncbi").iterdir()) == []  # the taxdump is gone again
-    assert json.loads(MetadataDB(tmp_path / "o.sqlite").info["ncbi_nearest"])["Mags"]["assigned"] == 2
+    counts = json.loads(MetadataDB(tmp_path / "o.sqlite").info["ncbi_nearest"])["Mags"]
+    assert counts["assigned"] == 3 and counts["informal"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -608,6 +654,7 @@ def test_ncbi_profile_falls_back_end_to_end_from_the_metadata(nearest_db: Path) 
         # a profile request adds the columns it needs, and the MAG is not "unclassified"
         fields = _taxprof_fields(["ncbi"], db, None)
         assert "ncbi_taxonomy" in fields and "ncbi_nearest_lineage" in fields
+        assert "ncbi_nearest_formal_taxid" in fields
         rows = result_rows(
             db, [_fake_result("genomes/MAG1.fa.gz", "MAG1_000000000001")],
             "s", mode="profile", fields=fields,

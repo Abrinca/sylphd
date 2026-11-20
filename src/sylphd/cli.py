@@ -1236,14 +1236,22 @@ def _ncbi_counts_text(ncbi: dict[str, Any]) -> str:
 
 
 def _nearest_counts_text(nearest: dict[str, Any]) -> str:
-    """How many keys without an NCBI record got a nearest NCBI taxon, by rank."""
+    """The raw nearest-taxon counts, by rank, plus how many are informal."""
     keys = int(nearest.get("keys") or 0)
     assigned = int(nearest.get("assigned") or 0)
+    informal = int(nearest.get("informal") or 0)
     ranks = ", ".join(
         f"{rank} {int(count):,}" for rank, count in (nearest.get("ranks") or {}).items()
     )
     text = f"nearest NCBI taxon: {assigned:,} of {keys:,} keys without an NCBI record"
-    return f"{text} ({ranks})" if ranks else text
+    if ranks:
+        text += f" ({ranks}"
+        if informal:
+            text += f"; {informal:,} informal, formally named above"
+        text += ")"
+    elif informal:
+        text += f", {informal:,} informal, formally named above"
+    return text
 
 
 def cmd_taxdb(args: argparse.Namespace) -> int:

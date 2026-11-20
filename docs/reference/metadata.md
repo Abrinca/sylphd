@@ -64,8 +64,9 @@ The file contains:
   (`reps_only`).
 
 With `--ncbi-taxonomy` a file also has the [nearest NCBI taxa](#nearest-ncbi-taxa):
-**`taxonomy_nearest`** (`source_id`, `key` → `taxid`, the GTDB `clade` and the member `support`) and
-**`ncbi_nearest_taxon`** (`taxid` → `rank`, `name`, `lineage`). They are optional tables, not a
+**`taxonomy_nearest`** (`source_id`, `key` → `taxid`, its `formal_taxid`, the GTDB `clade` and the
+member `support`) and **`ncbi_nearest_taxon`** (`taxid` → `rank`, `name`, `lineage`, for the raw and
+the formal taxa). They are optional tables, not a
 format change: a file without them (an older file, or one built without the flag) is read exactly
 as before, and its rows simply have no `ncbi_nearest_*` columns.
 
@@ -204,7 +205,7 @@ in one function, `sylphd.metadata.sylphtax_probes`, and `tests/test_sylphtax_par
 the whole path with the real sylph-tax.
 
 A file built with `--ncbi-taxonomy` and a key without an NCBI record also carries the
-[nearest NCBI taxon](#nearest-ncbi-taxa) in five more virtual columns, likewise listed in
+[nearest NCBI taxon](#nearest-ncbi-taxa) in eight more virtual columns, likewise listed in
 `metadata.columns`:
 
 | Column | Meaning |
@@ -214,6 +215,9 @@ A file built with `--ncbi-taxonomy` and a key without an NCBI record also carrie
 | `ncbi_nearest_name` | its scientific name |
 | `ncbi_nearest_clade` | the GTDB clade it came from (`g__Thiobacillus`) |
 | `ncbi_nearest_lineage` | its `d__…;p__…;…;s__…` lineage, for the NCBI profile |
+| `ncbi_nearest_formal_taxid` | the nearest ancestor NCBI names formally, when the raw node is an informally named species, else the raw taxid |
+| `ncbi_nearest_formal_rank` | its rank |
+| `ncbi_nearest_formal_name` | its scientific name |
 
 They are **never** a substitute for `ncbi_taxid`: that one stays `null` unless the key's assembly
 has a real NCBI taxid. `--fields` selects them like any other column (a file without the tables
@@ -263,28 +267,34 @@ the deepest rank upwards. For each GTDB clade (`g__Thiobacillus`, matched by `ra
 renamed parent does not hide it) the `ncbi_taxid`s of the GTDB metadata rows in that clade are
 collected, merged taxids are followed through `merged.dmp`, and each is lifted to its nearest
 ancestor with a major rank (a strain votes as its species); members below NCBI's *unclassified
-sequences*, *other sequences* or *environmental samples* do not vote. An NCBI species that has no
-formal name — the taxdump's `nodes.dmp` `specified_species` is 0, as for *Clostridia bacterium*,
-*uncultured Collinsella sp.* or *Tepidiphilus sp.* — is **not** a placement: the lift continues to
-the genus, family, class, … above it (the genus of *uncultured Collinsella sp.*, the class of
-*Clostridia bacterium*). This is a structural flag from the taxdump, not a pattern on names; a
-species with a binomial (`specified_species` 1) stays. The same lift is applied to the consensus
-node, so a result is never such an informal species. The clade's consensus is the
-deepest NCBI node that **strictly more than half** of the members have as ancestor-or-self, lifted
-to a major rank again. A strict LCA would be dragged to the root by one misclassified genome; the
-majority rule tolerates a minority up to just under half, and when no node has a majority the
-members' shared ancestors still do, so a split clade yields the nearest node they have in common.
-The first (deepest) clade with a consensus wins, so a genus with no informative members falls back
-to its family.
+sequences*, *other sequences* or *environmental samples* do not vote. That gives the clade's
+consensus: the deepest NCBI node that **strictly more than half** of the members have as
+ancestor-or-self, lifted to a major rank. A strict LCA would be dragged to the root by one
+misclassified genome; the majority rule tolerates a minority up to just under half, and when no
+node has a majority the members' shared ancestors still do, so a split clade yields the nearest
+node they have in common. The first (deepest) clade with a consensus wins, so a genus with no
+informative members falls back to its family. The raw taxon is reported as it is, even when it is a
+species NCBI only names informally (*Clostridia bacterium*, *uncultured Collinsella sp.*): that is
+the nearest taxon the profile and the web view place a hit at.
+
+NCBI's `nodes.dmp` says which species have a formal name (`specified_species`, 1 or 0). Alongside
+the raw taxon, the **formal** taxon is the nearest ancestor-or-self of it that is not such an
+informal species — the class *Clostridia* for *Clostridia bacterium*, the genus *Collinsella* for
+*uncultured Collinsella sp.* — computed by lifting the raw taxon, never by a new vote. For a
+formally named raw taxon it is the same node. This is a structural flag from the taxdump, not a
+pattern on names, and it is extra information: it never replaces the raw taxon.
 
 The result is `ncbi_nearest_taxid`, `ncbi_nearest_rank`, `ncbi_nearest_name`,
-`ncbi_nearest_clade` and `ncbi_nearest_lineage` on the key's rows (see
+`ncbi_nearest_clade` and `ncbi_nearest_lineage`, plus `ncbi_nearest_formal_taxid`,
+`ncbi_nearest_formal_rank` and `ncbi_nearest_formal_name`, on the key's rows (see
 [resolving a hit](#resolving-a-hit)), the tables `taxonomy_nearest` and `ncbi_nearest_taxon`, and
 the `info` key `ncbi_nearest`: per source, the number of keys without an NCBI record (`keys`), how
-many got a taxon (`assigned`) and the count per rank. `GET /info` reports it as each source's
+many got a taxon (`assigned`), how many of those are an informally named species (`informal`) and
+the count per raw rank. `GET /info` reports it as each source's
 `ncbi_nearest` object, `setup` and `sylphd info` print it, and the `ncbi` profile and the web NCBI
 view place such hits at that node (the web labels the group, e.g. *Thiobacillus (nearest NCBI
-genus)*, and the `/profile` JSON marks the strain row with a `nearest` object). Profiles of a file
+genus)*, or *Clostridia bacterium (nearest NCBI taxon; nearest formally named: class Clostridia)*,
+and the `/profile` JSON marks the strain row with a `nearest` object). Profiles of a file
 without nearest taxa are byte for byte what they were before.
 
 The nearest step needs the taxdump, which the NCBI enrichment already downloads; it is fetched once
@@ -295,11 +305,10 @@ NCBI knows has its real taxid and gets no nearest taxon. A rerun rebuilds both t
 
 Only format version 3 is read or updated; a file of any other version is refused with a message
 to rebuild it with `sylphd setup`. The [nearest NCBI taxa](#nearest-ncbi-taxa) did **not** bump the
-version: they are two optional tables and five virtual columns, a file without them reads exactly
+version: they are two optional tables and eight virtual columns, a file without them reads exactly
 as before, and nothing about an existing column changed, so every format-3 file stays valid. (A
 file built with `--ncbi-taxonomy` by an older `sylphd` has no nearest taxa; `--update
---ncbi-taxonomy` adds them.)
-`--update` adds sources to an existing file without the GTDB
+--ncbi-taxonomy` adds them.) `--update` adds sources to an existing file without the GTDB
 TSV files:
 
 ```bash

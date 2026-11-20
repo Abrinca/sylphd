@@ -26,18 +26,21 @@ All notable changes to `sylphd` are documented here. The format follows
   clade from the deepest rank up, its GTDB members' NCBI taxids vote, and the deepest NCBI node that
   **strictly more than half** of them have as ancestor-or-self (using `nodes.dmp`, following
   `merged.dmp`) is the nearest taxon. The majority rule replaces a strict LCA, which one misclassified
-  genome would drag to the root. NCBI's species without a formal name are not a placement: the
-  taxdump's `specified_species` (`nodes.dmp` field 16) is 0 for *Clostridia bacterium*, *uncultured
-  Collinsella sp.* and every *… sp.*, and such a node is skipped — the vote, and the result, go to the
-  genus, class, … above it (a `g__Collinsella` MAG gets *Collinsella*, genus rank). A structural
-  flag, not a pattern on names; a binomial species stays. Stored as `ncbi_nearest_taxid`,
-  `ncbi_nearest_rank`, `ncbi_nearest_name`, `ncbi_nearest_clade` and `ncbi_nearest_lineage` — always
-  apart from `ncbi_taxid`, which stays an assembly's real taxid or `null` — in the new
-  `taxonomy_nearest` and `ncbi_nearest_taxon` tables, and reported per source (`keys`, `assigned`,
-  and the counts per rank) by `setup`, `sylphd info` and `GET /info` as
-  `metadata.taxonomy_sources[].ncbi_nearest`. The `ncbi` profile and the web NCBI view use it as a
-  fallback (the web labels the group, e.g. *Thiobacillus (nearest NCBI genus)*; the `/profile` JSON
-  marks the strain row with a `nearest` object). Profiles of a file without nearest taxa are byte for
+  genome would drag to the root. That raw node is reported as it is, even when it is a species NCBI
+  only names informally (*Clostridia bacterium*, *uncultured Collinsella sp.*) — it is what the
+  profile and the web view place a hit at. Next to it the metadata says which ancestor NCBI names
+  **formally**, from `nodes.dmp`'s `specified_species` (field 16; a structural flag, not a pattern on
+  names): `ncbi_nearest_formal_taxid`, `ncbi_nearest_formal_rank` and `ncbi_nearest_formal_name` are
+  the class *Clostridia* for *Clostridia bacterium*, the genus *Collinsella* for *uncultured
+  Collinsella sp.*, and the raw taxon itself for a binomial. Stored as `ncbi_nearest_taxid`,
+  `ncbi_nearest_rank`, `ncbi_nearest_name`, `ncbi_nearest_clade`, `ncbi_nearest_lineage` and the three
+  `formal_*` columns — always apart from `ncbi_taxid`, which stays an assembly's real taxid or `null`
+  — in the new `taxonomy_nearest` and `ncbi_nearest_taxon` tables, and reported per source (`keys`,
+  `assigned`, `informal`, and the counts per raw rank) by `setup`, `sylphd info` and `GET /info` as
+  `metadata.taxonomy_sources[].ncbi_nearest`. The `ncbi` profile and the web NCBI view use the raw
+  node as a fallback, and the web names the formal taxon too when the two differ (*Clostridia
+  bacterium (nearest NCBI taxon; nearest formally named: class Clostridia)*); the `/profile` JSON
+  marks the strain row with a `nearest` object. Profiles of a file without nearest taxa are byte for
   byte unchanged. No format bump: the tables are optional, format 3 stays, and an older file reads
   exactly as before.
 
