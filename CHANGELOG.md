@@ -8,6 +8,12 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **Web: all options visible, and an ANI slider in Reads mode.** The "Options" section of Reads mode
+  and the "Consensus options" of the per-contig assembly form are no longer collapsed: every field is
+  shown in a compact row (the consensus fields now share the per-contig row). Reads mode has a small
+  slider (90 to 95, whole numbers) next to the minimum ANI input; the number input stays the value,
+  so any number can still be typed, and the slider then shows the nearest position.
+
 - **GlobDB r232, and genomes named without an assembly version.** The catalogue lists
   `globdb_r232_sylph_v2_c200.syl2db` (346,232 genomes) with the sylph-tax source `GlobDB_r232`
   (346,233 keys: `QXLSG_01327` is in no genome). GlobDB names its genomes `GCA_041167105` and its

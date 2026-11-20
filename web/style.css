@@ -596,10 +596,16 @@ details.lineage li span { min-width: 0; overflow-wrap: break-word; }
 .implied-note { color: var(--accent); font-weight: 600; }
 .field-name input { width: min(24em, 100%); }
 .field-name { max-width: 100%; }
-details.adv { margin-top: 14px; }
-details.adv summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .95rem; width: max-content; }
-details.adv[open] summary { margin-bottom: 4px; }
-details.adv .options { margin-top: 10px; }
+/* Options that used to sit behind a collapsed section, now always shown */
+.pc-consensus-note { margin: 8px 0 0; font-size: .85rem; color: var(--muted); }
+.opt-checks { margin-top: 4px; }
+.opt-checks .check { margin-top: 8px; }
+.field-ani > label { display: block; }
+.ani-row { display: flex; align-items: center; gap: 10px; }
+.ani-row input[type="number"] { width: 6.5em; }
+.ani-slide { display: flex; flex-direction: column; gap: 0; width: 12.5em; max-width: 100%; }
+.field .ani-slider { width: 100%; min-height: 0; padding: 0; margin: 0; border: 0; background: transparent; accent-color: var(--accent); height: 18px; }
+.ani-ends { display: flex; justify-content: space-between; gap: 6px; font-size: .68rem; line-height: 1.1; white-space: nowrap; color: var(--muted); }
 
 /* progress */
 .steps { display: flex; list-style: none; margin: 4px 0 16px; padding: 0; gap: 0; }

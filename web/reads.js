@@ -13,6 +13,8 @@
 
   const MEM_WARN = 1.5 * 1024 ** 3; // wasm memory is capped at 4 GiB per instance
   const DEFAULT_MIN_ANI = 95;
+  const ANI_SLIDER_MIN = 90;
+  const ANI_SLIDER_MAX = 95;
   const DEFAULT_MIN_KMERS = 10;
   const MAX_ROWS_SHOWN = 100;
   const NAME_MAX = 100;
@@ -109,6 +111,8 @@
   ui.fileMsg = el('p', { class: 'input-msg', role: 'alert', hidden: true });
   ui.name = el('input', { type: 'text', id: 'r-name', maxlength: String(NAME_MAX), autocomplete: 'off', spellcheck: 'false', placeholder: 'sample' });
   ui.minAni = el('input', { type: 'number', id: 'r-min-ani', min: '0', max: '100', step: '0.1', value: String(DEFAULT_MIN_ANI), inputmode: 'decimal' });
+  // Compact slider for the common range (90-95, whole numbers). The number input stays the value.
+  ui.aniSlider = el('input', { type: 'range', id: 'r-min-ani-slider', class: 'ani-slider', min: String(ANI_SLIDER_MIN), max: String(ANI_SLIDER_MAX), step: '1', value: String(DEFAULT_MIN_ANI), 'aria-label': 'Minimum ANI, quick choice from 90 to 95 percent', 'aria-controls': 'r-min-ani' });
   ui.minKmers = el('input', { type: 'number', id: 'r-min-kmers', min: '0', step: '1', value: String(DEFAULT_MIN_KMERS), inputmode: 'numeric' });
   // On by default: without it sylph shares the sample out over the genomes it found, so the
   // reads of organisms missing from every database (the "dark matter") are not shown at all.
@@ -129,12 +133,14 @@
   const form = el('form', { id: 'r-form', novalidate: true },
     fileInput, ui.drop, ui.fileList, ui.sketchInfo, ui.layout, ui.fileMsg,
     el('div', { class: 'options' },
-      el('label', { class: 'field field-name', for: 'r-name' }, el('span', { text: 'Sample name' }), ui.name)),
-    el('details', { class: 'adv' },
-      el('summary', { text: 'Options' }),
-      el('div', { class: 'options' },
-        el('label', { class: 'field', for: 'r-min-ani' }, el('span', { text: 'Minimum ANI (%)' }), ui.minAni),
-        el('label', { class: 'field', for: 'r-min-kmers' }, el('span', { text: 'Minimum k-mers per genome' }), ui.minKmers)),
+      el('label', { class: 'field field-name', for: 'r-name' }, el('span', { text: 'Sample name' }), ui.name),
+      el('div', { class: 'field field-ani' },
+        el('label', { for: 'r-min-ani', text: 'Minimum ANI (%)' }),
+        el('div', { class: 'ani-row' }, ui.minAni,
+          el('div', { class: 'ani-slide' }, ui.aniSlider,
+            el('div', { class: 'ani-ends', 'aria-hidden': 'true' }, el('span', { text: '90: finds relatives' }), el('span', { text: '95: default' }))))),
+      el('label', { class: 'field', for: 'r-min-kmers' }, el('span', { text: 'Minimum k-mers per genome' }), ui.minKmers)),
+    el('div', { class: 'opt-checks' },
       el('label', { class: 'check' }, ui.unknown,
         el('span', null, el('strong', { text: 'Estimate unknown fraction' }), ' (sylph ', el('code', { text: '--estimate-unknown' }),
           '): also shows how much of the sample no database covers (the dark matter). Turn it off for sylph’s plain shares of the genomes found.', ui.unknownImplied)),
@@ -326,6 +332,18 @@
   });
   ui.name.addEventListener('input', () => { st.nameTouched = true; refresh(); });
   for (const i of [ui.minAni, ui.minKmers]) i.addEventListener('input', refresh);
+  // The slider only writes round numbers into the number input; the number input drives the slider
+  // (nearest in-range position, the typed value is never changed).
+  function syncAniSlider() {
+    const v = Number(ui.minAni.value);
+    if (ui.minAni.value.trim() === '' || !Number.isFinite(v)) return;
+    ui.aniSlider.value = String(Math.min(ANI_SLIDER_MAX, Math.max(ANI_SLIDER_MIN, Math.round(v))));
+  }
+  ui.aniSlider.addEventListener('input', () => {
+    ui.minAni.value = ui.aniSlider.value;
+    refresh();
+  });
+  ui.minAni.addEventListener('input', syncAniSlider);
 
   /* -------------------------------------------------------- readiness UI */
   const PROBLEM_HINT = {
@@ -411,7 +429,7 @@
     ui.hint.hidden = !(st.files.length && hint);
     fileInput.disabled = st.busy;
     ui.name.disabled = st.busy;
-    for (const i of [ui.minAni, ui.minKmers, ui.unknown, ui.readCounts, ui.sketchOnly]) i.disabled = st.busy;
+    for (const i of [ui.minAni, ui.aniSlider, ui.minKmers, ui.unknown, ui.readCounts, ui.sketchOnly]) i.disabled = st.busy;
     if (ui.readCounts.checked) ui.unknown.disabled = true; // implied by estimated read counts
     ui.drop.classList.toggle('disabled', st.busy);
     ui.drop.setAttribute('aria-disabled', String(st.busy));
