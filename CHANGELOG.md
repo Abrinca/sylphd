@@ -8,6 +8,11 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed
 
+- **Data licence texts.** The terms page and `docs/project/terms.md` state that results contain
+  GlobDB and GTDB data, both CC BY-SA 4.0, to be cited and shared under the same licence if
+  published or redistributed, and that your own sequences and the numbers (ANI, abundances) are
+  yours. `deploy/sylphd.service` now defaults `SYLPH_META` to `meta-globdb-r232.sqlite`, the name
+  `deploy/README.md` and `site.env.example` use (it named an unrelated `meta-r232-reps-v3.sqlite`).
 - **The public server switches from GTDB r232 to GlobDB r232** (346,232 genomes, GTDB taxonomy),
   with UHGV and RefSeq fungi (32.2 GB in total). The web page, the README and the docs say so: the
   "idea" figure and size table are redrawn to scale (GlobDB 31.19 GB, 432× the 74.5 MB sketch), the
@@ -33,6 +38,22 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **Operator messages: `sylphd serve --messages FILE`.** FILE is JSON, a list of
+  `{"level": "info"|"warning"|"danger", "title", "message"}` (Markdown message; at most 20
+  messages, 120-character titles, 2000-character messages). `GET /messages` returns
+  `{"messages": [...]}` (empty without the option), open like `/info`, also with `--require-token`,
+  and listed in `/info` `endpoints`. The file is re-read when it changes; a bad version keeps the
+  last good list and logs a warning, a bad file at startup is an error. The web page shows the
+  messages under the server status bar (`info` blue and `warning` amber with a × that is remembered
+  in localStorage under a hash of level, title and message, `danger` red and not dismissible;
+  rendered with the same sanitising as the about text; read with every successful `/info` check;
+  a server without the endpoint shows nothing). `sylphd profile`, `query` and `assembly` print the
+  `warning` and `danger` messages on stderr once per run (not `info`; `-q` where it exists); an
+  absent endpoint, timeout (3 s) or error is ignored. `deploy/messages.example.json` holds the
+  data-licence and terms notes of the public instance.
+- **`/info` reports a data licence per database**: `databases[].licence` is
+  `{"name": "CC BY-SA 4.0", "url": ...}` or `null`. It comes from the download catalogue, matched on
+  the file name: the GTDB and GlobDB files are CC BY-SA 4.0, everything else is `null` (not known).
 - **A compatibility test against the real `sylph` binary** (`tests/test_sylph_compat.py`, run with
   `SYLPH_BIN=/path/to/sylph uv run pytest tests/test_sylph_compat.py`; skipped when no binary is
   found). It compares `query`, `profile` and `profile -u` TSV byte for byte on shared sylph-made

@@ -235,7 +235,8 @@ gtdb-r232-c200-dbv2.syl2db database. It contains 199,923 prokaryotic species fro
 eukaryotes (fungi, human, etc.).
 ```
 
-- **Terms of use:** if your instance has any, put them into the about text (the
+- **Terms of use:** if your instance has any, put them into the about text, or into an `info`
+  [operator message](#operator-messages) that links to them (the
   [terms of the Abrinca web service](../project/terms.md) are one example). There is no separate
   setting.
 - **Editing without a restart:** the server looks at the file's modification time and size on every
@@ -251,6 +252,45 @@ eukaryotes (fungi, human, etc.).
   dropped tag stays as text.
 - **Trust:** when a visitor has connected to a server other than the page's default, the page adds
   "This text comes from the server you connected to; sylphd does not verify it."
+
+## Operator messages { #operator-messages }
+
+`--messages FILE` publishes short notices: a standing licence note, a warning about a slow
+database, a maintenance announcement. The file is UTF-8 JSON, a list of objects with exactly the
+keys `level`, `title` and `message`:
+
+```json
+[
+  {"level": "info", "title": "Data licence",
+   "message": "Results contain GlobDB and GTDB data, both licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). [Details](https://abrinca.github.io/sylphd/terms.html)"},
+  {"level": "warning", "title": "Slow today",
+   "message": "A database is being rebuilt; expect **longer** waits."},
+  {"level": "danger", "title": "Maintenance",
+   "message": "The service stops at 22:00 UTC."}
+]
+```
+
+`deploy/messages.example.json` holds the two standing `info` messages of the public instance.
+
+- **Levels:** `info` (neutral), `warning` (amber) and `danger` (red). The web page shows them in a
+  compact area directly under the server status bar. `info` and `warning` have a small ×; the page
+  remembers the dismissal in the browser (localStorage) under a hash of level, title and message,
+  so a message whose text you change appears again. `danger` cannot be dismissed.
+- **Command line:** `sylphd profile`, `query` and `assembly` (also `--per-contig`) fetch the messages once
+  per run and print `warning` and `danger` on stderr (`sylphd: warning: TITLE: text`, links as
+  `text (url)`), but not `info`. `-q` silences them where the command has it. A server without the
+  endpoint, a slow one (3 s) or an error never affects the run.
+- **Limits:** at most 20 messages, `title` one line of at most 120 characters, `message` Markdown of
+  at most 2000 characters, file at most 64 KiB. Unknown keys, other levels and non-strings are
+  errors. Markdown is rendered as for the about text (a safe subset, never HTML).
+- **Editing without a restart:** like `--about`, the file is re-read when its modification time or
+  size changes. If the new file is invalid the last good list stays and a warning is logged once;
+  a bad file at startup is an error. The web page picks changes up when it connects (reload or
+  reconnect); clients fetch them per run.
+- **Public and untrusted:** `GET /messages` is open (see the [HTTP API](../reference/http-api.md#get-messages)),
+  so do not put anything private in it.
+
+The `licence` that `/info` reports per database comes from the catalogue, not from this file.
 
 ## Using the web app against your server
 

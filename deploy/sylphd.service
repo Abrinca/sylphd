@@ -15,7 +15,7 @@ Environment=HOME=/srv/sylphd PYTHONUNBUFFERED=1
 # Defaults; setup-server.sh overrides them from site.env.  SYLPH_DB_ARGS is
 # expanded unquoted so systemd splits it into one argument per --db.
 Environment="SYLPH_DB_ARGS=--db /srv/sylphd/db/gtdb-r232-c200-dbv2.syl2db"
-Environment=SYLPH_META=meta-r232-reps-v3.sqlite
+Environment=SYLPH_META=meta-globdb-r232.sqlite
 Environment="SYLPH_SERVE_ARGS=--allow-sequences --max-jobs 2 --max-contigs 100 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin *"
 
 ExecStart=/srv/sylphd/current/bin/sylphd serve \

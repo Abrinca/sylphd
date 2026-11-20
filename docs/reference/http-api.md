@@ -9,13 +9,14 @@ authentication; see the [security notes](security.md).
 | `/` | GET | service name, version and the endpoints this server offers |
 | `/health` | GET | liveness: status, version, uptime, jobs running and queued |
 | `/info` | GET | database, metadata, limits and endpoints |
+| `/messages` | GET | the operator's messages (`--messages`), an empty list without the option |
 | `/query` | POST | ANI hits of uploaded sketches |
 | `/profile` | POST | taxonomic profile of uploaded sketches |
 | `/assembly` | POST | closest genomes of one assembly, sent as a sketch (always) or as raw sequence (only with `--allow-sequences`) |
 | `/contigs` | POST | one classified result per contig of a fragmented assembly (contig-relative ANI, hits, consensus) |
 | `/usage` | GET | aggregated usage statistics, only on a server started with `--usage-db` (otherwise `404`) |
 
-`/health` and `/info` are always served. The abuse limits (`--rate-limit`, `--max-queue`) apply to
+`/health`, `/info` and `/messages` are always served. The abuse limits (`--rate-limit`, `--max-queue`) apply to
 the four POST endpoints and to `GET /usage`. With `curl` over a Unix socket:
 
 ```bash
@@ -83,7 +84,12 @@ Reports:
   is `true` for a GTDB database and also for GlobDB, whose `GCA_`/`GCF_` names are GTDB accessions
   with or without the assembly version: it means "the genome names are GTDB accessions", not "this
   is GTDB's database". A fungi or UHGV server that has GTDB metadata only for taxonomy lookups reports `false`). Results carry no
-  per-database field: a hit belongs to the database whose taxonomy it has;
+  per-database field: a hit belongs to the database whose taxonomy it has. Each entry also has
+  `licence`: `{"name": "CC BY-SA 4.0", "url": "https://creativecommons.org/licenses/by-sa/4.0/"}`
+  or `null`. It comes from the catalogue of `sylphd download`, matched on the **file name** (not
+  the `--db` alias), and is known for the GTDB and GlobDB files (both CC BY-SA 4.0). It is `null`
+  for every other file (UHGV, RefSeq fungi, your own databases): `null` means "not known", not
+  "unrestricted";
 - `metadata`: `file` (the base name of the SQLite file), `size`, `columns`, `rows`, `release`,
   `built`, `format_version`, `reps_only` and `sources`, or `null` without `--meta`. It also carries `taxonomy_sources` — one object per
   source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`
@@ -122,12 +128,31 @@ Reports:
   "taxa", "fuzzy", "rate_limit"}`; see [`/taxonomy/*`](#taxonomy);
 - `access`: `{"token_required": bool}` (`--require-token`), plus `"token_valid": bool` when the request
   carried `Authorization: Bearer ...`; see [Access tokens](#access-tokens);
-- `endpoints`: the endpoint paths this server serves (`/usage` only when it is on);
+- `endpoints`: the endpoint paths this server serves (`/usage` only when it is on; `/messages` is listed by servers that have it);
 - `params`: the keys each POST endpoint accepts, so a client does not have to probe with 400s:
   `{"/profile": [...], "/query": [...], "/contigs": [...], "/assembly": [...]}`. The lists are
   derived from the validators: `/query` and `/profile` list the `ProfileParams` fields plus
   `names`, `fields`, `mode` and `tax_sources`, and `/profile` adds `taxprof`; `/contigs` lists its
   `params` keys (including `contigs`); `/assembly` lists its query-string parameters.
+
+## `GET /messages` { #get-messages }
+
+The operator's messages, for clients to show. The answer is `{"messages": [...]}`, an empty list
+when the server was started without `--messages`. Each message has exactly three fields:
+
+| Field | Meaning |
+|---|---|
+| `level` | `info`, `warning` or `danger` |
+| `title` | one line of text, at most 120 characters |
+| `message` | Markdown, at most 2000 characters; treat it as untrusted like `about` (the web page renders it with the same sanitising) |
+
+There are no ids or dates: a client recognises a message by its content (the web page remembers
+a dismissed `info` or `warning` message by a hash of level, title and message, so changed text
+shows again). The server re-reads the file when it changes. `/messages` is open and not
+rate-limited like `/info`, and also answered when `--require-token` is on. A server older than this
+endpoint answers `404`; clients must treat that as "no messages". The web page reads it when it
+connects to a server, and `sylphd profile`, `query` and `assembly` print the `warning` and
+`danger` messages on stderr, see [Operator messages](../guides/public-server.md#operator-messages).
 
 ## `GET /usage` { #get-usage }
 

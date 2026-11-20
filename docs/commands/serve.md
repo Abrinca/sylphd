@@ -10,7 +10,8 @@ sylphd serve --db [NAME=]PATH [--db [NAME=]PATH ...] [--meta PATH]
              [--max-jobs N] [--max-contigs N] [--max-upload-mb N] [--hash]
              [--allow-sequences] [--max-sequence-mb N] [--rate-limit N/min]
              [--max-queue N] [--privileged-token-file FILE] [--require-token] [--trusted-proxy IP]
-             [--cors-origin ORIGIN] [--name TEXT] [--about FILE] [--usage-db FILE]
+             [--cors-origin ORIGIN] [--name TEXT] [--about FILE] [--messages FILE]
+             [--usage-db FILE]
              [--taxonomy-db FILE] [--taxonomy-rate-limit N/min] [--log-level LEVEL]
 ```
 
@@ -102,6 +103,7 @@ All off by default.
 | `--cors-origin ORIGIN` | none | allowed CORS origin; repeatable. `'*'`, a specific origin, or `local` |
 | `--name TEXT` | none | display name of the instance (one line, at most 80 characters), reported as `name` by `/info` and shown by the web page |
 | `--about FILE` | none | UTF-8 Markdown file (at most 16 KiB) describing the instance, reported as `about` by `/info` and shown by the web page. Checked at startup (an unreadable or too large file is an error) and re-read whenever it changes, so you can edit it without restarting; see [Describing your instance](../guides/public-server.md#describing-your-instance) |
+| `--messages FILE` | none | JSON file (at most 64 KiB) with operator messages, a list of `{"level", "title", "message"}` objects; served at `GET /messages`, shown under the status bar of the web page and, for `warning` and `danger`, printed by the client commands. Checked at startup (a bad file is an error) and re-read whenever it changes; see [Operator messages](../guides/public-server.md#operator-messages) |
 
 The details of the limits, client identity and CORS are in
 [Running a public server](../guides/public-server.md).

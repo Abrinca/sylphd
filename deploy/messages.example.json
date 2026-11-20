@@ -1,0 +1,12 @@
+[
+  {
+    "level": "info",
+    "title": "Data licence",
+    "message": "Results contain GlobDB and GTDB data, both licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). If you publish or redistribute them, cite the sources and share them under the same licence. [Details](https://abrinca.github.io/sylphd/terms.html)"
+  },
+  {
+    "level": "info",
+    "title": "Terms",
+    "message": "Free public service, without any guarantee of availability or correctness. Your reads are sketched locally; only the sketch is uploaded. [Terms of use](https://abrinca.github.io/sylphd/terms.html)"
+  }
+]

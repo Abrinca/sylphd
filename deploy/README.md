@@ -50,8 +50,12 @@ The scripts are the mechanism; these are the knobs you choose:
   spaces, e.g. `SYLPH_NAME="GTDB r232"`; it becomes `--name`).
   `--usage-db /srv/sylphd/usage/usage.sqlite` turns on opt-in
   [usage statistics](#usage-statistics); it is **not** part of the shipped set.
+  `--messages /etc/sylphd/messages.json` publishes short notices under the status bar of the web
+  page (and as warnings on the command line); `deploy/messages.example.json` holds the data-licence
+  and terms notes of the public instance. Install it by hand like the about file; see
+  [Operator messages](../docs/guides/public-server.md#operator-messages).
   Narrow `--cors-origin` to your page's origin if you run one. Terms of use,
-  if you have any, go into the `--about` text. See
+  if you have any, go into the `--about` text or an `info` message. See
   [Running a public server](../docs/guides/public-server.md) and the
   [security notes](../docs/reference/security.md).
 - **Databases** — `SYLPH_DB` in `site.env`: one file name in `/srv/sylphd/db`,
