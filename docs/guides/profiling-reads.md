@@ -27,7 +27,7 @@ Both take the same inputs and options; see the [`profile`](../commands/profile.m
 - **Use when:**
     - measuring community composition in a read set;
     - using databases with many related genomes (GTDB, GlobDB), where `query` would list many relatives of each organism;
-    - building taxonomic profiles (`--taxprof`, `--taxmatrix`), as `sylph-tax` does.
+    - building taxonomic profiles (`--taxprof`, `--taxmatrix`); the `tax` profile is equivalent to sylph-tax v1.9.2 output (check with `sylphd diff`).
 
 **`sylphd assembly`**: the closest genomes of one assembly, with a species call at 95 % ANI. See
 [Identifying an assembly](assembly.md).
@@ -138,8 +138,11 @@ profile:  Sample_file Genome_file Taxonomic_abundance Sequence_abundance
 | `Contig_name` | contig name and description recorded for the genome in the database |
 | `accession` | genome accession (`GCA_...`/`GCF_...`) derived from `Genome_file`; empty when there is none |
 
-Missing values are written as sylph writes them, so the sylph columns of the TSV are byte-identical
-to sylph's (the metadata columns and `accession` use empty cells). For a sketch without read
+Missing values are written as sylph writes them, so the text of every row is identical
+to sylph's (the metadata columns and `accession` use empty cells). The TSV is equivalent to sylph 1.0.0's:
+the same genomes and the same values, but rows with exactly equal abundance (or ANI) can come in a
+different order, which stock sylph itself varies between runs with several threads. Check with
+[`sylphd diff`](../commands/diff.md). For a sketch without read
 statistics (one made from contigs or an assembly) under
 `--estimate-unknown`, `True_cov` is `inf` and the abundances are `NaN`.
 

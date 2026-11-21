@@ -43,7 +43,7 @@ that still suggests otherwise; the sections are updated to match.
 - **`Profiler` construction cost** is solved in sylphd by caching `Profiler` objects per parameter
   set; no fork change. The optional pysylph `check_duplicates` switch is deferred until
   measurements show the cache is not enough.
-- **`--taxonomy tax`** is bit-exact sylph-tax; `gtdb` and `ncbi` keep sylphd's normalisation.
+- **`--taxonomy tax`** follows sylph-tax rule for rule (equivalent on a real run, see `sylphd diff`); `gtdb` and `ncbi` keep sylphd's normalisation.
 - **`--taxmatrix`** switches to `sylph-tax merge`'s sorted clade order and gains ANI and coverage
   matrices like `sylph-tax merge --column ANI|Coverage` (B4).
 - **Taxonomy sources for the target:** `GTDB_r232` (full GTDB metadata, as today), `UHGV_default`

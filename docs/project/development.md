@@ -32,20 +32,24 @@ only needed for manual runs.
 | `test_taxonomy.py` | `taxonomy.py`: profile aggregation, `.sylphmpa` and clade rendering |
 | `test_taxonomy_resolve.py` | hit → lineage resolution: probe rules, precedence, `tax_*` rows |
 | `test_taxprof_payload.py` | the server-side `taxprof` payload: text and round-trippable clades |
-| `test_sylphtax_parity.py`, `test_taxmatrix_parity.py` | byte-for-byte parity with the real `sylph-tax` (`tax` profile, `merge`) |
+| `test_sylphtax_parity.py`, `test_taxmatrix_parity.py` | rule-for-rule parity with the real `sylph-tax` (`tax` profile, `merge`), byte for byte on rows that have the TSV's precision |
+| `test_parity.py` | `sylphd diff`: its rules, and real GlobDB output of stock sylph / sylph-tax against sylphd's (equivalent, not byte-identical) |
 | `test_assembly_per_contig.py` | `POST /contigs` and `sylphd assembly --per-contig` end to end |
 | `test_about.py`, `test_deploy.py` | `--name`/`--about` in `/info`, and the `SYLPH_DB` rendering of the systemd unit |
 | `test_web_about_browser.py`, `test_web_reads_taxprof.py` | the page in headless Chromium: the operator text from `/info`, and the Reads chart from the server's `taxprof` |
 | `test_web_contigs_js.py`, `test_web_contigs_download.py` | browser per-contig sketching against pysylph, and its TSV/JSON against `sylphd assembly --per-contig` |
 | `test_web_sylsp_js.py` | `readSylspHeader` against `sylphd.sketchcheck` |
-| `test_sylph_compat.py` | byte-identical TSV against the real `sylph` binary (skipped without one), and pysylph's sketches against `sylph sketch` |
+| `test_sylph_compat.py` | identical row text, and an equivalent TSV, against the real `sylph` binary (skipped without one), and pysylph's sketches against `sylph sketch` |
 | `web_golden.py` | helper (not a test): the single-database `/info` and `/assembly` goldens |
 
 ### Checking against a new sylph release
 
 `tests/test_sylph_compat.py` runs the real `sylph` binary and sylphd on the same sylph-made
 sketches and requires the TSV of `query`, `profile` and `profile -u` to be byte-identical (only
-`Sample_file` and sylphd's extra `accession` column are dropped). A separate class compares
+`Sample_file` and sylphd's extra `accession` column are dropped), run with `sylph -t 1`. Rows with
+exactly equal values may be ordered differently (stock sylph's own order of ties depends on thread
+scheduling, and pysylph orders the survivors of a two-stage screen by name), so the tie tests use
+[`sylphd diff`](../commands/diff.md) instead. A separate class compares
 pysylph's sketches with `sylph sketch` (single-end identical, paired with a small tolerance). Run it
 before and after bumping sylph or pysylph:
 

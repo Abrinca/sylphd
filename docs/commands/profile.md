@@ -62,9 +62,11 @@ These need a server with `--meta`; `tax` additionally needs a metadata file with
 sources. The aggregation happens on the server (`/profile` `taxprof`): the command writes the
 returned `.sylphmpa` text and only lays out the matrix across samples. `tax` needs a metadata file
 with sylph-tax sources, where the **default `--taxprof` writes three files per sample** (`.gtdb`, `.ncbi`, `.tax`)
-instead of two — pass `--taxonomy gtdb,ncbi` for the old set. `tax` is bit-exact `sylph-tax taxprof` over all sources (opaque lineages, `UNKNOWN`,
-`NO_TAXONOMY`, level-based ordering); `tax:SOURCE` (e.g. `tax:UHGV_default`) is bit-exact
-`sylph-tax taxprof -t SOURCE`, one source alone, written as `PREFIX<sample>.tax.SOURCE.sylphmpa`;
+instead of two — pass `--taxonomy gtdb,ncbi` for the old set. `tax` follows `sylph-tax taxprof` over all sources rule for rule (opaque lineages, `UNKNOWN`,
+`NO_TAXONOMY`, level-based ordering); `tax:SOURCE` (e.g. `tax:UHGV_default`) follows
+`sylph-tax taxprof -t SOURCE`, one source alone, written as `PREFIX<sample>.tax.SOURCE.sylphmpa`.
+Both are equivalent to sylph-tax v1.9.2's on the same sylph run: the same clades, values equal within the TSV's rounding (sylphd works at full precision, sylph-tax sums sylph's rounded TSV), and clades with equal values may be ordered differently. Check with [`sylphd diff`](diff.md).
+
 `gtdb` and `ncbi` keep sylphd's own normalisation. With two
 or more samples the matrix rows are sorted lexicographically, like `sylph-tax merge`. See
 [Taxonomic profiles](../guides/taxonomic-profiles.md).

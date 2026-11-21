@@ -321,8 +321,8 @@ With `"taxprof": ["gtdb", "ncbi", "tax"]` the server aggregates the sample's row
 ```
 
 `clades` is the cumulative lineage table (`clade_name` joins the levels with `|`; only strain rows
-carry `ani`/`coverage`), ordered exactly as `sylph-tax taxprof` orders the file. `sylphmpa` is
-that file, newline-terminated, byte for byte. For `tax`, `taxonomies_used` lists the source names
+carry `ani`/`coverage`), ordered as `sylph-tax taxprof` orders the file. The `tax` profile is equivalent to sylph-tax v1.9.2's on the same sylph run: the same clades, values equal within the TSV's rounding (sylphd works at full precision, sylph-tax sums sylph's rounded TSV), and clades with equal values may be ordered differently. Check with [`sylphd diff`](../commands/diff.md). `sylphmpa` is
+that file, newline-terminated. For `tax`, `taxonomies_used` lists the source names
 the profile was resolved against (`tax_sources`, in `ord` order). `gtdb`/`ncbi` come from the
 metadata columns of the same name; `tax` needs a metadata file with sylph-tax sources. The
 server adds the taxonomy columns the requested taxonomies need to `rows` even when `fields` hides
@@ -336,7 +336,7 @@ The `ncbi_nearest_formal_*` columns say which ancestor NCBI names formally when 
 informally named species; the profile places the hit at the raw node either way.
 A metadata file without nearest taxa profiles exactly as before.
 
-`tax:<source>` (for example `tax:UHGV_default`) is one taxonomy source alone, bit-exact
+`tax:<source>` (for example `tax:UHGV_default`) is one taxonomy source alone, following
 `sylph-tax taxprof -t <source>`: the hits are resolved against that source only, so the hits of
 other sources are `NO_TAXONOMY`, and a key that a later source overrides in `tax` keeps this
 source's lineage. `taxonomies_used` is `[source]`. Its payload adds the source's `ranks`, read

@@ -93,7 +93,8 @@ rank, then by decreasing abundance).
 Only `t__` rows carry an ANI and a coverage, so the `ani` and `coverage` matrices contain the
 strain-level rows alone: a clade without a value in *any* sample is dropped (pandas'
 `dropna(how="all")`), and a strain found in one sample but not another gets `0`, not `NA`. These
-files are what `sylph-tax merge --column ANI|Coverage` writes, byte for byte.
+files are what `sylph-tax merge --column ANI|Coverage` writes for the same profiles (the layout is
+identical; the values are as equivalent as the profiles).
 
 ## Lineage rules
 
@@ -126,9 +127,15 @@ sylphd profile -r sample.fq.gz --taxonomy tax --taxprof results/
 
 The server resolves every hit to a source, a key and a lineage (`tax_lineage`, `tax_key`,
 `tax_source` and `tax_host` columns) and aggregates the profile; the CLI writes it. Both sides
-follow sylph-tax v1.9.2 rule for rule, and `tests/test_sylphtax_parity.py` compares the output
-byte for byte with the real `sylph-tax taxprof` and `sylph-tax merge` (a committed golden always,
-the live tool when it is installed).
+follow sylph-tax v1.9.2 rule for rule. `tests/test_sylphtax_parity.py` compares the output byte for
+byte with the real `sylph-tax taxprof` and `sylph-tax merge` on rows that already have the TSV's
+precision (a committed golden always, the live tool when it is installed).
+
+On a real run the `tax` profile is equivalent to sylph-tax v1.9.2's on the same sylph run: the same clades, values equal within the TSV's rounding (sylphd works at full precision, sylph-tax sums sylph's rounded TSV), and clades with equal values may be ordered differently. Check with [`sylphd diff`](../commands/diff.md). The difference is only rounding and ties: `sylph-tax`
+adds up the values as `sylph` printed them (abundances to 4 decimals, ANI to 2, coverage to 3), so
+a sum can differ in the 4th decimal (a root clade of 99.9993 against sylphd's 100.0000), and clades
+with equal values come in a different order, which for stock `sylph` itself varies between runs
+with several threads. `gtdb` and `ncbi` are sylphd's own and are not compared with `sylph-tax`.
 
 Differences from `gtdb`/`ncbi`, all of them sylph-tax's behaviour:
 

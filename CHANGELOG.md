@@ -6,6 +6,21 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`sylphd diff A B`: are two outputs equivalent?** Compares `sylph profile`/`query` TSVs, or
+  `sylph-tax` `.sylphmpa` files (or directories of them), with sylphd's: the same genomes or
+  clades, values equal within the printed rounding, and rows with equal values in any order.
+  sylphd works at full precision while sylph prints rounded values and sylph-tax sums those, so
+  the same run is never byte-identical; the order of exact ties also differs (stock sylph's own
+  varies between runs with several threads). Exit status 0, 1 (not equivalent) or 2 (usage or
+  format error); `--json`, `--tolerance`, `--max-differences`. Standard library only, so it works
+  in the base install. Tests use it for real GlobDB output and for exact ties against the sylph
+  binary. The documentation now says "equivalent to sylph 1.0.0 / sylph-tax v1.9.2" for the `tax`
+  profile and the TSV rows (whose text is still identical) instead of byte-identical.
+- The sylph-tax golden script and live test write the TSV with sylph's own number formatting, as
+  sylph-tax really reads it.
+
 ### Fixed
 
 - **Web: Reads mode no longer stays on "Uploading the sketch…" while the server profiles.** The
