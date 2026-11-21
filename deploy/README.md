@@ -116,7 +116,7 @@ limit under which the server starts at all; below it the server is killed while 
 systemd would loop on `Restart=`). It is measured in
 [the GlobDB evaluation](../docs/project/globdb-evaluation.md#memory). `sylphd.service` ships
 `MemoryMax=8G` and `MemorySwapMax=0`, which is the recommended value exactly and leaves no
-margin above it: raise it (10 GiB is comfortable; a 12 GB host has room) in a drop-in if requests
+margin above it: raise it (10 GiB is comfortable; the public instance runs 9.5 GiB on a 10.6 GiB host) in a drop-in if requests
 get killed. That limit is not changed by `setup-server.sh`. Host: Oracle Ampere A1, 2 cores,
 12 GB; `--max-jobs 2` is one job per core.
 

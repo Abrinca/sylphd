@@ -152,7 +152,7 @@ heuristic:
 
 The caveat appears as `note` on the `assignment` (or `closest`) object and as
 one `sylphd: warning:` line per output on stderr; `--quiet` hides it and
-`--json` never prints it. GTDB sources carry no note.
+`--json` never prints it. GTDB and GlobDB sources (GlobDB's taxonomy is GTDB's) carry no note.
 
 The rank names follow the lineage of the source: GTDB's
 `domain … species`, ICTV's `realm`/`kingdom` (parsed from `r__`/`k__` tokens),

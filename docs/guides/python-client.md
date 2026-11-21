@@ -47,6 +47,9 @@ run.write_tsv(open("contigs.tsv", "w"))
 - A sketch over the server's upload limit is refused before it is sent.
 - `client.sketch_parameters()` gives the `(c, k)` the server wants and `client.database_info()` its
   `/info`, fetched once.
+- `client.messages()` returns the server's [operator messages](public-server.md#operator-messages) as a
+  list of `{level, title, message}` dicts (`GET /messages`). It never raises: an older server, a timeout
+  or an error gives `[]`.
 
 ## From sketches or bytes
 
