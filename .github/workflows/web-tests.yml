@@ -14,6 +14,8 @@ on:
       - "tests/test_web_about_browser.py"
       - "tests/test_web_messages_browser.py"
       - "tests/test_web_sylsp_js.py"
+      - "tests/test_web_gtdb_family.py"
+      - "tests/gtdb_family_check.mjs"
       - "tests/package*.json"
       - "tests/data/*.sylsp"
       - "src/sylphd/taxonomy.py"
@@ -25,6 +27,8 @@ on:
       - "tests/test_web_about_browser.py"
       - "tests/test_web_messages_browser.py"
       - "tests/test_web_sylsp_js.py"
+      - "tests/test_web_gtdb_family.py"
+      - "tests/gtdb_family_check.mjs"
       - "tests/package*.json"
       - "tests/data/*.sylsp"
       - "src/sylphd/taxonomy.py"
@@ -55,4 +59,4 @@ jobs:
           PYTHONPATH=src uv run --no-project --python 3.14 --with pytest==9.2.0
           pytest --noconftest -q -rs
           tests/test_web_about_browser.py tests/test_web_messages_browser.py
-          tests/test_web_sylsp_js.py
+          tests/test_web_sylsp_js.py tests/test_web_gtdb_family.py

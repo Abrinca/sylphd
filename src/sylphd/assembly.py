@@ -361,6 +361,9 @@ def genome_id(hit: Mapping[str, Any], *, contig_name: str | None = None) -> str 
     """
     source = hit.get("tax_source")
     key = hit.get("tax_key")
+    # Identifier rule, not taxonomy: only a GTDB source keys its hits by accession.
+    # GlobDB hits are GTDB *taxonomy* (see is_gtdb_taxonomy_source) but a MOTU40_…
+    # or SPIREOTU… key has no accession, so tax_key stays the id.
     if key and isinstance(source, str) and source and not _is_gtdb_source(source):
         return str(key)
     accession = hit.get("accession")
@@ -375,8 +378,22 @@ def genome_id(hit: Mapping[str, Any], *, contig_name: str | None = None) -> str 
 
 
 def _is_gtdb_source(source: object) -> bool:
-    """Whether a taxonomy source name is one of GTDB's."""
+    """Whether a taxonomy source name is one of GTDB's own catalogues (identifiers)."""
     return isinstance(source, str) and source.upper().startswith("GTDB")
+
+
+def is_gtdb_taxonomy_source(source: object) -> bool:
+    """Whether a taxonomy source's lineages are GTDB taxonomy (``GTDB_*``, ``GlobDB_*``).
+
+    GlobDB classifies its genomes with GTDB-Tk and publishes GTDB lineages
+    (``d__..;s__..``): ``GlobDB_r232`` is GTDB r232 nomenclature, extended by
+    species named after a catalogue id.  Such a source is in the GTDB family:
+    its hits compare with GTDB hits, a species call is GTDB's (no 95 % caveat)
+    and it is worded as a species.  Releases are not told apart, as for
+    ``GTDB_r214`` against r232 metadata.  This is about taxonomy only; whether a
+    hit has an accession is a separate question (:func:`genome_id`).
+    """
+    return isinstance(source, str) and source.upper().startswith(("GTDB", "GLOBDB"))
 
 
 def hit_lineage(hit: Mapping[str, Any]) -> Lineage:
@@ -392,7 +409,7 @@ def hit_lineage(hit: Mapping[str, Any]) -> Lineage:
     """
     raw_source = hit.get("tax_source")
     source = raw_source if isinstance(raw_source, str) and raw_source else None
-    if source is not None and not _is_gtdb_source(source):
+    if source is not None and not is_gtdb_taxonomy_source(source):
         lineage = parse_lineage(hit.get("tax_lineage"), source=source, family=source)
         if lineage:
             return lineage
@@ -403,7 +420,7 @@ def hit_lineage(hit: Mapping[str, Any]) -> Lineage:
     gtdb = parse_lineage(hit.get("gtdb_taxonomy"))
     if gtdb:
         return Lineage(gtdb.ranks, source or GTDB_SOURCE, GTDB_FAMILY)
-    family = GTDB_FAMILY if _is_gtdb_source(source) else source
+    family = GTDB_FAMILY if is_gtdb_taxonomy_source(source) else source
     return parse_lineage(hit.get("tax_lineage"), source=source, family=family)
 
 

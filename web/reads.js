@@ -1295,7 +1295,7 @@
       const tax = lin.length ? [] : taxLineage(r);
       return { r, i: i + 1, lin, tax, species: sp ? sp.name : (tax.length ? tax[tax.length - 1].name : '') };
     });
-    const taxonLabel = hits.some((h) => h.tax.length) ? 'Taxon' : 'GTDB species';
+    const taxonLabel = hits.some((h) => h.tax.length && !S.isGtdbTaxonomySource(h.r.tax_source)) ? 'Taxon' : 'GTDB species';
     const maxTax = Math.max(...hits.map((h) => h.r.Taxonomic_abundance || 0), 1e-9);
     const COLS = [
       { key: 'rank', label: '#', get: (h) => h.i, dir: 'asc' },

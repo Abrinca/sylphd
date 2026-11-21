@@ -437,3 +437,44 @@ def test_a_non_gtdb_source_wins_over_gtdb_metadata() -> None:
     assert hits[1]["taxonomy_source"] == "GTDB_r232"
     assert hits[1]["relation"] == "different source"
 
+
+
+# GlobDB: GTDB-Tk lineages, so GTDB taxonomy (no caveat, one family with GTDB hits).
+GLOBDB = "GlobDB_r232"
+
+
+def globdb_hit(ani: float, lineage: str | None, key: str = "MOTU40_002958", **extra: Any) -> dict[str, Any]:
+    return {"ani": ani, "accession": None, "gtdb_taxonomy": None,
+            "tax_source": GLOBDB, "tax_key": key, "tax_lineage": lineage, **extra}
+
+
+def test_globdb_hit_is_gtdb_family_without_caveat() -> None:
+    from sylphd.assembly import GTDB_FAMILY, hit_lineage, is_gtdb_taxonomy_source
+
+    assert is_gtdb_taxonomy_source("GlobDB_r226") and is_gtdb_taxonomy_source("GTDB_r214")
+    assert not is_gtdb_taxonomy_source("UHGV_default")
+    for extra in ({}, {"accession": "GCF_1.1", "gtdb_taxonomy": LACTIS}):
+        hits = [globdb_hit(100.0, LACTIS, **extra)]
+        assert hit_lineage(hits[0]).family == GTDB_FAMILY
+        assert species_caveat(hit_lineage(hits[0])) is None
+        assignment, closest = classify_hits(hits)
+        assert assignment is not None and "note" not in assignment and "note" not in closest
+        assert assignment["taxon"] == "Lactococcus lactis"
+        assert assignment["taxonomy_source"] == GLOBDB
+
+
+def test_globdb_and_gtdb_hits_compare_across_releases() -> None:
+    hits = [globdb_hit(99.0, LACTIS), hit(96.0, CREMORIS), globdb_hit(90.0, STREP, key="MOTU1_2"),
+            globdb_hit(80.0, ARCHAEON, key="MOTU1_3")]
+    classify_hits(hits)
+    assert relations(hits) == ["same species", "same genus", "same family", "different domain"]
+    # GlobDB_r226 lineage against GTDB_r232 metadata: one family, as GTDB_r214 already was
+    old = [{**globdb_hit(99.0, LACTIS), "tax_source": "GlobDB_r226"}, hit(97.0, LACTIS)]
+    classify_hits(old)
+    assert old[1]["relation"] == "same species"
+
+
+def test_globdb_genome_id_stays_the_catalogue_key() -> None:
+    assert genome_id(globdb_hit(99.0, LACTIS)) == "MOTU40_002958"
+    # unchanged: a non-GTDB-named source's tax_key wins over the accession
+    assert genome_id(globdb_hit(99.0, LACTIS, accession="GCF_1.1")) == "MOTU40_002958"

@@ -1297,8 +1297,13 @@
 
   // A hit whose lineage comes from a taxonomy source other than GTDB (UHGV, ICTV, fungi):
   // it has `taxonomy_source`/`taxonomy`, but no gtdb_taxonomy.
-  const nonGtdb = (h) => !has(h.gtdb_taxonomy) && (has(h.taxonomy_source) || genericRanks(h).length > 0);
-  // The taxonomy source to name for a hit/link badge; GTDB when it has a GTDB lineage.
+  // A GlobDB source (GlobDB_r232, ...) carries GTDB lineages (GTDB-Tk), so it counts as GTDB
+  // taxonomy here, as in assembly.is_gtdb_taxonomy_source; its hits (MOTU40_…) have no accession.
+  const isGtdbTaxonomySource = (source) => /^(GTDB|GlobDB)/i.test(String(source ?? ''));
+  const nonGtdb = (h) => !has(h.gtdb_taxonomy) && !isGtdbTaxonomySource(h.taxonomy_source ?? h.tax_source)
+    && (has(h.taxonomy_source) || genericRanks(h).length > 0);
+  // The taxonomy source to name for a hit/link badge (an identifier question: GTDB links only exist
+  // for hits with a GTDB lineage, so a GlobDB hit without one names its source); not the family test.
   // /assembly and /contigs hits call the field `taxonomy_source`, /profile rows `tax_source`.
   function hitSource(h) {
     const source = h.taxonomy_source ?? h.tax_source;
@@ -1754,7 +1759,7 @@
   window.Sylphd = {
     el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtPct, fmtSecs, fmtDur, isNum, has, notice,
     readChoice, writeChoice, choiceModal, stem, fileStem, exportName, download, downloadJson,
-    RANK_NAMES, DEPTH, rankTitle, parseLineage, lineageName, genericRanks, genericTaxon, hitSource, genomeFileId, relClass,
+    RANK_NAMES, DEPTH, rankTitle, parseLineage, lineageName, genericRanks, genericTaxon, hitSource, isGtdbTaxonomySource, nonGtdb, genomeFileId, relClass,
     exportButtons, seg, barRow, sortableTable,
     accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal, updateSubmit,
     assemblyInput: () => input,

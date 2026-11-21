@@ -958,3 +958,15 @@ class TestRequireToken:
         )
         assert result.returncode == 2
         assert "--require-token needs --privileged-token-file" in result.stderr
+
+
+def test_assignment_summary_words_a_gtdb_taxonomy_source_as_a_species() -> None:
+    from sylphd.cli import _assignment_summary
+    from sylphd.assembly import classify_hits
+
+    lineage = "d__Bacteria;p__Mycoplasmatota;c__C;o__O;f__F;g__Mycoplasmoides;s__Mycoplasmoides genitalium"
+    hits = [{"ani": 100.0, "accession": None, "gtdb_taxonomy": None, "tax_source": "GlobDB_r232",
+             "tax_key": "MOTU40_002958", "tax_lineage": lineage}]
+    assignment, closest = classify_hits(hits)
+    text = _assignment_summary({"assignment": assignment, "closest": closest})
+    assert text == "assigned to species Mycoplasmoides genitalium (100.00 % ANI)"

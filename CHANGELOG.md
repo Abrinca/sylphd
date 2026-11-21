@@ -4,6 +4,19 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **GlobDB hits are GTDB taxonomy.** A hit from a `GlobDB_*` taxonomy source (whose lineages are
+  GTDB-Tk's `d__…;s__…`, `GlobDB_r232` being GTDB r232) was treated like a foreign taxonomy, so
+  `sylphd assembly` against the public server said `assigned to Mycoplasmoides genitalium at the
+  95 % species threshold` and warned that the threshold is a heuristic. `GTDB_*` and `GlobDB_*`
+  are now one family (`is_gtdb_taxonomy_source`): `assigned to species …`, no caveat, relations
+  computed against GTDB hits (any release, as before), and the web page shows the "GTDB species"
+  column and GTDB wording for them. Genome ids are unchanged: a GlobDB hit is still named by its
+  `MOTU…`/`SPIREOTU…` key.
+
 ## [0.6.0] - 2026-11-21
 
 ### Changed
