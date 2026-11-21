@@ -12,6 +12,31 @@ writes the returned rows as a TSV.
 Both take the same inputs and options; see the [`profile`](../commands/profile.md) and
 [`query`](../commands/query.md) references for every flag.
 
+## Which one to use
+
+**`sylphd query`**: ANI hits, one row per genome. Default `--minimum-ani` 90.
+
+- **Use when:**
+    - finding a specific genome, plasmid, virus or MAG in a read set (metagenome FASTQ or FASTA);
+    - finding the closest relative of a novel organism at roughly 90–94 % ANI, which `profile` would drop;
+    - inspecting ANI across near-identical strains without one genome taking all the shared k-mers.
+
+**`sylphd profile`**: abundances, with shared k-mers reassigned between competing genomes. Default
+`--minimum-ani` 95, the species threshold.
+
+- **Use when:**
+    - measuring community composition in a read set;
+    - using databases with many related genomes (GTDB, GlobDB), where `query` would list many relatives of each organism;
+    - building taxonomic profiles (`--taxprof`, `--taxmatrix`), as `sylph-tax` does.
+
+**`sylphd assembly`**: the closest genomes of one assembly, with a species call at 95 % ANI. See
+[Identifying an assembly](assembly.md).
+
+- **Use when:**
+    - identifying what a single assembly or genome is closest to;
+    - checking a MAG for contamination: `--per-contig` classifies each contig and reports a consensus;
+      contigs that disagree are suspect (short contigs carry too few k-mers for a reliable call).
+
 ## Inputs
 
 Each file or group of files is one **sample**. A sample is the unit the server profiles and the

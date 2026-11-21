@@ -71,7 +71,8 @@ sylphd profile -r sample.fq.gz -o sample.profile.tsv
 Clients find the server at `$SYLPHD_SOCKET`, else the default socket path. A client on another
 machine uses `--tcp HOST:PORT` or `--url`; see [Server address](commands/address.md). The output is a
 TSV with sylph's columns followed by `accession` and the metadata columns. More in
-[Profiling reads](guides/profiling-reads.md).
+[Profiling reads](guides/profiling-reads.md). To choose between `query`, `profile` and `assembly`, see
+[Which one to use](guides/profiling-reads.md#which-one-to-use).
 
 ## Identify an assembly
 
