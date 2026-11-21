@@ -230,3 +230,57 @@ def test_cli_is_silent_when_messages_are_unavailable(capsys, kind: str) -> None:
         raise httpx.ConnectError("no")
 
     assert _notice(handler, capsys) == ""
+
+
+# -- `sylphd info` shows the messages ---------------------------------------
+
+
+def _serve_socket(tmp_path: Path, *extra: str):
+    from test_cli import _wait_for_socket
+
+    socket_path = tmp_path / "sylphd.sock"
+    process = subprocess.Popen(
+        [sys.executable, "-m", "sylphd", "serve", "--db", str(ECOLI_TWO_STAGE),
+         "--socket", str(socket_path), "--log-level", "warning", *extra],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _wait_for_socket(socket_path)
+    except BaseException:
+        process.kill()
+        raise
+    return socket_path, process
+
+
+def _info(socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "sylphd", "info", "--socket", str(socket_path), *args],
+        capture_output=True, text=True, timeout=120, check=True,
+    )
+
+
+def test_info_shows_all_messages_and_json_carries_them(tmp_path: Path) -> None:
+    path = _write(tmp_path / "m.json", [INFO, WARNING, DANGER])
+    socket_path, process = _serve_socket(tmp_path, "--messages", str(path))
+    try:
+        text = _info(socket_path).stdout
+        assert "messages:" in text
+        assert "[info] Licence: CC BY-SA, terms" in text
+        assert "[warning] Slow: Expect delays." in text
+        assert "[danger] Down: Maintenance tonight." in text
+        document = json.loads(_info(socket_path, "--json").stdout)
+        assert document["messages"] == [INFO, WARNING, DANGER]
+        assert "usage" in document
+    finally:
+        process.terminate()
+        process.wait(timeout=20)
+
+
+def test_info_omits_the_section_without_messages(tmp_path: Path) -> None:
+    socket_path, process = _serve_socket(tmp_path)
+    try:
+        assert "messages:" not in _info(socket_path).stdout
+        assert json.loads(_info(socket_path, "--json").stdout)["messages"] == []
+    finally:
+        process.terminate()
+        process.wait(timeout=20)

@@ -296,15 +296,28 @@ def _log_startup(
 def cmd_info(args: argparse.Namespace) -> int:
     with _client_from_args(args) as client:
         info = client.info()
+        # Every level, so that agents and scripts can show them before analysing.
+        messages = client.messages()
     if args.json:
-        json.dump(info, sys.stdout, indent=2, sort_keys=False)
+        json.dump({**info, "messages": messages}, sys.stdout, indent=2, sort_keys=False)
         sys.stdout.write("\n")
         return 0
     _print_database(info)
     _print_metadata(info.get("metadata"))
     _print_limits(info)
     _print_usage(info["usage"])
+    _print_messages(messages)
     return 0
+
+
+def _print_messages(messages: list[dict[str, str]]) -> None:
+    """The operator's messages, all levels, as plain text (``info`` only)."""
+    if not messages:
+        return
+    print("messages:")
+    for item in messages:
+        body = " ".join(_plain_text(item["message"]).split())
+        print(f"  [{item['level']}] {item['title']}: {body}")
 
 
 def _print_usage(usage: dict[str, Any]) -> None:

@@ -35,8 +35,13 @@ Prints what the server reports about itself:
   statistics, see <url>/usage`, once per run when it is on. `assembly --quiet` and `--json` keep
   it off stderr; nothing is asked.
 
+- `messages:`, when the operator has set [messages](../guides/public-server.md#operator-messages), one
+  line per message of every level (`info`, `warning`, `danger`) as `[level] title: text`, in plain
+  text (Markdown links reduced to their label). Nothing is printed when there are none.
+
 The commands that send work also print the server's `warning` and `danger` [operator messages](../guides/public-server.md#operator-messages) on stderr, once per run.
 
-`--json` prints the raw `/info` payload instead. See [`GET /info`](../reference/http-api.md#get-info).
+`--json` prints the raw `/info` payload instead, plus a `messages` key with the list from `/messages`
+(`[]` when there are none). See [`GET /info`](../reference/http-api.md#get-info).
 The [server address](address.md) options select the server, and `--retries N` retries a `429` or
 `503` answer.

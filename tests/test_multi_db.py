@@ -374,6 +374,9 @@ class _FakeClient:
     def info(self) -> dict[str, object]:
         return self._info
 
+    def messages(self) -> list[dict[str, str]]:
+        return []
+
 
 def _info_document(databases: list[dict[str, object]]) -> dict[str, object]:
     return {

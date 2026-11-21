@@ -1055,6 +1055,9 @@ class TestOverlaps:
             def info(self) -> dict[str, object]:
                 return document
 
+            def messages(self) -> list[dict[str, str]]:
+                return []
+
         monkeypatch.setattr(cli, "_client_from_args", lambda args: FakeClient())
         assert cli.main(["info"]) == 0
         out = capsys.readouterr().out
