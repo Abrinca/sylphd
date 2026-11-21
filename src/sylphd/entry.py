@@ -17,6 +17,12 @@ OPTIONAL_MODULES = frozenset(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["diff"]:
+        # Pure standard library: works in the base install, without any extra.
+        from .parity import main as diff
+
+        return diff(args[1:])
     try:
         from .cli import main as run
     except ImportError as error:
@@ -31,4 +37,4 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    return run(argv)
+    return run(args)

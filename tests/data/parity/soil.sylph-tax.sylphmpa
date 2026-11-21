@@ -1,0 +1,556 @@
+#SampleID	soil	Taxonomies_used:['GlobDB_r232']
+clade_name	relative_abundance	sequence_abundance	ANI (if strain-level)	Coverage (if strain-level)
+d__Bacteria	99.99930000000002	75.68680000000003	NA	NA
+d__Bacteria|p__Actinomycetota	92.9974	70.4322	NA	NA
+d__Bacteria|p__Pseudomonadota	3.603399999999999	2.7033999999999994	NA	NA
+d__Bacteria|p__Acidobacteriota	1.9994000000000007	1.6388999999999996	NA	NA
+d__Bacteria|p__Verrucomicrobiota	0.49010000000000004	0.28709999999999997	NA	NA
+d__Bacteria|p__Vulcanimicrobiota	0.2832	0.148	NA	NA
+d__Bacteria|p__Chloroflexota	0.25529999999999997	0.17700000000000002	NA	NA
+d__Bacteria|p__Planctomycetota	0.16940000000000002	0.1366	NA	NA
+d__Bacteria|p__Desulfobacterota	0.09190000000000001	0.0622	NA	NA
+d__Bacteria|p__Bacteroidota	0.0573	0.0375	NA	NA
+d__Bacteria|p__Myxococcota_A	0.0519	0.0639	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes	58.17339999999998	50.287400000000005	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia	18.525199999999995	11.1711	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia	16.298800000000004	8.973700000000001	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria	3.297799999999999	2.515999999999999	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia	1.9994000000000007	1.6388999999999996	NA	NA
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia	0.49010000000000004	0.28709999999999997	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria	0.3056	0.1874	NA	NA
+d__Bacteria|p__Vulcanimicrobiota|c__Vulcanimicrobiia	0.2832	0.148	NA	NA
+d__Bacteria|p__Chloroflexota|c__Dormibacteria	0.25529999999999997	0.17700000000000002	NA	NA
+d__Bacteria|p__Planctomycetota|c__Planctomycetia	0.16940000000000002	0.1366	NA	NA
+d__Bacteria|p__Desulfobacterota|c__Binatia	0.09190000000000001	0.0622	NA	NA
+d__Bacteria|p__Bacteroidota|c__Bacteroidia	0.0573	0.0375	NA	NA
+d__Bacteria|p__Myxococcota_A|c__Polyangia	0.0519	0.0639	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales	44.67079999999998	40.5056	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales	18.525199999999995	11.1711	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales	15.2987	8.617400000000004	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales	13.2773	9.624900000000002	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales	2.7275999999999994	1.9499000000000002	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales	1.1413000000000002	0.9465000000000001	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales	1.0001	0.3563	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales	0.6941	0.5529000000000001	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales	0.5702	0.5661	NA	NA
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales	0.49010000000000004	0.28709999999999997	NA	NA
+d__Bacteria|p__Vulcanimicrobiota|c__Vulcanimicrobiia|o__Vulcanimicrobiales	0.2832	0.148	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__UBA6002	0.2148	0.1055	NA	NA
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Dormibacterales	0.211	0.1554	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Bryobacterales	0.164	0.1395	NA	NA
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Isosphaerales	0.1496	0.116	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Frankiales	0.1156	0.078	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptomycetales	0.10969999999999999	0.0789	NA	NA
+d__Bacteria|p__Desulfobacterota|c__Binatia|o__Binatales	0.09190000000000001	0.0622	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Steroidobacterales	0.0631	0.0444	NA	NA
+d__Bacteria|p__Bacteroidota|c__Bacteroidia|o__Chitinophagales	0.0573	0.0375	NA	NA
+d__Bacteria|p__Myxococcota_A|c__Polyangia|o__Palsa-1104	0.0519	0.0639	NA	NA
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Aeolococcales	0.0443	0.0216	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Burkholderiales	0.0277	0.0375	NA	NA
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Planctomycetales	0.0198	0.0206	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae	44.67079999999998	40.5056	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2	17.363	9.9838	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae	14.392899999999997	8.1963	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae	13.2773	9.624900000000002	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae	2.2044999999999995	1.6559000000000001	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__Palsa-688	1.1622	1.1873	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae	1.1413000000000002	0.9465000000000001	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales|f__Gaiellaceae	1.0001	0.3563	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9	0.9057999999999999	0.4211	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541	0.6941	0.5529000000000001	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae	0.5702	0.5661	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Beijerinckiaceae	0.5231	0.294	NA	NA
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01	0.49010000000000004	0.28709999999999997	NA	NA
+d__Bacteria|p__Vulcanimicrobiota|c__Vulcanimicrobiia|o__Vulcanimicrobiales|f__Vulcanimicrobiaceae	0.2832	0.148	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__UBA6002|f__UBA6002	0.2148	0.1055	NA	NA
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Dormibacterales|f__Dormibacteraceae	0.211	0.1554	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Bryobacterales|f__Bryobacteraceae	0.164	0.1395	NA	NA
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Isosphaerales|f__Isosphaeraceae	0.1496	0.116	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Frankiales|f__Frankiaceae	0.1156	0.078	NA	NA
+d__Bacteria|p__Desulfobacterota|c__Binatia|o__Binatales|f__Binataceae	0.09190000000000001	0.0622	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptomycetales|f__Catenulisporaceae	0.0808	0.0466	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Steroidobacterales|f__Steroidobacteraceae	0.0631	0.0444	NA	NA
+d__Bacteria|p__Bacteroidota|c__Bacteroidia|o__Chitinophagales|f__Chitinophagaceae	0.0573	0.0375	NA	NA
+d__Bacteria|p__Myxococcota_A|c__Polyangia|o__Palsa-1104|f__Palsa-1104	0.0519	0.0639	NA	NA
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Aeolococcales|f__Aeolococcaceae	0.0443	0.0216	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptomycetales|f__Streptomycetaceae	0.0289	0.0323	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Burkholderiales|f__Burkholderiaceae	0.0277	0.0375	NA	NA
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Planctomycetales|f__Planctomycetaceae	0.0198	0.0206	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504	14.347199999999997	12.6003	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473	13.4559	7.6453999999999995	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium	13.2596	9.608800000000002	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia	11.198000000000002	9.897899999999998	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744	8.837999999999997	4.1185	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-506	5.808	4.5526	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465	5.5549	4.0778	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__RYN-230	5.4966	5.2371	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JASHPR01	4.5411	5.1028	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931	1.8219000000000003	1.3165	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756	1.4692	0.7533	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASXMT01	1.1906	0.8559	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__Palsa-688|g__Fen-671	1.1622	1.1873	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Bog-532	0.8734	0.8674	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JAJYUU01	0.8007	0.6872	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales|f__Gaiellaceae|g__Palsa-739	0.7951	0.2591	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__PALSA-505	0.671	0.5956	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASZUK01	0.5781	0.3004	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DATKRB01	0.5324	0.3806	NA	NA
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01|g__JAFAMB01	0.49010000000000004	0.28709999999999997	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Acidiferrum	0.45920000000000005	0.39080000000000004	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9|g__CAVUWL01	0.4145	0.1922	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Beijerinckiaceae|g__Roseiarcus	0.389	0.22509999999999997	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__DASUBV01	0.3617	0.479	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__Bradyrhizobium	0.3058	0.2853	NA	NA
+d__Bacteria|p__Vulcanimicrobiota|c__Vulcanimicrobiia|o__Vulcanimicrobiales|f__Vulcanimicrobiaceae|g__Cybelea	0.2832	0.148	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__Rhodopila	0.2701	0.292	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9|g__CAVUPF01	0.266	0.1054	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__JAMXLO01	0.24680000000000002	0.227	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JAWWPY01	0.2416	0.1923	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter	0.2371	0.1941	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9|g__VAYN01	0.2253	0.1235	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__UBA6002|f__UBA6002|g__UBA6002	0.2148	0.1055	NA	NA
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Dormibacterales|f__Dormibacteraceae|g__CAVTSA01	0.211	0.1554	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales|f__Gaiellaceae|g__PALSA-600	0.205	0.09720000000000001	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Palsa-295	0.1801	0.1253	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Edaphobacter	0.18009999999999998	0.11910000000000001	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__DASXKD01	0.1702	0.1561	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Bryobacterales|f__Bryobacteraceae|g__Palsa-89	0.164	0.1395	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__JABDBE01	0.16299999999999998	0.15680000000000002	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__CAWDVH01	0.1613	0.1373	NA	NA
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Isosphaerales|f__Isosphaeraceae|g__CAWFRS01	0.1496	0.116	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__KBS-83	0.1404	0.1032	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__RAAP-2	0.13679999999999998	0.04820000000000001	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Beijerinckiaceae|g__Methylocapsa	0.1341	0.0689	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Frankiales|f__Frankiaceae|g__DATAZK01	0.1156	0.078	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Silvibacterium	0.1076	0.1068	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__PALSA-350	0.0992	0.0977	NA	NA
+d__Bacteria|p__Desulfobacterota|c__Binatia|o__Binatales|f__Binataceae|g__JAKAVN01	0.09190000000000001	0.0622	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Acidisarcina	0.0898	0.0742	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptomycetales|f__Catenulisporaceae|g__Actinospica	0.0808	0.0466	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__JAJPKK01	0.0768	0.0541	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Steroidobacterales|f__Steroidobacteraceae|g__Bog-1198	0.0631	0.0444	NA	NA
+d__Bacteria|p__Bacteroidota|c__Bacteroidia|o__Chitinophagales|f__Chitinophagaceae|g__Puia	0.0573	0.0375	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__CAVRXT01	0.0548	0.0368	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__Acidisoma	0.0533	0.0471	NA	NA
+d__Bacteria|p__Myxococcota_A|c__Polyangia|o__Palsa-1104|f__Palsa-1104|g__JAQBQH01	0.0519	0.0639	NA	NA
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Aeolococcales|f__Aeolococcaceae|g__Palsa-851	0.0443	0.0216	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Bog-257	0.0395	0.0284	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Telmatobacter	0.0333	0.0262	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptomycetales|f__Streptomycetaceae|g__Streptomyces	0.0289	0.0323	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Acidiflorens	0.0286	0.0232	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Burkholderiales|f__Burkholderiaceae|g__Caballeronia	0.0277	0.0375	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__TOLSYN	0.0227	0.0168	NA	NA
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Planctomycetales|f__Planctomycetaceae|g__DASPSM01	0.0198	0.0206	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Rhodococcus_F	0.0177	0.0161	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963777905	8.3313	7.086	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-506|s__Palsa-506 sp963755815	5.4943	4.2626	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963723615	5.0058	3.5856	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp963844625	4.2501	4.1468	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp963849595	4.1773	2.1178	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp963742795	3.5324	4.1143	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__RYN-230|s__RYN-230 sp963713815	3.3397	3.24	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JASHPR01|s__JASHPR01 sp963833885	3.0711	3.2561	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963749285	2.6617	1.2544	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963736515	2.4395	1.3864	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__RYN-230|s__RYN-230 sp963844695	1.4062	1.3606	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp035314925	1.3951	0.8316	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963770615	1.2954	1.182	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963743785	1.2214	0.8264	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp049676235	1.1014	1.1858	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963788005	1.1008	0.8069	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963767375	1.0609	1.0052	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASXMT01|s__DASXMT01 sp963781305	1.0374	0.7807	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JASHPR01|s__JASHPR01 SMAGOTU_15026	0.9859	1.1946	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp036519055	0.9751	0.3595	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 SMAGOTU_09160	0.9695	0.3326	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp963818225	0.9153	0.8995	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Bog-532|s__Bog-532 sp963833835	0.8734	0.8674	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963836195	0.8481	1.0574	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__Palsa-688|g__Fen-671|s__Fen-671 sp963750465	0.8345	0.8859	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales|f__Gaiellaceae|g__Palsa-739|s__Palsa-739 MOTU40_124927	0.7951	0.2591	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963838825	0.7683	0.4375	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963731065	0.7518	0.455	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963751335	0.7439	0.5028	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium GEMOTU_16069	0.7316	0.5521	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963755655	0.7153	0.3561	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963777885	0.6577	0.5716	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp036501715	0.6447	0.2995	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium MGYG000496850	0.6284	0.5001	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JAJYUU01|s__JAJYUU01 sp035484155	0.6237	0.5329	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963840245	0.6108	0.2258	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium GEMOTU_06127	0.5882	0.383	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__RYN-230|s__RYN-230 sp963781085	0.582	0.4925	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963781565	0.5802	0.3053	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASZUK01|s__DASZUK01 sp963745595	0.5781	0.3004	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963826365	0.56	0.4985	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963827045	0.5459	0.2694	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963751315	0.5409	0.4856	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DATKRB01|s__DATKRB01 sp963794215	0.5324	0.3806	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963734715	0.5075	0.137	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963708085	0.5073	0.234	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963805095	0.5021	0.3569	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JASHPR01|s__JASHPR01 MGYG000499459	0.4841	0.6521	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963815235	0.4736	0.2525	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963850185	0.4708	0.2774	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963838405	0.4677	0.2453	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963821105	0.4621	0.2547	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963708995	0.4576	0.3617	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963782025	0.4392	0.171	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963822265	0.439	0.298	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 GEMOTU_09319	0.4271	0.2199	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9|g__CAVUWL01|s__CAVUWL01 sp963787415	0.4145	0.1922	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp036509775	0.4112	0.1482	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963701325	0.4068	0.2237	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp035603155	0.3875	0.2311	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963744815	0.3835	0.2762	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963714295	0.3811	0.3364	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 MOTU40_124832	0.3707	0.1361	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963783995	0.3669	0.2301	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__PALSA-505|s__PALSA-505 sp963699015	0.3645	0.2861	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__DASUBV01|s__DASUBV01 sp963822485	0.3617	0.479	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963774885	0.3571	0.2088	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963817875	0.3489	0.2512	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963846395	0.343	0.168	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963720195	0.342	0.2348	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963701035	0.3393	0.1409	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__Palsa-688|g__Fen-671|s__Fen-671 sp963823855	0.3277	0.3014	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963850115	0.3236	0.4122	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963744535	0.3195	0.1848	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-506|s__Palsa-506 sp963707065	0.3137	0.29	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963830475	0.3125	0.1907	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963726855	0.3119	0.2133	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__PALSA-505|s__PALSA-505 sp963762615	0.3065	0.3095	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963794875	0.2982	0.1648	NA	NA
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01|g__JAFAMB01|s__JAFAMB01 sp963793135	0.2982	0.2072	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963704375	0.2947	0.1377	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963773165	0.2896	0.2037	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963767195	0.2882	0.206	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963759545	0.2842	0.2968	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963818915	0.2841	0.1607	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963831725	0.2821	0.1252	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963840435	0.28	0.1989	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963783965	0.2763	0.1728	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9|g__CAVUPF01|s__CAVUPF01 sp963777915	0.266	0.1054	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia SMAGOTU_20840	0.2614	0.2716	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Acidiferrum|s__Acidiferrum sp963784015	0.2548	0.2189	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963725275	0.2474	0.1265	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JAWWPY01|s__JAWWPY01 MOTU40_124829	0.2416	0.1923	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__Rhodopila|s__Rhodopila sp963832865	0.2409	0.2651	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp035566615	0.2331	0.1345	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963813935	0.2293	0.1866	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963837135	0.2292	0.0908	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp035569675	0.2261	0.0919	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9|g__VAYN01|s__VAYN01 sp036787695	0.2253	0.1235	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963850095	0.2239	0.1235	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963818135	0.2198	0.1309	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__UBA6002|f__UBA6002|g__UBA6002|s__UBA6002 sp963817645	0.2148	0.1055	NA	NA
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Dormibacterales|f__Dormibacteraceae|g__CAVTSA01|s__CAVTSA01 sp963737225	0.211	0.1554	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963726005	0.207	0.1267	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Acidiferrum|s__Acidiferrum sp963740015	0.2044	0.1719	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp036511875	0.1974	0.0536	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Beijerinckiaceae|g__Roseiarcus|s__Roseiarcus sp963702825	0.1955	0.0962	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Beijerinckiaceae|g__Roseiarcus|s__Roseiarcus SMAGOTU_16939	0.1935	0.1289	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963776985	0.1897	0.0949	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963713985	0.1894	0.0987	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963812595	0.1891	0.116	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963764905	0.1846	0.084	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963755665	0.181	0.1052	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JAJYUU01|s__JAJYUU01 sp963746485	0.177	0.1543	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963845075	0.1767	0.1622	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963727955	0.174	0.0976	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__DASXKD01|s__DASXKD01 sp963762735	0.1702	0.1561	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp035602795	0.1688	0.1147	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__RYN-230|s__RYN-230 sp036497945	0.1687	0.144	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__CAWDVH01|s__CAWDVH01 sp963805705	0.1613	0.1373	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963818155	0.1579	0.1693	NA	NA
+d__Bacteria|p__Vulcanimicrobiota|c__Vulcanimicrobiia|o__Vulcanimicrobiales|f__Vulcanimicrobiaceae|g__Cybelea|s__Cybelea sp963833845	0.1561	0.0808	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963846255	0.1557	0.0775	NA	NA
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Isosphaerales|f__Isosphaeraceae|g__CAWFRS01|s__CAWFRS01 SMAGOTU_06295	0.1496	0.116	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales|f__Gaiellaceae|g__PALSA-600|s__PALSA-600 sp963765345	0.149	0.0685	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp035483735	0.1482	0.089	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963821175	0.1461	0.1002	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__Bradyrhizobium|s__Bradyrhizobium sp963725555	0.1449	0.11	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963754375	0.1419	0.1048	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium MOTU40_037039	0.141	0.066	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__KBS-83|s__KBS-83 sp963834345	0.1404	0.1032	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Beijerinckiaceae|g__Methylocapsa|s__Methylocapsa lahnbergensis	0.1341	0.0689	NA	NA
+d__Bacteria|p__Vulcanimicrobiota|c__Vulcanimicrobiia|o__Vulcanimicrobiales|f__Vulcanimicrobiaceae|g__Cybelea|s__Cybelea MGYG000496939	0.1271	0.0672	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963806465	0.1266	0.1676	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__JAMXLO01|s__JAMXLO01 sp963818775	0.1258	0.1218	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963843915	0.1194	0.1089	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963809285	0.1176	0.0872	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963758035	0.1174	0.0829	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Edaphobacter|s__Edaphobacter sp963774835	0.1171	0.084	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__Bradyrhizobium|s__Bradyrhizobium MOTU40_122875	0.1162	0.0931	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Frankiales|f__Frankiaceae|g__DATAZK01|s__DATAZK01 sp963737695	0.1156	0.078	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963751195	0.1152	0.0652	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter sp963758005	0.1115	0.0888	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Silvibacterium|s__Silvibacterium sp963781245	0.1076	0.1068	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 MOTU40_122681	0.1058	0.0842	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963787485	0.1028	0.0619	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963775645	0.1019	0.0397	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__PALSA-350|s__PALSA-350 sp963844785	0.0992	0.0977	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963832935	0.0944	0.0745	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Acidisarcina|s__Acidisarcina sp963826855	0.0898	0.0742	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp049677525	0.0882	0.0658	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__JABDBE01|s__JABDBE01 sp963838905	0.0877	0.0966	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963845485	0.0865	0.0431	NA	NA
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01|g__JAFAMB01|s__JAFAMB01 SPIREOTU_00096521	0.0835	0.05	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptomycetales|f__Catenulisporaceae|g__Actinospica|s__Actinospica SPIREOTU_00919853	0.0808	0.0466	NA	NA
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01|g__JAFAMB01|s__JAFAMB01 sp035483355	0.0792	0.0192	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASXMT01|s__DASXMT01 sp963812965	0.0786	0.0298	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__JAJPKK01|s__JAJPKK01 sp963746235	0.0768	0.0541	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963756025	0.0763	0.055	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963762625	0.076	0.06	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASXMT01|s__DASXMT01 sp963717035	0.0746	0.0454	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963808205	0.0725	0.045	NA	NA
+d__Bacteria|p__Desulfobacterota|c__Binatia|o__Binatales|f__Binataceae|g__JAKAVN01|s__JAKAVN01 sp963717045	0.0685	0.0477	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Bryobacterales|f__Bryobacteraceae|g__Palsa-89|s__Palsa-89 sp963818065	0.0682	0.0645	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Palsa-295|s__Palsa-295 sp963732325	0.0665	0.05	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Steroidobacterales|f__Steroidobacteraceae|g__Bog-1198|s__Bog-1198 sp963775565	0.0631	0.0444	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Edaphobacter|s__Edaphobacter sp035483075	0.063	0.0351	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Bryobacterales|f__Bryobacteraceae|g__Palsa-89|s__Palsa-89 sp963767775	0.0618	0.0451	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__JAMXLO01|s__JAMXLO01 sp963812505	0.0617	0.053	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__RAAP-2|s__RAAP-2 sp963801695	0.06	0.0208	NA	NA
+d__Bacteria|p__Bacteroidota|c__Bacteroidia|o__Chitinophagales|f__Chitinophagaceae|g__Puia|s__Puia sp963711345	0.0573	0.0375	NA	NA
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales|f__Gaiellaceae|g__PALSA-600|s__PALSA-600 sp963758125	0.056	0.0287	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__CAVRXT01|s__CAVRXT01 sp963725655	0.0548	0.0368	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 GCMETA_01097149	0.0538	0.0279	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__Acidisoma|s__Acidisoma sp009765865	0.0533	0.0471	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 MOTU40_122757	0.0519	0.024	NA	NA
+d__Bacteria|p__Myxococcota_A|c__Polyangia|o__Palsa-1104|f__Palsa-1104|g__JAQBQH01|s__JAQBQH01 sp963785725	0.0519	0.0639	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter MOTU40_037042	0.0517	0.0427	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Palsa-295|s__Palsa-295 sp963779465	0.0447	0.0312	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__Bradyrhizobium|s__Bradyrhizobium sp963822795	0.0447	0.0822	NA	NA
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Aeolococcales|f__Aeolococcaceae|g__Palsa-851|s__Palsa-851 sp963709585	0.0443	0.0216	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__JAMXLO01|s__JAMXLO01 sp963812475	0.0423	0.0399	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__JABDBE01|s__JABDBE01 sp963722725	0.0419	0.0341	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__RAAP-2|s__RAAP-2 sp963840595	0.0399	0.0142	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Palsa-295|s__Palsa-295 GEMOTU_12395	0.039	0.0251	NA	NA
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__RAAP-2|s__RAAP-2 sp963703105	0.0369	0.0132	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter MOTU40_122685	0.0346	0.0327	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963761525	0.034	0.0269	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Bryobacterales|f__Bryobacteraceae|g__Palsa-89|s__Palsa-89 MOTU40_122669	0.034	0.0299	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__JABDBE01|s__JABDBE01 sp963817925	0.0334	0.0261	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Telmatobacter|s__Telmatobacter sp963769345	0.0333	0.0262	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Palsa-295|s__Palsa-295 MOTU40_020120	0.0299	0.019	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__Rhodopila|s__Rhodopila sp963812585	0.0292	0.0269	NA	NA
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01|g__JAFAMB01|s__JAFAMB01 sp035939025	0.0292	0.0107	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptomycetales|f__Streptomycetaceae|g__Streptomyces|s__Streptomyces sp940670765	0.0289	0.0323	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Acidiflorens|s__Acidiflorens sp049589635	0.0286	0.0232	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Burkholderiales|f__Burkholderiaceae|g__Caballeronia|s__Caballeronia choica	0.0277	0.0375	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Bog-257|s__Bog-257 sp963835125	0.0234	0.0158	NA	NA
+d__Bacteria|p__Desulfobacterota|c__Binatia|o__Binatales|f__Binataceae|g__JAKAVN01|s__JAKAVN01 sp963771325	0.0234	0.0145	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__TOLSYN|s__TOLSYN sp963759215	0.0227	0.0168	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter MOTU40_122687	0.0217	0.0167	NA	NA
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Planctomycetales|f__Planctomycetaceae|g__DASPSM01|s__DASPSM01 sp963813715	0.0198	0.0206	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Rhodococcus_F|s__Rhodococcus_F erythropolis	0.0177	0.0161	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter MOTU40_122705	0.0176	0.0132	NA	NA
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__JAMXLO01|s__JAMXLO01 sp035511435	0.017	0.0123	NA	NA
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Bog-257|s__Bog-257 sp963833305	0.0161	0.0126	NA	NA
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963777905|t__GCA_963777905	8.3313	7.086	99.16	21.718
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-506|s__Palsa-506 sp963755815|t__GCA_963755815	5.4943	4.2626	99.78	14.322
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963723615|t__GCA_963723615	5.0058	3.5856	98.79	13.049
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp963844625|t__GCA_963844625	4.2501	4.1468	99.86	11.079
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp963849595|t__GCA_963849595	4.1773	2.1178	97.92	10.889
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp963742795|t__GCA_963742795	3.5324	4.1143	95.61	9.208
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__RYN-230|s__RYN-230 sp963713815|t__GCA_963713815	3.3397	3.24	99.06	8.706
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JASHPR01|s__JASHPR01 sp963833885|t__GCA_963833885	3.0711	3.2561	98.83	8.006
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963749285|t__GCA_963749285	2.6617	1.2544	96.54	6.938
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963736515|t__GCA_963736515	2.4395	1.3864	99.3	6.359
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__RYN-230|s__RYN-230 sp963844695|t__GCA_963844695	1.4062	1.3606	99.75	3.666
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp035314925|t__GCA_035314925	1.3951	0.8316	97.81	3.637
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963770615|t__GCA_963770615	1.2954	1.182	99.85	3.377
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963743785|t__GCA_963743785	1.2214	0.8264	95.96	3.184
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp049676235|t__GCA_049676235	1.1014	1.1858	97.64	2.871
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963788005|t__GCA_963788005	1.1008	0.8069	96.12	2.869
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963767375|t__GCA_963767375	1.0609	1.0052	99.57	2.766
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASXMT01|s__DASXMT01 sp963781305|t__GCA_963781305	1.0374	0.7807	99.48	2.704
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JASHPR01|s__JASHPR01 SMAGOTU_15026|t__SMAGOTU_15026	0.9859	1.1946	95.65	2.57
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp036519055|t__GCA_036519055	0.9751	0.3595	98.02	2.542
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 SMAGOTU_09160|t__SMAGOTU_09160	0.9695	0.3326	97.09	2.527
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 sp963818225|t__GCA_963818225	0.9153	0.8995	99.19	2.386
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Bog-532|s__Bog-532 sp963833835|t__GCA_963833835	0.8734	0.8674	99.65	2.277
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963836195|t__GCA_963836195	0.8481	1.0574	96.73	2.211
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__Palsa-688|g__Fen-671|s__Fen-671 sp963750465|t__GCA_963750465	0.8345	0.8859	98.17	2.175
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales|f__Gaiellaceae|g__Palsa-739|s__Palsa-739 MOTU40_124927|t__MOTU40_124927	0.7951	0.2591	95.01	2.073
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963838825|t__GCA_963838825	0.7683	0.4375	95.21	2.003
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963731065|t__GCA_963731065	0.7518	0.455	96.19	1.96
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963751335|t__GCA_963751335	0.7439	0.5028	96.12	1.939
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium GEMOTU_16069|t__GEMOTU_16069	0.7316	0.5521	97.17	1.907
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963755655|t__GCA_963755655	0.7153	0.3561	99.01	1.865
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963777885|t__GCA_963777885	0.6577	0.5716	98.67	1.714
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp036501715|t__GCA_036501715	0.6447	0.2995	98.91	1.681
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium MGYG000496850|t__MGYG000496850	0.6284	0.5001	95.15	1.638
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JAJYUU01|s__JAJYUU01 sp035484155|t__GCA_035484155	0.6237	0.5329	98.5	1.626
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963840245|t__GCA_963840245	0.6108	0.2258	98.24	1.592
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium GEMOTU_06127|t__GEMOTU_06127	0.5882	0.383	95.14	1.533
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__RYN-230|s__RYN-230 sp963781085|t__GCA_963781085	0.582	0.4925	97.74	1.517
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963781565|t__GCA_963781565	0.5802	0.3053	98.35	1.512
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASZUK01|s__DASZUK01 sp963745595|t__GCA_963745595	0.5781	0.3004	98.97	1.507
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963826365|t__GCA_963826365	0.56	0.4985	99.19	1.46
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963827045|t__GCA_963827045	0.5459	0.2694	95.05	1.423
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963751315|t__GCA_963751315	0.5409	0.4856	97.94	1.41
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DATKRB01|s__DATKRB01 sp963794215|t__GCA_963794215	0.5324	0.3806	99.29	1.388
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963734715|t__GCA_963734715	0.5075	0.137	95.29	1.323
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963708085|t__GCA_963708085	0.5073	0.234	96.81	1.322
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963805095|t__GCA_963805095	0.5021	0.3569	98.0	1.309
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JASHPR01|s__JASHPR01 MGYG000499459|t__MGYG000499459	0.4841	0.6521	95.75	1.262
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963815235|t__GCA_963815235	0.4736	0.2525	98.23	1.235
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963850185|t__GCA_963850185	0.4708	0.2774	98.89	1.227
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963838405|t__GCA_963838405	0.4677	0.2453	99.31	1.219
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963821105|t__GCA_963821105	0.4621	0.2547	98.11	1.205
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963708995|t__GCA_963708995	0.4576	0.3617	96.41	1.193
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963782025|t__GCA_963782025	0.4392	0.171	99.8	1.145
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963822265|t__GCA_963822265	0.439	0.298	96.68	1.144
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 GEMOTU_09319|t__GEMOTU_09319	0.4271	0.2199	97.28	1.113
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9|g__CAVUWL01|s__CAVUWL01 sp963787415|t__GCA_963787415	0.4145	0.1922	96.0	1.081
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp036509775|t__GCA_036509775	0.4112	0.1482	95.19	1.072
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963701325|t__GCA_963701325	0.4068	0.2237	99.51	1.06
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp035603155|t__GCA_035603155	0.3875	0.2311	97.59	1.01
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963744815|t__GCA_963744815	0.3835	0.2762	96.91	1.0
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963714295|t__GCA_963714295	0.3811	0.3364	97.18	0.993
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-504|s__Palsa-504 MOTU40_124832|t__MOTU40_124832	0.3707	0.1361	95.31	0.966
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963783995|t__GCA_963783995	0.3669	0.2301	98.76	0.956
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__PALSA-505|s__PALSA-505 sp963699015|t__GCA_963699015	0.3645	0.2861	98.65	0.95
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__DASUBV01|s__DASUBV01 sp963822485|t__GCA_963822485	0.3617	0.479	98.68	0.943
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963774885|t__GCA_963774885	0.3571	0.2088	96.57	0.931
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963817875|t__GCA_963817875	0.3489	0.2512	98.72	0.91
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963846395|t__GCA_963846395	0.343	0.168	99.06	0.894
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963720195|t__GCA_963720195	0.342	0.2348	96.89	0.891
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963701035|t__GCA_963701035	0.3393	0.1409	97.99	0.885
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__Palsa-688|g__Fen-671|s__Fen-671 sp963823855|t__GCA_963823855	0.3277	0.3014	96.28	0.854
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963850115|t__GCA_963850115	0.3236	0.4122	97.37	0.843
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963744535|t__GCA_963744535	0.3195	0.1848	98.44	0.833
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Palsa-506|s__Palsa-506 sp963707065|t__GCA_963707065	0.3137	0.29	98.44	0.818
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963830475|t__GCA_963830475	0.3125	0.1907	97.81	0.815
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963726855|t__GCA_963726855	0.3119	0.2133	95.19	0.813
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__PALSA-505|s__PALSA-505 sp963762615|t__GCA_963762615	0.3065	0.3095	96.83	0.799
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963794875|t__GCA_963794875	0.2982	0.1648	97.39	0.777
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01|g__JAFAMB01|s__JAFAMB01 sp963793135|t__GCA_963793135	0.2982	0.2072	95.87	0.777
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963704375|t__GCA_963704375	0.2947	0.1377	99.41	0.768
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963773165|t__GCA_963773165	0.2896	0.2037	97.29	0.755
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963767195|t__GCA_963767195	0.2882	0.206	96.22	0.751
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia sp963759545|t__GCA_963759545	0.2842	0.2968	95.83	0.741
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963818915|t__GCA_963818915	0.2841	0.1607	95.77	0.741
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963831725|t__GCA_963831725	0.2821	0.1252	97.76	0.735
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963840435|t__GCA_963840435	0.28	0.1989	99.65	0.73
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963783965|t__GCA_963783965	0.2763	0.1728	96.91	0.72
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9|g__CAVUPF01|s__CAVUPF01 sp963777915|t__GCA_963777915	0.266	0.1054	97.55	0.693
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__Trebonia|s__Trebonia SMAGOTU_20840|t__SMAGOTU_20840	0.2614	0.2716	95.65	0.681
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Acidiferrum|s__Acidiferrum sp963784015|t__GCA_963784015	0.2548	0.2189	98.32	0.664
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963725275|t__GCA_963725275	0.2474	0.1265	97.8	0.645
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JAWWPY01|s__JAWWPY01 MOTU40_124829|t__MOTU40_124829	0.2416	0.1923	96.43	0.63
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__Rhodopila|s__Rhodopila sp963832865|t__GCA_963832865	0.2409	0.2651	96.41	0.628
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp035566615|t__GCA_035566615	0.2331	0.1345	98.2	0.608
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963813935|t__GCA_963813935	0.2293	0.1866	97.12	0.598
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963837135|t__GCA_963837135	0.2292	0.0908	95.47	0.597
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp035569675|t__GCA_035569675	0.2261	0.0919	97.05	0.589
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__70-9|g__VAYN01|s__VAYN01 sp036787695|t__GCA_036787695	0.2253	0.1235	96.16	0.587
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963850095|t__GCA_963850095	0.2239	0.1235	98.48	0.584
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963818135|t__GCA_963818135	0.2198	0.1309	98.56	0.573
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__UBA6002|f__UBA6002|g__UBA6002|s__UBA6002 sp963817645|t__GCA_963817645	0.2148	0.1055	96.49	0.56
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Dormibacterales|f__Dormibacteraceae|g__CAVTSA01|s__CAVTSA01 sp963737225|t__GCA_963737225	0.211	0.1554	99.35	0.55
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963726005|t__GCA_963726005	0.207	0.1267	95.07	0.54
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Acidiferrum|s__Acidiferrum sp963740015|t__GCA_963740015	0.2044	0.1719	98.83	0.533
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp036511875|t__GCA_036511875	0.1974	0.0536	97.78	0.515
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Beijerinckiaceae|g__Roseiarcus|s__Roseiarcus sp963702825|t__GCA_963702825	0.1955	0.0962	97.62	0.509
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Beijerinckiaceae|g__Roseiarcus|s__Roseiarcus SMAGOTU_16939|t__SMAGOTU_16939	0.1935	0.1289	95.95	0.504
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963776985|t__GCA_963776985	0.1897	0.0949	95.12	0.495
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963713985|t__GCA_963713985	0.1894	0.0987	96.4	0.494
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963812595|t__GCA_963812595	0.1891	0.116	95.11	0.493
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963764905|t__GCA_963764905	0.1846	0.084	95.62	0.481
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963755665|t__GCA_963755665	0.181	0.1052	98.13	0.472
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__JAJYUU01|s__JAJYUU01 sp963746485|t__GCA_963746485	0.177	0.1543	99.15	0.461
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963845075|t__GCA_963845075	0.1767	0.1622	96.44	0.461
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963727955|t__GCA_963727955	0.174	0.0976	96.81	0.454
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__DASXKD01|s__DASXKD01 sp963762735|t__GCA_963762735	0.1702	0.1561	98.14	0.444
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp035602795|t__GCA_035602795	0.1688	0.1147	98.35	0.44
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__RYN-230|s__RYN-230 sp036497945|t__GCA_036497945	0.1687	0.144	95.64	0.44
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptosporangiales|f__Streptosporangiaceae|g__CAWDVH01|s__CAWDVH01 sp963805705|t__GCA_963805705	0.1613	0.1373	96.06	0.421
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963818155|t__GCA_963818155	0.1579	0.1693	96.91	0.412
+d__Bacteria|p__Vulcanimicrobiota|c__Vulcanimicrobiia|o__Vulcanimicrobiales|f__Vulcanimicrobiaceae|g__Cybelea|s__Cybelea sp963833845|t__GCA_963833845	0.1561	0.0808	99.77	0.407
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963846255|t__GCA_963846255	0.1557	0.0775	96.36	0.406
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Isosphaerales|f__Isosphaeraceae|g__CAWFRS01|s__CAWFRS01 SMAGOTU_06295|t__SMAGOTU_06295	0.1496	0.116	96.49	0.39
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales|f__Gaiellaceae|g__PALSA-600|s__PALSA-600 sp963765345|t__GCA_963765345	0.149	0.0685	96.86	0.389
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp035483735|t__GCA_035483735	0.1482	0.089	98.72	0.386
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963821175|t__GCA_963821175	0.1461	0.1002	95.19	0.381
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__Bradyrhizobium|s__Bradyrhizobium sp963725555|t__GCA_963725555	0.1449	0.11	95.96	0.378
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963754375|t__GCA_963754375	0.1419	0.1048	96.89	0.37
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium MOTU40_037039|t__MOTU40_037039	0.141	0.066	98.13	0.367
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__KBS-83|s__KBS-83 sp963834345|t__GCA_963834345	0.1404	0.1032	98.73	0.366
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Beijerinckiaceae|g__Methylocapsa|s__Methylocapsa lahnbergensis|t__GCA_002890675	0.1341	0.0689	98.04	0.35
+d__Bacteria|p__Vulcanimicrobiota|c__Vulcanimicrobiia|o__Vulcanimicrobiales|f__Vulcanimicrobiaceae|g__Cybelea|s__Cybelea MGYG000496939|t__MGYG000496939	0.1271	0.0672	99.29	0.331
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963806465|t__GCA_963806465	0.1266	0.1676	97.07	0.33
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__JAMXLO01|s__JAMXLO01 sp963818775|t__GCA_963818775	0.1258	0.1218	99.72	0.328
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963843915|t__GCA_963843915	0.1194	0.1089	96.5	0.311
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963809285|t__GCA_963809285	0.1176	0.0872	97.09	0.307
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-465|s__Palsa-465 sp963758035|t__GCA_963758035	0.1174	0.0829	97.08	0.306
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Edaphobacter|s__Edaphobacter sp963774835|t__GCA_963774835	0.1171	0.084	97.87	0.305
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__Bradyrhizobium|s__Bradyrhizobium MOTU40_122875|t__MOTU40_122875	0.1162	0.0931	98.23	0.303
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Frankiales|f__Frankiaceae|g__DATAZK01|s__DATAZK01 sp963737695|t__GCA_963737695	0.1156	0.078	96.12	0.301
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963751195|t__GCA_963751195	0.1152	0.0652	96.27	0.3
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter sp963758005|t__GCA_963758005	0.1115	0.0888	96.1	0.291
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Silvibacterium|s__Silvibacterium sp963781245|t__GCA_963781245	0.1076	0.1068	99.19	0.281
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 MOTU40_122681|t__MOTU40_122681	0.1058	0.0842	99.1	0.276
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963787485|t__GCA_963787485	0.1028	0.0619	96.66	0.268
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Solirubrobacterales|f__Solirubrobacteraceae|g__Palsa-744|s__Palsa-744 sp963775645|t__GCA_963775645	0.1019	0.0397	98.67	0.266
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__PALSA-350|s__PALSA-350 sp963844785|t__GCA_963844785	0.0992	0.0977	95.19	0.259
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963832935|t__GCA_963832935	0.0944	0.0745	96.33	0.246
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Acidisarcina|s__Acidisarcina sp963826855|t__GCA_963826855	0.0898	0.0742	98.3	0.234
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp049677525|t__GCA_049677525	0.0882	0.0658	97.47	0.23
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__JABDBE01|s__JABDBE01 sp963838905|t__GCA_963838905	0.0877	0.0966	95.97	0.229
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-756|s__Bog-756 sp963845485|t__GCA_963845485	0.0865	0.0431	98.07	0.225
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01|g__JAFAMB01|s__JAFAMB01 SPIREOTU_00096521|t__SPIREOTU_00096521	0.0835	0.05	95.8	0.218
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptomycetales|f__Catenulisporaceae|g__Actinospica|s__Actinospica SPIREOTU_00919853|t__SPIREOTU_00919853	0.0808	0.0466	97.36	0.211
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01|g__JAFAMB01|s__JAFAMB01 sp035483355|t__GCA_035483355	0.0792	0.0192	96.79	0.206
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASXMT01|s__DASXMT01 sp963812965|t__GCA_963812965	0.0786	0.0298	99.19	0.205
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__JAJPKK01|s__JAJPKK01 sp963746235|t__GCA_963746235	0.0768	0.0541	96.09	0.2
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__Bog-473|s__Bog-473 sp963756025|t__GCA_963756025	0.0763	0.055	96.45	0.199
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Mycobacterium|s__Mycobacterium sp963762625|t__GCA_963762625	0.076	0.06	97.5	0.198
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__DASXMT01|s__DASXMT01 sp963717035|t__GCA_963717035	0.0746	0.0454	98.38	0.194
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963808205|t__GCA_963808205	0.0725	0.045	98.82	0.189
+d__Bacteria|p__Desulfobacterota|c__Binatia|o__Binatales|f__Binataceae|g__JAKAVN01|s__JAKAVN01 sp963717045|t__GCA_963717045	0.0685	0.0477	95.73	0.179
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Bryobacterales|f__Bryobacteraceae|g__Palsa-89|s__Palsa-89 sp963818065|t__GCA_963818065	0.0682	0.0645	100.0	0.178
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Palsa-295|s__Palsa-295 sp963732325|t__GCA_963732325	0.0665	0.05	97.8	0.173
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Steroidobacterales|f__Steroidobacteraceae|g__Bog-1198|s__Bog-1198 sp963775565|t__GCA_963775565	0.0631	0.0444	97.09	0.165
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Edaphobacter|s__Edaphobacter sp035483075|t__GCA_035483075	0.063	0.0351	96.53	0.164
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Bryobacterales|f__Bryobacteraceae|g__Palsa-89|s__Palsa-89 sp963767775|t__GCA_963767775	0.0618	0.0451	95.57	0.161
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__JAMXLO01|s__JAMXLO01 sp963812505|t__GCA_963812505	0.0617	0.053	96.09	0.161
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__RAAP-2|s__RAAP-2 sp963801695|t__GCA_963801695	0.06	0.0208	98.51	0.156
+d__Bacteria|p__Bacteroidota|c__Bacteroidia|o__Chitinophagales|f__Chitinophagaceae|g__Puia|s__Puia sp963711345|t__GCA_963711345	0.0573	0.0375	95.92	0.149
+d__Bacteria|p__Actinomycetota|c__Thermoleophilia|o__Gaiellales|f__Gaiellaceae|g__PALSA-600|s__PALSA-600 sp963758125|t__GCA_963758125	0.056	0.0287	97.7	0.146
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__CAVRXT01|s__CAVRXT01 sp963725655|t__GCA_963725655	0.0548	0.0368	95.48	0.143
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 GCMETA_01097149|t__GCMETA_01097149	0.0538	0.0279	99.04	0.14
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__Acidisoma|s__Acidisoma sp009765865|t__GCF_009765865	0.0533	0.0471	97.38	0.139
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 MOTU40_122757|t__MOTU40_122757	0.0519	0.024	97.78	0.135
+d__Bacteria|p__Myxococcota_A|c__Polyangia|o__Palsa-1104|f__Palsa-1104|g__JAQBQH01|s__JAQBQH01 sp963785725|t__GCA_963785725	0.0519	0.0639	96.96	0.135
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter MOTU40_037042|t__MOTU40_037042	0.0517	0.0427	98.08	0.135
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Palsa-295|s__Palsa-295 sp963779465|t__GCA_963779465	0.0447	0.0312	98.45	0.117
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__Bradyrhizobium|s__Bradyrhizobium sp963822795|t__GCA_963822795	0.0447	0.0822	99.21	0.116
+d__Bacteria|p__Chloroflexota|c__Dormibacteria|o__Aeolococcales|f__Aeolococcaceae|g__Palsa-851|s__Palsa-851 sp963709585|t__GCA_963709585	0.0443	0.0216	96.73	0.115
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__JAMXLO01|s__JAMXLO01 sp963812475|t__GCA_963812475	0.0423	0.0399	100.0	0.11
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__JABDBE01|s__JABDBE01 sp963722725|t__GCA_963722725	0.0419	0.0341	98.44	0.109
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__RAAP-2|s__RAAP-2 sp963840595|t__GCA_963840595	0.0399	0.0142	98.73	0.104
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Palsa-295|s__Palsa-295 GEMOTU_12395|t__GEMOTU_12395	0.039	0.0251	96.97	0.102
+d__Bacteria|p__Actinomycetota|c__Acidimicrobiia|o__Acidimicrobiales|f__RAAP-2|g__RAAP-2|s__RAAP-2 sp963703105|t__GCA_963703105	0.0369	0.0132	97.74	0.096
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter MOTU40_122685|t__MOTU40_122685	0.0346	0.0327	98.05	0.09
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Rhizobiales|f__Xanthobacteraceae|g__BOG-931|s__BOG-931 sp963761525|t__GCA_963761525	0.034	0.0269	98.23	0.089
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Bryobacterales|f__Bryobacteraceae|g__Palsa-89|s__Palsa-89 MOTU40_122669|t__MOTU40_122669	0.034	0.0299	96.43	0.089
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__JABDBE01|s__JABDBE01 sp963817925|t__GCA_963817925	0.0334	0.0261	97.36	0.087
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Telmatobacter|s__Telmatobacter sp963769345|t__GCA_963769345	0.0333	0.0262	97.35	0.087
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Acidiferrales|f__UBA7541|g__Palsa-295|s__Palsa-295 MOTU40_020120|t__MOTU40_020120	0.0299	0.019	97.73	0.078
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__Rhodopila|s__Rhodopila sp963812585|t__GCA_963812585	0.0292	0.0269	98.03	0.076
+d__Bacteria|p__Verrucomicrobiota|c__Verrucomicrobiia|o__Chthoniobacterales|f__JAFAMB01|g__JAFAMB01|s__JAFAMB01 sp035939025|t__GCA_035939025	0.0292	0.0107	100.0	0.076
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Streptomycetales|f__Streptomycetaceae|g__Streptomyces|s__Streptomyces sp940670765|t__GCF_036241575	0.0289	0.0323	99.56	0.075
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Acidiflorens|s__Acidiflorens sp049589635|t__GCA_049589635	0.0286	0.0232	97.75	0.075
+d__Bacteria|p__Pseudomonadota|c__Gammaproteobacteria|o__Burkholderiales|f__Burkholderiaceae|g__Caballeronia|s__Caballeronia choica|t__GCF_001544535	0.0277	0.0375	97.19	0.072
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Bog-257|s__Bog-257 sp963835125|t__GCA_963835125	0.0234	0.0158	98.52	0.061
+d__Bacteria|p__Desulfobacterota|c__Binatia|o__Binatales|f__Binataceae|g__JAKAVN01|s__JAKAVN01 sp963771325|t__GCA_963771325	0.0234	0.0145	97.32	0.061
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__TOLSYN|s__TOLSYN sp963759215|t__GCA_963759215	0.0227	0.0168	99.28	0.059
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter MOTU40_122687|t__MOTU40_122687	0.0217	0.0167	96.95	0.057
+d__Bacteria|p__Planctomycetota|c__Planctomycetia|o__Planctomycetales|f__Planctomycetaceae|g__DASPSM01|s__DASPSM01 sp963813715|t__GCA_963813715	0.0198	0.0206	99.34	0.052
+d__Bacteria|p__Actinomycetota|c__Actinomycetes|o__Mycobacteriales|f__Mycobacteriaceae|g__Rhodococcus_F|s__Rhodococcus_F erythropolis|t__GCF_001552595	0.0177	0.0161	99.36	0.046
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Sulfotelmatobacter|s__Sulfotelmatobacter MOTU40_122705|t__MOTU40_122705	0.0176	0.0132	99.99	0.046
+d__Bacteria|p__Pseudomonadota|c__Alphaproteobacteria|o__Acetobacterales|f__Acetobacteraceae|g__JAMXLO01|s__JAMXLO01 sp035511435|t__GCA_035511435	0.017	0.0123	100.0	0.044
+d__Bacteria|p__Acidobacteriota|c__Terriglobia|o__Terriglobales|f__Acidobacteriaceae|g__Bog-257|s__Bog-257 sp963833305|t__GCA_963833305	0.0161	0.0126	99.78	0.042

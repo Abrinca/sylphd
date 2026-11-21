@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from . import per_contig_client
+from . import parity, per_contig_client
 from .about import About, check_name
 from .messages import Messages
 from .assembly import gtdb_species, hit_lineage, species_caveat
@@ -1388,6 +1388,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "setup": cmd_setup,
         "taxdb": cmd_taxdb,
         "taxonomy": cmd_taxonomy,
+        "diff": parity.run,
     }
     try:
         return int(commands[args.command](args))

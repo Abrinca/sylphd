@@ -88,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_setup_parser(subparsers)
     add_taxdb_parser(subparsers)
     add_taxonomy_parser(subparsers)
+    add_diff_parser(subparsers)
     return parser
 
 
@@ -834,6 +835,20 @@ def add_taxdb_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     build.add_argument("--force", action="store_true", help="replace the output file")
     build.add_argument("-q", "--quiet", action="store_true", help="no progress output")
+
+
+def add_diff_parser(subparsers: argparse._SubParsersAction) -> None:
+    from . import parity
+
+    parser = subparsers.add_parser(
+        "diff",
+        help="check that two sylph / sylph-tax outputs are equivalent",
+        description=(
+            "Check that two sylph (or sylph-tax) outputs are equivalent: the same genomes "
+            "or clades, values equal within the printed rounding, ties in any order."
+        ),
+    )
+    parity.add_arguments(parser)
 
 
 def add_taxonomy_parser(subparsers: argparse._SubParsersAction) -> None:
