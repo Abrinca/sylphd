@@ -39,7 +39,7 @@ the sketches to the server. For the ANI hits without abundances see [`query`](qu
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--minimum-ani ANI` | `95` | minimum adjusted ANI, 0-100 |
+| `--minimum-ani ANI` | `95` | minimum adjusted ANI, 0-100. sylph warns that values below 95 give inaccurate profiles; for relatives at 90–94 % ANI use [`query`](query.md) (default 90) |
 | `--seq-id PCT` | none | read sequence identity in percent, only used with `--estimate-unknown` |
 | `--estimate-unknown` | off | estimate true coverage and scale sequence abundance of unknowns (`Eff_cov` becomes `True_cov`) |
 | `--estimate-read-counts` | off | put the estimated number of reads per genome in `Sequence_abundance` instead of a relative abundance (sylph's experimental option); implies `--estimate-unknown`, so `Eff_cov` becomes `True_cov` |

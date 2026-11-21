@@ -63,5 +63,5 @@ Add the server options (`--url URL` / `--socket PATH`, `--token-file PATH`) as s
 Keep the CLI defaults otherwise. Several FASTA files can be given to `profile -r` in one call (the public server allows 10 requests per minute); `assembly` takes one file per call.
 
 Notes:
-- Lowering `--minimum-ani` admits more distant hits; 95 % is the species convention. For a novel organism near 90–94 % ANI, `query` (default 90) may fit better. See https://abrinca.github.io/sylphd/species-and-ani/
+- Don't lower `--minimum-ani` for `profile` below 95: sylph says that gives inaccurate results. For a relative at 90–94 % ANI, use `query` (default 90). See https://abrinca.github.io/sylphd/species-and-ani/
 - Method: the `sylph` paper, https://doi.org/10.1038/s41587-024-02412-y

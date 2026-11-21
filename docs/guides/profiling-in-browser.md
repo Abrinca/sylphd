@@ -4,7 +4,7 @@ The [web app](https://abrinca.github.io/sylphd/#reads) has two equal modes, and 
 browser: **Assembly** finds the closest genomes of an assembly (see
 [Identifying an assembly](assembly.md#sketching-in-the-browser)) and **Reads** gives a taxonomic
 profile of sequencing reads. In *Reads* mode you drop the reads on the page and nothing but a small
-sketch leaves your computer.
+sketch leaves your computer. The web app does not offer [`query`](profiling-reads.md#which-one-to-use); use `sylphd query` on the command line.
 
 !!! note "Reads never leave your computer"
     The reads are read, decompressed and sketched **inside your browser** (WebAssembly in Web

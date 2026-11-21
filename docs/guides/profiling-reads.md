@@ -17,9 +17,8 @@ Both take the same inputs and options; see the [`profile`](../commands/profile.m
 **`sylphd query`**: ANI hits, one row per genome. Default `--minimum-ani` 90.
 
 - **Use when:**
-    - finding a specific genome, plasmid, virus or MAG in a read set (metagenome FASTQ or FASTA);
-    - finding the closest relative of a novel organism at roughly 90–94 % ANI, which `profile` would drop;
-    - inspecting ANI across near-identical strains without one genome taking all the shared k-mers.
+    - you want the ANI of known genomes in a read set, one row per genome, as a presence or absence measure;
+    - you screen many genomes at genome level, for example for strain-level or association studies (the paper queries all 289,232 UHGG genomes this way).
 
 **`sylphd profile`**: abundances, with shared k-mers reassigned between competing genomes. Default
 `--minimum-ani` 95, the species threshold.
@@ -97,7 +96,7 @@ The defaults are sylph's.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--minimum-ani` | `90` (`query`), `95` (`profile`) | minimum adjusted ANI, 0-100 |
+| `--minimum-ani` | `90` (`query`), `95` (`profile`) | minimum adjusted ANI, 0-100. sylph warns that a `profile` value below 95 gives inaccurate results; use `query` for relatives at 90–94 % ANI |
 | `--seq-id` | none | read sequence identity in percent, only used with `--estimate-unknown` |
 | `--estimate-unknown` | off | estimate true coverage and scale sequence abundance of unknowns |
 | `--estimate-read-counts` | off | `profile` only: put the estimated number of reads per genome in `Sequence_abundance` instead of a relative abundance (experimental in sylph); implies `--estimate-unknown` |
