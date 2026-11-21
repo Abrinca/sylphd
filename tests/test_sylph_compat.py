@@ -63,6 +63,7 @@ from conftest import (
 )
 from starlette.testclient import TestClient
 
+from sylphd.parity import compare_texts
 from sylphd.protocol import ProfileParams, rows_to_tsv
 from sylphd.server import ServerConfig, create_app
 
@@ -241,6 +242,50 @@ class TestNoAdjustParity:
     @pytest.mark.parametrize("mode", ["query", "profile"])
     def test_high_coverage(self, inputs, deep_database, mode) -> None:
         _compare(deep_database, mode, inputs["deep"], ["--no-adjust"], no_adjust=True)
+
+
+@pytest.fixture(scope="module")
+def tie_databases(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    """The plasmid twice, as ``z_copy.fa`` then ``a_copy.fa``: exact ties.
+
+    Both genomes get the identical ANI and coverage, so the order of their rows
+    is decided by the order sylph collected them in, not by any value.
+    """
+    work = tmp_path_factory.mktemp("sylph-ties")
+    with dnaio.open(CLODF13_FASTA) as reader:
+        genome = "".join(record.sequence for record in reader)
+    for name in ("z_copy.fa", "a_copy.fa"):
+        (work / name).write_text(f">{name}\n{genome}\n")
+    _sylph("sketch", "-g", "z_copy.fa", "a_copy.fa", "-o", "tie", "-t", "1", cwd=work)
+    _sylph("convert-db-two-screen", "tie.syldb", "-o", "tie2", cwd=work)
+    return {"syldb": work / "tie.syldb", "syl2db": work / "tie2.syl2db"}
+
+
+class TestTieOrder:
+    """Rows with exactly equal values may be ordered differently, and are still equivalent.
+
+    Stock sylph collects hits from parallel workers through a mutex, so its own
+    order among ties changes between runs with several threads (``-t 1`` gives
+    the database order); pysylph orders the survivors of a two-stage screen by
+    name.  ``sylphd diff`` accepts any order of tied rows, nothing else.
+    """
+
+    @pytest.mark.parametrize("database", ["syldb", "syl2db"])
+    def test_query_ties_are_equivalent(self, inputs, tie_databases, database) -> None:
+        db = tie_databases[database]
+        sylph_out = _sylph("query", db, inputs["deep"], "-t", "1")
+        sylphd_out = _sylphd_tsv(db, "query", inputs["deep"])
+        report = compare_texts(sylph_out, sylphd_out)
+        assert report.equivalent, report.format()
+        assert report.samples[0].compared == 2  # both tied genomes are there
+
+    def test_a_real_difference_is_not_hidden(self, inputs, tie_databases) -> None:
+        db = tie_databases["syldb"]
+        sylph_out = _sylph("query", db, inputs["deep"], "-t", "1")
+        sylphd_out = _sylphd_tsv(db, "query", inputs["deep"])
+        lines = sylphd_out.splitlines()
+        lines = [lines[0], *(line.replace("100.00", "99.00", 1) for line in lines[1:])]
+        assert not compare_texts(sylph_out, "\n".join(lines) + "\n").equivalent
 
 
 # ---------------------------------------------------------------------------

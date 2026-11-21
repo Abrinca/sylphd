@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from sylphd.metadata import MetadataDB
+from sylphd.protocol import format_value
 from sylphd.metadata_build import build_metadata_db
 from sylphd.taxonomy_sources import TaxonomySource
 from sylphd.taxonomy import (
@@ -252,10 +253,10 @@ def _write_inputs(directory: Path) -> None:
                     [
                         sample["name"],
                         row["Genome_file"],
-                        repr(float(row["Taxonomic_abundance"])),
-                        repr(float(row["Sequence_abundance"])),
-                        repr(float(row["Adjusted_ANI"])),
-                        repr(float(row["Eff_cov"])),
+                        format_value("Taxonomic_abundance", row["Taxonomic_abundance"]),
+                        format_value("Sequence_abundance", row["Sequence_abundance"]),
+                        format_value("Adjusted_ANI", row["Adjusted_ANI"]),
+                        format_value("Eff_cov", row["Eff_cov"]),
                         row["Contig_name"],
                     ]
                 )

@@ -42,6 +42,9 @@ from sylph_tax.merge_sylph_taxprof import merge_data
 from sylph_tax.sylph_to_taxprof import main as taxprof_main
 
 ROOT = Path(__file__).resolve().parent.parent
+# The TSV is written with sylphd's own copy of sylph's number formatting.
+sys.path.insert(0, str(ROOT / "src"))
+from sylphd.protocol import format_value  # noqa: E402
 DATA = ROOT / "tests" / "data" / "sylphtax"
 
 #: The columns sylph-tax reads; the full profile header works too, but `main`
@@ -65,8 +68,9 @@ MATRIX_COLUMNS = {
 }
 
 
-def _number(value: object) -> str:
-    return repr(float(value))  # type: ignore[arg-type]
+def _number(column: str, value: object) -> str:
+    """The cell as sylph prints it (rounded), which is all sylph-tax ever sees."""
+    return format_value(column, value)
 
 
 def write_rows(path: Path, samples: list[dict]) -> None:
@@ -78,10 +82,10 @@ def write_rows(path: Path, samples: list[dict]) -> None:
                     [
                         sample["name"],
                         str(row["Genome_file"]),
-                        _number(row["Taxonomic_abundance"]),
-                        _number(row["Sequence_abundance"]),
-                        _number(row["Adjusted_ANI"]),
-                        _number(row["Eff_cov"]),
+                        _number("Taxonomic_abundance", row["Taxonomic_abundance"]),
+                        _number("Sequence_abundance", row["Sequence_abundance"]),
+                        _number("Adjusted_ANI", row["Adjusted_ANI"]),
+                        _number("Eff_cov", row["Eff_cov"]),
                         str(row["Contig_name"]),
                     ]
                 )
