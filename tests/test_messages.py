@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from conftest import ECOLI_TWO_STAGE
 from starlette.testclient import TestClient
 
 from sylphd import cli
@@ -23,8 +23,6 @@ from sylphd.messages import (
     parse_messages,
 )
 from sylphd.server import ServerConfig, create_app
-
-from conftest import ECOLI_TWO_STAGE
 
 INFO = {"level": "info", "title": "Licence", "message": "CC BY-SA, [terms](https://example.org)"}
 WARNING = {"level": "warning", "title": "Slow", "message": "Expect **delays**."}
@@ -145,7 +143,7 @@ def test_cli_rejects_bad_messages(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "sylphd", "serve", "--db", str(ECOLI_TWO_STAGE),
          "--tcp", "127.0.0.1:8798", "--messages", str(bad)],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, check=False,
     )
     assert result.returncode != 0
     assert "level must be one of" in result.stderr

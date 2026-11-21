@@ -6,6 +6,8 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-21
+
 ### Added
 
 - **A `sylphd` skill for coding agents** (`skills/sylphd/SKILL.md`), installed with

@@ -26,10 +26,10 @@ def _subparsers() -> dict[str, argparse.ArgumentParser]:
 
 def test_front_matter() -> None:
     text = SKILL.read_text(encoding="utf-8")
-    head = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    head = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
     assert head is not None
-    assert re.search(r"^name: sylphd$", head.group(1), re.M)
-    assert re.search(r"^description: \S", head.group(1), re.M)
+    assert re.search(r"^name: sylphd$", head.group(1), re.MULTILINE)
+    assert re.search(r"^description: \S", head.group(1), re.MULTILINE)
     assert len(text.splitlines()) <= 120
 
 
