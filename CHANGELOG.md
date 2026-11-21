@@ -4,6 +4,15 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Web: Reads mode no longer stays on "Uploading the sketch…" while the server profiles.** The
+  progress switched to *Profiling* only on the upload's `load` event, which Firefox fires over
+  HTTP/2 (the public server behind Caddy) only once the response starts, i.e. after profiling. It now
+  also switches when the progress events report every byte sent.
+
 ## [0.6.1] - 2026-11-21
 
 ### Fixed

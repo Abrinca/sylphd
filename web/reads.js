@@ -479,8 +479,15 @@
       xhr.open('POST', url);
       xhr.responseType = 'text';
       for (const [name, value] of Object.entries(S.authHeaders())) xhr.setRequestHeader(name, value);
-      xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) run.prog.uploaded = ev.loaded; };
-      xhr.upload.onload = () => { run.prog.uploaded = run.sketch.size; setPhase(run, 'profile'); };
+      // upload.onload is not reliable on its own: over HTTP/2 some browsers fire it only once the
+      // response starts, i.e. after profiling. A progress event with every byte sent is enough.
+      const uploaded = () => { run.prog.uploaded = run.sketch.size; if (run.phase === 'upload') setPhase(run, 'profile'); };
+      xhr.upload.onprogress = (ev) => {
+        if (!ev.lengthComputable) return;
+        run.prog.uploaded = ev.loaded;
+        if (ev.total > 0 && ev.loaded >= ev.total) uploaded();
+      };
+      xhr.upload.onload = uploaded;
       xhr.onload = () => { S.noteToken({ headers: { get: (n) => xhr.getResponseHeader(n) } }); resolve({ status: xhr.status, retryAfter: parseInt(xhr.getResponseHeader('Retry-After'), 10), text: xhr.responseText }); };
       xhr.onerror = () => { const e = new Error('network'); e.network = true; reject(e); };
       xhr.ontimeout = xhr.onerror;
