@@ -709,7 +709,6 @@ async def _run_slot(
             fields,
             name,
             payload,
-            params.no_adjust,
             tax_sources,
             taxprof,
         )

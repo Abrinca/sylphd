@@ -1318,7 +1318,8 @@
     }
     function row({ r, i, lin, tax, species }) {
       const key = r.accession || r.Genome_file || `#${i}`;
-      const ci = Array.isArray(r['ANI_5-95_percentile']) ? r['ANI_5-95_percentile'] : null;
+      // With no_adjust the interval still describes the (disabled) adjustment: not shown.
+      const ci = !params.no_adjust && Array.isArray(r['ANI_5-95_percentile']) ? r['ANI_5-95_percentile'] : null;
       const cont = Array.isArray(r.Containment_ind) ? r.Containment_ind : null;
       const lineage = lin.length ? lin : tax;
       const source = S.hitSource(r);

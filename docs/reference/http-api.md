@@ -279,9 +279,9 @@ The TSV renders missing values as sylph does: `Eff_lambda` is `HIGH` or `LOW` ac
 `Lambda_status` when it is `null`, a missing interval is `NA-NA`, and for a sketch without read
 statistics under `estimate_unknown` `True_cov` is `inf` and the abundances are `NaN` (in JSON all of
 these are `null`). The TSV also caps `Adjusted_ANI` at 100 as sylph does; JSON keeps the value.
-With `no_adjust`, `Adjusted_ANI` is the naive containment ANI and `ANI_5-95_percentile` is `null`
-(`NA-NA` in the TSV): the interval still describes the disabled adjustment. This is a deliberate
-difference from stock sylph, whose hidden `--no-adjust` still prints that interval.
+With `no_adjust`, `Adjusted_ANI` is the naive containment ANI, while `ANI_5-95_percentile` is still
+sylph's interval of the adjusted estimate (as in stock sylph's `--no-adjust`), so it can lie away
+from `Adjusted_ANI`. It is `null` only when sylph computes no interval.
 
 With sylph-tax taxonomy sources (see [the metadata reference](metadata.md#taxonomy-sources)), every row has four more columns, and
 they are listed in `metadata.columns` so `fields` can select them:

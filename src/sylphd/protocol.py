@@ -387,13 +387,12 @@ def result_row(
     mode: str = "query",
     metadata: Mapping[str, Any] | None = None,
     fields: Sequence[str] | None = None,
-    hide_ani_ci: bool = False,
 ) -> dict[str, Any]:
     """Convert a `pysylph` result object into a JSON-friendly row.
 
-    With ``no_adjust``, ``ani`` is the naive containment ANI while
-    ``ani_ci`` is still the confidence interval of the adjusted estimate;
-    ``hide_ani_ci`` drops that misleading value.
+    With ``no_adjust``, ``ani`` is the naive containment ANI while ``ani_ci``
+    is still the confidence interval of the adjusted estimate, exactly as in
+    stock sylph; the row keeps it (clients may choose not to show it).
     """
     genome = result.genome_sketch
     genome_file = genome.name
@@ -404,7 +403,7 @@ def result_row(
         "Genome_file": genome_file,
         "Adjusted_ANI": float(result.ani),
         "Eff_cov": _finite(result.coverage),
-        "ANI_5-95_percentile": None if hide_ani_ci else _pair(result.ani_ci),
+        "ANI_5-95_percentile": _pair(result.ani_ci),
         "Eff_lambda": None if result.effective_lambda is None else float(result.effective_lambda),
         "Lambda_status": result.lambda_status,
         "Lambda_5-95_percentile": _pair(result.lambda_ci),

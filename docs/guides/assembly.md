@@ -208,8 +208,8 @@ A real example, assembly FAM22000 (8 contigs, 2.59 Mb) against its best GTDB hit
 | Contained k-mers | `7096/10826` |
 
 The adjusted value claims 100 % identity with an interval that cannot exist, while the naive ANI is
-a plain, interpretable 98.65 %. With `no_adjust`, the confidence interval is left out entirely: it
-still belongs to the disabled adjustment.
+a plain, interpretable 98.65 %. The `/assembly` hits carry no confidence interval, because it
+belongs to the adjustment that is not applied.
 
 The same switch exists for read workflows as [`--no-adjust`](../commands/profile.md) on `query`
 and `profile`, if you use an assembly as a sample there.

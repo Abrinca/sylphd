@@ -52,7 +52,15 @@ from pathlib import Path
 import dnaio
 import pysylph
 import pytest
-from conftest import CLODF13_FASTA, DATA, ECOLI_PLAIN, ECOLI_TWO_STAGE, K12_R1, K12_R2
+from conftest import (
+    CLODF13_FASTA,
+    DATA,
+    ECOLI_PLAIN,
+    ECOLI_TWO_STAGE,
+    K12_R1,
+    K12_R2,
+    O157_SKETCH,
+)
 from starlette.testclient import TestClient
 
 from sylphd.protocol import ProfileParams, rows_to_tsv
@@ -211,6 +219,28 @@ class TestFormattingRules:
         )
         row = expected.splitlines()[1].split("\t")
         assert "inf" in row and "NaN" in row
+
+
+class TestNoAdjustParity:
+    """``--no-adjust``: naive point estimate, but sylph's interval is still printed."""
+
+    @pytest.mark.parametrize("mode", ["query", "profile"])
+    def test_reads(self, inputs, mode) -> None:
+        expected = _compare(
+            ECOLI_TWO_STAGE, mode, O157_SKETCH, ["--no-adjust"], no_adjust=True
+        )
+        header, *rows = (line.split("\t") for line in expected.splitlines())
+        assert rows, "the fixture must produce a hit"
+        column = header.index("ANI_5-95_percentile")
+        assert all(row[column] != "NA-NA" for row in rows)
+
+    @pytest.mark.parametrize("mode", ["query", "profile"])
+    def test_syldb(self, inputs, mode) -> None:
+        _compare(ECOLI_PLAIN, mode, O157_SKETCH, ["--no-adjust"], no_adjust=True)
+
+    @pytest.mark.parametrize("mode", ["query", "profile"])
+    def test_high_coverage(self, inputs, deep_database, mode) -> None:
+        _compare(deep_database, mode, inputs["deep"], ["--no-adjust"], no_adjust=True)
 
 
 # ---------------------------------------------------------------------------

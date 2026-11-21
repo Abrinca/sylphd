@@ -711,7 +711,6 @@ def run_sample(
     fields: Sequence[str] | None,
     name: str,
     payload: bytes,
-    hide_ani_ci: bool = False,
     tax_sources: Sequence[str] | None = None,
     taxprof: Sequence[str] | None = None,
 ) -> dict[str, Any]:
@@ -736,7 +735,6 @@ def run_sample(
         name,
         mode=mode,
         fields=fields,
-        hide_ani_ci=hide_ani_ci,
         tax_sources=tax_sources,
     )
     sample: dict[str, Any] = {
@@ -829,7 +827,6 @@ def run_contig_query(
             name,
             mode="query",
             fields=fields,
-            hide_ani_ci=True,
             tax_sources=tax_sources,
         ),
     }
@@ -842,7 +839,6 @@ def result_rows(
     *,
     mode: str = "query",
     fields: Sequence[str] | None = None,
-    hide_ani_ci: bool = False,
     tax_sources: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Convert ``pysylph`` results into JSON rows, joining the metadata.
@@ -853,7 +849,7 @@ def result_rows(
     """
     if metadata is None:
         return [
-            result_row(result, name, mode=mode, hide_ani_ci=hide_ani_ci)
+            result_row(result, name, mode=mode)
             for result in results
         ]
     accessions = [
@@ -878,7 +874,6 @@ def result_rows(
                 mode=mode,
                 metadata=record,
                 fields=fields,
-                hide_ani_ci=hide_ani_ci,
             )
         )
     return rows

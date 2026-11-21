@@ -28,9 +28,13 @@ All notable changes to `sylphd` are documented here. The format follows
   `ANI_5-95_percentile` and `Lambda_5-95_percentile` when there is no interval, and, for a sketch
   without read statistics under `-u`, `inf` in `True_cov` and `NaN` in the abundances. `Adjusted_ANI`
   is capped at 100 as in sylph. Scripts that tested for empty cells need updating. Metadata columns
-  still use empty cells for missing values. One known difference remains: under `--no-adjust`
-  `sylphd` hides the ANI interval (`NA-NA` in the TSV, `null` in JSON) because it describes the
-  disabled adjustment, where stock sylph still prints it.
+  still use empty cells for missing values. Under `--no-adjust` the ANI interval is printed as
+  stock sylph prints it (see the API change below).
+- **API change: `no_adjust` keeps the ANI interval.** With `no_adjust`, `ANI_5-95_percentile` in
+  the `/query` and `/profile` JSON used to be `null`; it is now sylph's interval of the adjusted
+  estimate (as in stock sylph and pysylph), so the CLI TSV matches `sylph --no-adjust` byte for
+  byte. The web app still does not show it. Clients that relied on the `null` must ignore the
+  column themselves.
 - **Dependency refresh.** `uv lock --upgrade` moves anyio 4.15.1 → 4.16.0, click 8.5.0 → 8.5.1,
   dnaio 1.2.4 → 1.2.5, isal 1.8.0 → 1.9.1, python-multipart 0.0.32 → 0.0.34 and zlib-ng
   1.0.0 → 1.1.0. `pysylph` stays on the `multi-db` commit pinned in `uv.lock`, so no Rust rebuild is

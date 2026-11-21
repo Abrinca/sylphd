@@ -122,9 +122,9 @@ statistics (one made from contigs or an assembly) under
 `none` to omit them); see the [metadata database](../reference/metadata.md#columns) for the names.
 `--fields` needs a server started with `--meta`. Unknown column names are rejected.
 
-With `--no-adjust`, `Adjusted_ANI` equals `Naive_ANI` and `ANI_5-95_percentile` is `NA-NA` (`null`
-in JSON), because that interval still describes the (disabled) adjustment. This is a deliberate
-difference from stock sylph, whose hidden `--no-adjust` still prints that interval.
+With `--no-adjust`, `Adjusted_ANI` equals `Naive_ANI`. `ANI_5-95_percentile` is printed exactly as
+stock sylph prints it: it is still the interval of the adjusted estimate, so it need not contain
+the naive value, and it is `NA-NA` only when sylph computes none.
 
 ## Using a remote server
 

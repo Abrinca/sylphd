@@ -256,7 +256,7 @@ class TestAssemblyHelpers:
 
 
 class TestNoAdjust:
-    def test_query_reports_naive_ani_without_ci(self) -> None:
+    def test_query_reports_naive_ani_with_sylphs_ci(self) -> None:
         app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE))
         with TestClient(app) as test_client:
             default = test_client.post(
@@ -273,7 +273,8 @@ class TestNoAdjust:
         assert default["Adjusted_ANI"] == pytest.approx(99.79, abs=0.01)
         assert naive["Adjusted_ANI"] == pytest.approx(96.02, abs=0.01)
         assert naive["Adjusted_ANI"] == pytest.approx(naive["Naive_ANI"], abs=0.005)
-        assert naive["ANI_5-95_percentile"] is None
+        # As in stock sylph, the interval of the adjusted estimate is still reported.
+        assert len(naive["ANI_5-95_percentile"]) == 2
         assert default["ANI_5-95_percentile"] is not None
 
 
