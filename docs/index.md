@@ -150,6 +150,8 @@ uploads for `curl` and scripts; the public instance runs with it.
   95 % ANI and the lineage relation of every hit.
 - **[Taxonomic profiles](guides/taxonomic-profiles.md).** `.sylphmpa` files and clade × sample
   matrices in the format of `sylph-tax`, aggregated on the server and written by the client.
+- **[Coding agents](guides/coding-agents.md).** A skill that lets Claude Code and other agents run
+  these commands for you; only sketches leave your machine.
 - **[Public server](guides/public-server.md).** TCP and `--url` clients, upload limits, rate limit,
   queue, trusted proxy and CORS, all off by default.
 

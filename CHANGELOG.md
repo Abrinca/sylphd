@@ -8,6 +8,14 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **A `sylphd` skill for coding agents** (`skills/sylphd/SKILL.md`), installed with
+  `gh skill install Abrinca/sylphd sylphd --agent claude-code --scope user`. It picks assembly,
+  per-contig or reads mode from the input, checks the server and its messages first, writes the
+  full output next to the input and summarises it. A guide ("Coding agents") explains
+  it, including that the message acknowledgement is a rule for the agent, not enforced. A test
+  checks that every option the skill names exists in the CLI.
+- **`sylphd info` shows the operator's messages** (all levels, plain text), and `info --json`
+  carries them in a `messages` key.
 - **`sylphd diff A B`: are two outputs equivalent?** Compares `sylph profile`/`query` TSVs, or
   `sylph-tax` `.sylphmpa` files (or directories of them), with sylphd's: the same genomes or
   clades, values equal within the printed rounding, and rows with equal values in any order.
@@ -23,6 +31,9 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Fixed
 
+- **The client extra works on its own.** `sylphd[client]` failed on every command, `info` included,
+  because the command line imported the server (starlette, uvicorn) at start-up. The server is now
+  imported only by `sylphd serve`, and a test runs a client command with the server packages blocked.
 - **Web: Reads mode no longer stays on "Uploading the sketch…" while the server profiles.** The
   progress switched to *Profiling* only on the upload's `load` event, which Firefox fires over
   HTTP/2 (the public server behind Caddy) only once the response starts, i.e. after profiling. It now

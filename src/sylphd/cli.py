@@ -17,14 +17,13 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import httpx
 
 from . import parity, per_contig_client
 from .about import About, check_name
-from .messages import Messages
 from .assembly import gtdb_species, hit_lineage, species_caveat
 from .cli_parser import PROG, build_parser
 from .client import ClientError, TokenWarning, connect
@@ -45,14 +44,12 @@ from .download import (
     taxonomy_table,
 )
 from .limits import load_token_digests
-from .ncbitax import Taxonomy
+from .messages import Messages
 from .metadata_build import build_metadata_db, update_metadata_db
-from .taxonomy_sources import TaxonomySource
+from .ncbitax import Taxonomy
 from .paths import check_socket_path, default_socket_path, parse_tcp
 from .profiling import DatabaseSet, DatabaseSpec
 from .protocol import ProfileParams, ProtocolError, rows_to_tsv_lines
-from .server import ServerConfig, create_app
-from .server_launch import serve
 from .sketching import (
     InputError,
     SampleInput,
@@ -71,7 +68,11 @@ from .taxonomy import (
     resolve_taxonomy_columns,
     write_outputs,
 )
+from .taxonomy_sources import TaxonomySource
 from .usage import Usage
+
+if TYPE_CHECKING:
+    from .server import ServerConfig
 
 log = logging.getLogger("sylphd")
 
@@ -137,6 +138,11 @@ def _configure_logging(level: str) -> None:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
+    # The server needs starlette and uvicorn (the server extra). Imported here so
+    # that client commands work with the client extra alone.
+    from .server import ServerConfig, create_app
+    from .server_launch import serve
+
     if args.socket is not None and args.tcp is not None:
         _print_error("--socket and --tcp are mutually exclusive")
         return 2

@@ -20,8 +20,11 @@ wheel (see below).
 - [uv](https://docs.astral.sh/uv/).
 - A **Rust toolchain** (for example via [rustup](https://rustup.rs/)). `sylphd` depends on the
   [pysylph](https://github.com/MrTomRod/pysylph) fork, branch `multi-db`, which is built from git
-  at install time. `cmake` is provided automatically in uv's isolated build environment
-  (`extra-build-dependencies` in `pyproject.toml`).
+  at install time.
+- **`cmake` on the system `PATH`** (for example `sudo dnf install cmake` or `sudo apt install cmake`).
+  The Rust build of `libz-ng-sys` runs the `cmake` on `PATH`; the isolated build environment that
+  uv provides for `pysylph` (`extra-build-dependencies` in `pyproject.toml`) does not reach it, so
+  the install fails with "`cmake` not installed" without it.
 - A sylph database: `.syl2db` (two-stage) or `.syldb` (plain). See
   [Quick start](quickstart.md#get-a-database).
 
@@ -128,6 +131,17 @@ sylphd --version
 ```
 
 Clients need the package too, because they sketch locally with pysylph.
+
+## Coding agent skill
+
+To let a coding agent such as Claude Code run sylphd for you, install the skill with the GitHub CLI:
+
+```bash
+gh skill install Abrinca/sylphd sylphd --agent claude-code --scope user
+```
+
+The skill installs the command line itself when it is missing (`uv tool install`, after asking).
+See [Coding agents](guides/coding-agents.md) for what it does and how to use it.
 
 ## Documentation
 

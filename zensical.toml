@@ -22,6 +22,7 @@ nav = [
     { "Identifying an assembly" = "guides/assembly.md" },
     { "Taxonomic profiles" = "guides/taxonomic-profiles.md" },
     { "Python client" = "guides/python-client.md" },
+    { "Coding agents" = "guides/coding-agents.md" },
     { "NCBI taxonomy" = "guides/ncbi-taxonomy.md" },
     { "Running a public server" = "guides/public-server.md" },
   ] },

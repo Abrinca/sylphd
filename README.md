@@ -151,6 +151,9 @@ guides (profiling reads, identifying an assembly, taxonomic profiles, running a 
 the commands, the HTTP API, the metadata database and security notes. It is built with
 [Zensical](https://zensical.org/) from `docs/`: `uvx zensical serve`.
 
+Coding agents can drive the CLI through a skill: see
+[Coding agents](https://abrinca.github.io/sylphd/docs/guides/coding-agents/).
+
 ## Development
 
 ```console
