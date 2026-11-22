@@ -1,0 +1,12 @@
+[submodule "ref/sylph"]
+	path = ref/sylph
+	url = https://github.com/MrTomRod/sylph
+	branch = sketch-core
+[submodule "ref/pysylph"]
+	path = ref/pysylph
+	url = https://github.com/MrTomRod/pysylph
+	branch = multi-db
+[submodule "ref/sylph-tax"]
+	path = ref/sylph-tax
+	url = https://github.com/bluenote-1577/sylph-tax
+	branch = main

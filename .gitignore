@@ -12,7 +12,10 @@ dist/
 htmlcov/
 
 # Local data, references and scratch space
-ref/
+ref/*
+!ref/pysylph
+!ref/sylph
+!ref/sylph-tax
 scratch/
 db/
 *.part
