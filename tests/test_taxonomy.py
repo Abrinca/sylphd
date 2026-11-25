@@ -478,16 +478,13 @@ class TestWriteOutputs:
             _served(samples, ("gtdb", "ncbi")),
             taxonomies=("gtdb", "ncbi"),
             taxprof_prefix=str(tmp_path / "p-"),
-            taxmatrix_prefix=str(tmp_path / "m-"),
         )
         names = {path.name for path in written}
         assert names == {
             "p-one.gtdb.sylphmpa",
             "p-two.gtdb.sylphmpa",
-            "m-gtdb.tsv",
             "p-one.ncbi.sylphmpa",
             "p-two.ncbi.sylphmpa",
-            "m-ncbi.tsv",
         }
         assert all(path.is_file() for path in written)
 
@@ -506,10 +503,9 @@ class TestWriteOutputs:
             _served(samples, ("gtdb",)),
             taxonomies=("gtdb",),
             taxprof_prefix=str(tmp_path),
-            taxmatrix_prefix=str(tmp_path / "m-"),  # not a directory: a prefix
         )
         assert {path.parent for path in written} == {tmp_path}
-        assert {path.name for path in written} == {"one.gtdb.sylphmpa", "m-gtdb.tsv"}
+        assert {path.name for path in written} == {"one.gtdb.sylphmpa"}
 
     def test_colliding_sample_names_write_nothing(self, tmp_path: Path) -> None:
         samples = [
@@ -521,7 +517,6 @@ class TestWriteOutputs:
                 _served(samples, ("gtdb", "ncbi")),
                 taxonomies=("gtdb", "ncbi"),
                 taxprof_prefix=str(tmp_path / "p-"),
-                taxmatrix_prefix=str(tmp_path / "m-"),
             )
         assert not list(tmp_path.iterdir())
 
@@ -713,15 +708,9 @@ class TestSylphTaxFlags:
             _served(samples, ("tax",), ("UHGV_default",)),
             taxonomies=("tax",),
             taxprof_prefix=str(tmp_path / "p-"),
-            taxmatrix_prefix=str(tmp_path / "m-"),
             tax_sources=["UHGV_default"],
         )
-        assert {path.name for path in written} == {
-            "p-one.tax.sylphmpa",
-            "m-tax.tsv",
-        }
-        header = (tmp_path / "m-tax.tsv").read_text().splitlines()[0]
-        assert header == "clade_name\tone"
+        assert {path.name for path in written} == {"p-one.tax.sylphmpa"}
 
 
 class TestOneSource:

@@ -26,7 +26,7 @@ Both take the same inputs and options; see the [`profile`](../commands/profile.m
 - **Use when:**
     - measuring community composition in a read set;
     - using databases with many related genomes (GTDB, GlobDB), where `query` would list many relatives of each organism;
-    - building taxonomic profiles (`--taxprof`, `--taxmatrix`); the `tax` profile is equivalent to sylph-tax v1.9.2 output (check with `sylphd diff`).
+    - building taxonomic profiles (`--taxprof`, merged across samples with [`sylphd taxmatrix`](../commands/taxmatrix.md)); the `tax` profile is equivalent to sylph-tax v1.9.2 output (check with `sylphd diff`).
 
 **`sylphd assembly`**: the closest genomes of one assembly, with a species call at 95 % ANI. See
 [Identifying an assembly](assembly.md).

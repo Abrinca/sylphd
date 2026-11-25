@@ -2,8 +2,7 @@
 
 ```text
 sylphd profile [inputs] [options] [--estimate-read-counts] [--taxonomy LIST]
-               [--tax-source NAME] [--taxprof PREFIX] [--taxmatrix PREFIX]
-               [--taxmatrix-value {relative,sequence,ani,coverage}]
+               [--tax-source NAME] [--taxprof PREFIX]
 ```
 
 Taxonomic profile of one or more samples: the equivalent of `sylph profile`, with
@@ -55,20 +54,18 @@ the sketches to the server. For the ANI hits without abundances see [`query`](qu
 | `--taxonomy LIST` | `gtdb,ncbi` (+ `tax`) | taxonomies to aggregate, comma-separated from `gtdb`, `ncbi`, `tax` and `tax:SOURCE`; `tax` is added to the default when the server's metadata file has sylph-tax sources |
 | `--tax-source NAME` | all sources | with `--taxonomy tax`: resolve against these taxonomy sources only (repeatable, in `setup` order) |
 | `--taxprof PREFIX` | none | write one sylph-tax-style `.sylphmpa` per sample and taxonomy as `PREFIX<sample>.<taxonomy>.sylphmpa` |
-| `--taxmatrix PREFIX` | none | write one clade × sample matrix per taxonomy as `PREFIX<taxonomy>.tsv` |
-| `--taxmatrix-value {relative,sequence,ani,coverage}` | `relative` | value used in `--taxmatrix`: `relative` (`Taxonomic_abundance`) or `sequence` (`Sequence_abundance`), or `ani`/`coverage` for the strain-level columns, as `sylph-tax merge --column ANI\|Coverage` |
 
 These need a server with `--meta`; `tax` additionally needs a metadata file with sylph-tax
 sources. The aggregation happens on the server (`/profile` `taxprof`): the command writes the
-returned `.sylphmpa` text and only lays out the matrix across samples. `tax` needs a metadata file
+returned `.sylphmpa` text directly. To merge `.sylphmpa` files (or saved `/profile` JSON
+documents) into a clade × sample matrix, use [`sylphd taxmatrix`](taxmatrix.md). `tax` needs a metadata file
 with sylph-tax sources, where the **default `--taxprof` writes three files per sample** (`.gtdb`, `.ncbi`, `.tax`)
 instead of two — pass `--taxonomy gtdb,ncbi` for the old set. `tax` follows `sylph-tax taxprof` over all sources rule for rule (opaque lineages, `UNKNOWN`,
 `NO_TAXONOMY`, level-based ordering); `tax:SOURCE` (e.g. `tax:UHGV_default`) follows
 `sylph-tax taxprof -t SOURCE`, one source alone, written as `PREFIX<sample>.tax.SOURCE.sylphmpa`.
 Both are equivalent to sylph-tax v1.9.2's on the same sylph run: the same clades, values equal within the TSV's rounding (sylphd works at full precision, sylph-tax sums sylph's rounded TSV), and clades with equal values may be ordered differently. Check with [`sylphd diff`](diff.md).
 
-`gtdb` and `ncbi` keep sylphd's own normalisation. With two
-or more samples the matrix rows are sorted lexicographically, like `sylph-tax merge`. See
+`gtdb` and `ncbi` keep sylphd's own normalisation. See
 [Taxonomic profiles](../guides/taxonomic-profiles.md).
 
 ## Server

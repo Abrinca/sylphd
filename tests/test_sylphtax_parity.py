@@ -46,7 +46,7 @@ from sylphd.taxonomy import (
 
 DATA = Path(__file__).parent / "data" / "sylphtax"
 
-#: ``sylph-tax merge --column`` for each ``--taxmatrix-value``.
+#: ``sylph-tax merge --column`` for each ``sylphd taxmatrix --value``.
 SYLPH_TAX_COLUMNS = {
     "relative": "relative_abundance",
     "sequence": "sequence_abundance",
@@ -314,7 +314,7 @@ def test_matches_sylph_tax_live(rows: list[dict], tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("value", list(SYLPH_TAX_COLUMNS))
 def test_matches_sylph_tax_merge_live(rows: list[dict], tmp_path: Path, value: str) -> None:
-    """``--taxmatrix`` for ``tax`` versus the real ``sylph-tax merge``."""
+    """``sylphd taxmatrix`` for ``tax`` versus the real ``sylph-tax merge``."""
     merge_sylph_taxprof = pytest.importorskip(
         "sylph_tax.merge_sylph_taxprof",
         reason="sylph-tax (and pandas) not installed",

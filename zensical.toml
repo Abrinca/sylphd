@@ -31,6 +31,7 @@ nav = [
     { "Server address" = "commands/address.md" },
     { "info" = "commands/info.md" },
     { "profile" = "commands/profile.md" },
+    { "taxmatrix" = "commands/taxmatrix.md" },
     { "diff" = "commands/diff.md" },
     { "query" = "commands/query.md" },
     { "assembly" = "commands/assembly.md" },

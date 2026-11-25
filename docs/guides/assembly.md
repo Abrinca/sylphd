@@ -268,7 +268,7 @@ source, but it says so:
   wording — MIUViG calls a vOTU at 95 % ANI over 85 % of the shorter genome, and sylph's ANI
   ignores the aligned fraction. Fungi get "no established ANI boundary, a heuristic". Any other
   source gets a generic note.
-- `--per-contig` and `--taxprof`/`--taxmatrix` with `--taxonomy tax` print the same caveat **once
+- `--per-contig` and `--taxprof` with `--taxonomy tax` print the same caveat **once
   per output**, not once per row.
 - `thresholds.species` in JSON is still one value; a per-source threshold may come later.
 

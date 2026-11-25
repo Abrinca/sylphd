@@ -6,6 +6,20 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`sylphd taxmatrix [--value relative|sequence|ani|coverage] [--taxonomy NAME] [-o FILE] FILES...`**:
+  offline command that merges `.sylphmpa` files (as written by `sylph-tax taxprof` or
+  `sylphd profile --taxprof`) and saved `/profile` JSON documents into one wide clade × sample TSV
+  table, matching `sylph-tax merge`. Standard library only (dispatched directly in `entry.py`, like
+  `sylphd diff`), so it works in the base install without `pysylph` and can merge samples across
+  separate profiling runs.
+
+### Removed
+
+- **`sylphd profile --taxmatrix` and `--taxmatrix-value`**: replaced by the standalone
+  `sylphd taxmatrix` command.
+
 ## [0.7.0] - 2026-11-21
 
 ### Added

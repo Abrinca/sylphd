@@ -456,7 +456,6 @@ class TestLocalCLI:
         [
             ["query", str(O157_SKETCH), "-o", "{dir}/missing/out.tsv"],
             ["profile", str(O157_SKETCH), "--taxprof", "{dir}/missing/p-"],
-            ["profile", str(O157_SKETCH), "--taxmatrix", "{dir}/missing/m-"],
             ["profile", str(O157_SKETCH), "--taxonomy", "kraken", "--taxprof", "{dir}/p-"],
         ],
     )
@@ -550,8 +549,6 @@ class TestTaxonomyOutputs:
             "none",
             "--taxprof",
             str(directory / "taxprof-"),
-            "--taxmatrix",
-            str(directory / "matrix-"),
         )
         assert result.returncode == 0, result.stderr
 
@@ -564,17 +561,70 @@ class TestTaxonomyOutputs:
         for sample in ("one", "two"):
             for taxonomy in ("gtdb", "ncbi"):
                 assert (directory / f"taxprof-{sample}.{taxonomy}.sylphmpa").is_file()
-        assert (directory / "matrix-gtdb.tsv").is_file()
-        assert (directory / "matrix-ncbi.tsv").is_file()
 
         gtdb = (directory / "taxprof-one.gtdb.sylphmpa").read_text().splitlines()
         rows = {line.split("\t")[0]: line.split("\t") for line in gtdb[2:]}
         assert float(rows["d__Bacteria"][1]) == pytest.approx(100.0)
 
+        for taxonomy in ("gtdb", "ncbi"):
+            matrix_out = directory / f"matrix-{taxonomy}.tsv"
+            merged = _run(
+                "taxmatrix",
+                str(directory / f"taxprof-one.{taxonomy}.sylphmpa"),
+                str(directory / f"taxprof-two.{taxonomy}.sylphmpa"),
+                "-o",
+                str(matrix_out),
+                check=False,
+            )
+            assert merged.returncode == 0, merged.stderr
+            assert matrix_out.is_file()
+
+    def test_profile_rejects_removed_taxmatrix_flags(self, taxonomy_server) -> None:
+        _, directory = taxonomy_server
+        for flag in ("--taxmatrix", "--taxmatrix-value"):
+            result = self._profile(taxonomy_server, flag, "x")
+            assert result.returncode == 2
+
+    def test_taxmatrix_from_live_server_profile_json(self, taxonomy_server) -> None:
+        """A raw Step-1 ``POST /profile`` JSON document feeds ``sylphd taxmatrix``."""
+        import httpx
+
+        socket_path, directory = taxonomy_server
+        transport = httpx.HTTPTransport(uds=str(socket_path))
+        with httpx.Client(transport=transport, base_url="http://localhost") as http:
+            response = http.post(
+                "/profile",
+                data={"params": json.dumps({"names": ["one", "two"], "taxprof": ["gtdb", "ncbi"]})},
+                files=[
+                    ("sketch", ("one.sylsp", (directory / "one.sylsp").read_bytes(), "application/octet-stream")),
+                    ("sketch", ("two.sylsp", (directory / "two.sylsp").read_bytes(), "application/octet-stream")),
+                ],
+            )
+        assert response.status_code == 200, response.text
+        doc_path = directory / "server-profile.json"
+        doc_path.write_text(response.text)
+
+        ambiguous = _run("taxmatrix", str(doc_path), check=False)
+        assert ambiguous.returncode == 2
+        assert "--taxonomy" in ambiguous.stderr
+
+        gtdb_from_json = _run("taxmatrix", "--taxonomy", "gtdb", str(doc_path), check=False)
+        assert gtdb_from_json.returncode == 0, gtdb_from_json.stderr
+
+        # Same output as merging the per-sample .sylphmpa files from the same doc.
+        doc = response.json()
+        mpa_one = directory / "live-one.gtdb.sylphmpa"
+        mpa_two = directory / "live-two.gtdb.sylphmpa"
+        mpa_one.write_text(doc["taxprof"]["one"]["gtdb"]["sylphmpa"])
+        mpa_two.write_text(doc["taxprof"]["two"]["gtdb"]["sylphmpa"])
+        gtdb_from_mpa = _run("taxmatrix", str(mpa_one), str(mpa_two), check=False)
+        assert gtdb_from_mpa.returncode == 0, gtdb_from_mpa.stderr
+        assert gtdb_from_json.stdout == gtdb_from_mpa.stdout
+
     def test_taxprof_is_aggregated_by_the_server(
         self, taxonomy_server, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The CLI only writes the server's clades/text: no client aggregation."""
+        """The CLI only writes the server's text: no client aggregation."""
         _, directory = taxonomy_server
 
         def boom(*args: object, **kwargs: object) -> None:
@@ -587,12 +637,9 @@ class TestTaxonomyOutputs:
             "gtdb",
             "--taxprof",
             str(directory / "srv-"),
-            "--taxmatrix",
-            str(directory / "srv-"),
         )
         assert result.returncode == 0, result.stderr
         assert (directory / "srv-one.gtdb.sylphmpa").is_file()
-        assert (directory / "srv-gtdb.tsv").is_file()
 
     def test_taxonomy_selection_and_visible_fields(self, taxonomy_server) -> None:
         _, directory = taxonomy_server
@@ -604,8 +651,6 @@ class TestTaxonomyOutputs:
             "gtdb_taxonomy",
             "--taxprof",
             str(directory / "sel-"),
-            "--taxmatrix",
-            str(directory / "sel-"),
         )
         assert result.returncode == 0, result.stderr
         header = result.stdout.splitlines()[0].split("\t")
@@ -614,9 +659,7 @@ class TestTaxonomyOutputs:
         assert "d__Bacteria" in result.stdout
 
         assert (directory / "sel-one.gtdb.sylphmpa").is_file()
-        assert (directory / "sel-gtdb.tsv").is_file()
         assert not (directory / "sel-one.ncbi.sylphmpa").exists()
-        assert not (directory / "sel-ncbi.tsv").exists()
 
     def test_sequence_matrix(self, taxonomy_server) -> None:
         _, directory = taxonomy_server
@@ -624,13 +667,20 @@ class TestTaxonomyOutputs:
             taxonomy_server,
             "--taxonomy",
             "gtdb",
-            "--taxmatrix",
+            "--taxprof",
             str(directory / "seq-"),
-            "--taxmatrix-value",
-            "sequence",
         )
         assert result.returncode == 0, result.stderr
-        matrix = (directory / "seq-gtdb.tsv").read_text().splitlines()
+        merged = _run(
+            "taxmatrix",
+            "--value",
+            "sequence",
+            str(directory / "seq-one.gtdb.sylphmpa"),
+            str(directory / "seq-two.gtdb.sylphmpa"),
+            check=False,
+        )
+        assert merged.returncode == 0, merged.stderr
+        matrix = merged.stdout.splitlines()
         rows = {line.split("\t")[0]: line.split("\t")[1:] for line in matrix[1:]}
         assert [float(value) for value in rows["d__Bacteria"]] == pytest.approx(
             [100.0, 100.0], rel=0.01
@@ -649,13 +699,23 @@ class TestTaxonomyOutputs:
             taxonomy_server,
             "--taxonomy",
             "gtdb",
-            "--taxmatrix",
+            "--taxprof",
             str(directory / f"{value}-"),
-            "--taxmatrix-value",
-            value,
         )
         assert result.returncode == 0, result.stderr
-        lines = (directory / f"{value}-gtdb.tsv").read_text().splitlines()
+        out_path = directory / f"{value}-gtdb.tsv"
+        merged = _run(
+            "taxmatrix",
+            "--value",
+            value,
+            "-o",
+            str(out_path),
+            str(directory / f"{value}-one.gtdb.sylphmpa"),
+            str(directory / f"{value}-two.gtdb.sylphmpa"),
+            check=False,
+        )
+        assert merged.returncode == 0, merged.stderr
+        lines = out_path.read_text().splitlines()
         assert lines[0] == "clade_name\tone\ttwo"
         rows = [line.split("\t") for line in lines[1:]]
         assert rows
@@ -676,8 +736,6 @@ class TestTaxonomyOutputs:
             "tax",
             "--taxprof",
             str(directory / "tax-"),
-            "--taxmatrix",
-            str(directory / "tax-"),
             "--fields",
             "none",
         )
@@ -693,7 +751,14 @@ class TestTaxonomyOutputs:
         strain = "vFAM-1|vOTU-1|t__GCA_111111111.1_genomic.fna.gz"
         assert strain in rows
         assert float(rows[strain][3]) > 90.0
-        assert (directory / "tax-tax.tsv").is_file()
+        merged = _run(
+            "taxmatrix",
+            str(directory / "tax-one.tax.sylphmpa"),
+            str(directory / "tax-two.tax.sylphmpa"),
+            check=False,
+        )
+        assert merged.returncode == 0, merged.stderr
+        assert merged.stdout.splitlines()[0] == "clade_name\tone\ttwo"
 
     def test_tax_source_restricts_the_sources(self, taxonomy_server) -> None:
         _, directory = taxonomy_server

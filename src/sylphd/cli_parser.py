@@ -8,7 +8,7 @@ import math
 from . import __version__
 from .download import METADATA_FILES
 from .limits import parse_rate_limit
-from .taxonomy import MATRIX_VALUES, TAXONOMIES
+from .taxonomy import TAXONOMIES
 
 PROG = "sylphd"
 
@@ -88,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_setup_parser(subparsers)
     add_taxdb_parser(subparsers)
     add_taxonomy_parser(subparsers)
+    add_taxmatrix_parser(subparsers)
     add_diff_parser(subparsers)
     return parser
 
@@ -773,25 +774,6 @@ def _add_profile_options(parser: argparse.ArgumentParser) -> None:
             "'PREFIX<sample>.<taxonomy>.sylphmpa'"
         ),
     )
-    parser.add_argument(
-        "--taxmatrix",
-        metavar="PREFIX",
-        help=(
-            "write one clade x sample matrix per taxonomy as "
-            "'PREFIX<taxonomy>.tsv'"
-        ),
-    )
-    parser.add_argument(
-        "--taxmatrix-value",
-        choices=MATRIX_VALUES,
-        default="relative",
-        help=(
-            "value in --taxmatrix: 'relative' (Taxonomic_abundance), "
-            "'sequence' (Sequence_abundance), 'ani' or 'coverage' (strain "
-            "rows only, like 'sylph-tax merge --column ANI|Coverage') "
-            "[default: relative]"
-        ),
-    )
 
 
 def _add_contain_options(parser: argparse.ArgumentParser, mode: str) -> None:
@@ -835,6 +817,20 @@ def add_taxdb_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     build.add_argument("--force", action="store_true", help="replace the output file")
     build.add_argument("-q", "--quiet", action="store_true", help="no progress output")
+
+
+def add_taxmatrix_parser(subparsers: argparse._SubParsersAction) -> None:
+    from . import taxmatrix
+
+    parser = subparsers.add_parser(
+        "taxmatrix",
+        help="merge .sylphmpa files or /profile JSON documents into a clade x sample TSV",
+        description=(
+            "Merge .sylphmpa files or saved /profile JSON documents into one "
+            "clade x sample TSV table (the offline equivalent of 'sylph-tax merge')."
+        ),
+    )
+    taxmatrix.add_arguments(parser)
 
 
 def add_diff_parser(subparsers: argparse._SubParsersAction) -> None:

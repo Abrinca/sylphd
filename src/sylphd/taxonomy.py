@@ -66,6 +66,7 @@ so a chart can show one rank of a source whose lineages skip ranks.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -130,7 +131,7 @@ TAXPROF_COLUMNS: tuple[str, ...] = (
     "Coverage (if strain-level)",
 )
 
-#: Values accepted by ``--taxmatrix-value``, as ``sylph-tax merge --column``.
+#: Values accepted by ``sylphd taxmatrix --value``, as ``sylph-tax merge --column``.
 MATRIX_VALUES: tuple[str, ...] = ("relative", "sequence", "ani", "coverage")
 
 #: Values that only strain rows carry (``sylph-tax merge --column ANI|Coverage``).
@@ -288,7 +289,7 @@ def resolve_taxonomy_columns(
     """
     if metadata is None:
         raise TaxonomyError(
-            "the server has no metadata database; --taxprof/--taxmatrix need "
+            "the server has no metadata database; --taxprof needs "
             "'gtdb_taxonomy'/'ncbi_taxonomy' (start it with 'sylphd serve --meta')"
         )
     if any(is_sylphtax(taxonomy) for taxonomy in taxonomies) and not has_taxonomy_sources(metadata):
@@ -715,6 +716,101 @@ def taxprof_lines(
             yield f"{item.clade}\t{_cell(item.relative)}\t{_cell(item.sequence)}\tNA\tNA"
 
 
+def _parse_required_float(cell: str, label: str, lineno: int, column: str) -> float:
+    try:
+        return float(cell)
+    except ValueError:
+        raise TaxonomyError(
+            f"{label} line {lineno}: invalid {column} value {cell!r}"
+        ) from None
+
+
+def _parse_optional_float(
+    cell: str, label: str, lineno: int, column: str
+) -> float | None:
+    text = cell.strip()
+    if not text or text == "NA":
+        return None
+    try:
+        value = float(text)
+    except ValueError:
+        raise TaxonomyError(
+            f"{label} line {lineno}: invalid {column} value {cell!r}"
+        ) from None
+    return None if math.isnan(value) else value
+
+
+def parse_sylphmpa(
+    text: str, *, label: str = "<input>"
+) -> tuple[str, list[CladeAbundance]]:
+    """Parse a ``.sylphmpa`` document into ``(sample_name, clades)``.
+
+    Reads the five columns written by ``sylph-tax taxprof`` and
+    :func:`taxprof_lines` (an optional sixth virus-host column from
+    ``sylph-tax taxprof -a`` is ignored).  Raises :class:`TaxonomyError` on
+    malformed input.
+    """
+    lines = text.splitlines()
+    if not lines:
+        raise TaxonomyError(
+            f"{label}: not a .sylphmpa file (expected '#SampleID' on line 1)"
+        )
+    first = lines[0].split("\t")
+    if first[0] != "#SampleID":
+        raise TaxonomyError(
+            f"{label}: not a .sylphmpa file (expected '#SampleID' on line 1)"
+        )
+    if len(first) < 2 or not first[1].strip():
+        raise TaxonomyError(f"{label}: missing sample name on '#SampleID' line")
+    name = first[1].strip()
+
+    index = 1
+    while index < len(lines) and (not lines[index].strip() or lines[index].startswith("#")):
+        index += 1
+    if index >= len(lines):
+        raise TaxonomyError(f"{label}: missing column header")
+    header = lines[index].split("\t")
+    if (
+        len(header) < len(TAXPROF_COLUMNS)
+        or tuple(header[: len(TAXPROF_COLUMNS)]) != TAXPROF_COLUMNS
+    ):
+        raise TaxonomyError(
+            f"{label}: unexpected .sylphmpa header "
+            f"(expected tab-separated {', '.join(TAXPROF_COLUMNS)})"
+        )
+
+    clades: list[CladeAbundance] = []
+    for lineno, line in enumerate(lines[index + 1 :], start=index + 2):
+        if not line.strip() or line.startswith("#"):
+            continue
+        cells = line.split("\t")
+        if len(cells) < len(TAXPROF_COLUMNS):
+            raise TaxonomyError(
+                f"{label} line {lineno}: expected at least {len(TAXPROF_COLUMNS)} "
+                f"columns, got {len(cells)}"
+            )
+        clade = cells[0]
+        if not clade:
+            raise TaxonomyError(f"{label} line {lineno}: empty clade_name")
+        relative = _parse_required_float(cells[1], label, lineno, "relative_abundance")
+        sequence = _parse_required_float(cells[2], label, lineno, "sequence_abundance")
+        ani = _parse_optional_float(cells[3], label, lineno, "ANI")
+        coverage = _parse_optional_float(cells[4], label, lineno, "Coverage")
+        has_stats = ani is not None or coverage is not None
+        is_strain = clade.rsplit("|", 1)[-1].startswith("t__")
+        clades.append(
+            CladeAbundance(
+                clade=clade,
+                relative=relative,
+                sequence=sequence,
+                ani=ani,
+                coverage=coverage,
+                strain_stats=True if (has_stats and not is_strain) else None,
+            )
+        )
+    return name, clades
+
+
 def clade_matrix_lines(
     samples: Sequence[tuple[str, Sequence[CladeAbundance]]],
     value: str = "relative",
@@ -787,8 +883,8 @@ def clade_dict(item: CladeAbundance) -> dict[str, Any]:
 def clades_from_dict(rows: Iterable[Mapping[str, Any]]) -> list[CladeAbundance]:
     """Rebuild :class:`CladeAbundance` values from the ``/profile`` JSON.
 
-    Used by the CLI for ``--taxmatrix`` (and by tests): the server has already
-    done the aggregation, so only the matrix rendering needs the objects.
+    Used by ``sylphd taxmatrix`` (and by tests): the server has already done
+    the aggregation, so only the matrix rendering needs the objects.
     """
     return [
         CladeAbundance(
@@ -875,32 +971,25 @@ def taxprof_path(prefix: str, name: str, taxonomy: str) -> Path:
     return Path(f"{prefix}{_safe_name(name)}.{taxonomy_file_label(taxonomy)}.sylphmpa")
 
 
-def taxmatrix_path(prefix: str, taxonomy: str) -> Path:
-    return Path(f"{prefix}{taxonomy_file_label(taxonomy)}.tsv")
-
-
 def write_outputs(
     samples: Sequence[Mapping[str, Any]],
     *,
     taxonomies: Sequence[str],
     taxprof_prefix: str | None = None,
-    taxmatrix_prefix: str | None = None,
-    matrix_value: str = "relative",
     tax_sources: Sequence[str] = (),
 ) -> list[Path]:
-    """Write the requested taxonomy files for a profile response.
+    """Write the requested ``.sylphmpa`` files for a profile response.
 
-    Files are named ``{taxprof_prefix}{sample}.{taxonomy}.sylphmpa`` and
-    ``{taxmatrix_prefix}{taxonomy}.tsv``; a ``None`` prefix skips that output.
-    A prefix that is an existing directory is treated as ``directory/``.
-    Returns the paths written, taxonomy by taxonomy (each taxonomy writes its
-    per-sample files first, then its matrix).
+    Files are named ``{taxprof_prefix}{sample}.{taxonomy}.sylphmpa``; a
+    ``None`` prefix skips writing.  A prefix that is an existing directory is
+    treated as ``directory/``.  Returns the paths written, taxonomy by
+    taxonomy.
 
     ``tax_sources`` names the taxonomy sources the ``tax`` profile was resolved
     against, in ``ord`` order; it becomes the ``Taxonomies_used:`` list of a
     ``tax`` ``.sylphmpa``, so it must be given when ``tax`` is written.
     """
-    if taxprof_prefix is None and taxmatrix_prefix is None:
+    if taxprof_prefix is None:
         return []
     if SYLPHTAX in taxonomies and not tax_sources:
         raise TaxonomyError(
@@ -909,40 +998,30 @@ def write_outputs(
         )
 
     # A prefix naming an existing directory writes into it, like one ending in "/".
-    if taxprof_prefix is not None and os.path.isdir(taxprof_prefix):
+    if os.path.isdir(taxprof_prefix):
         taxprof_prefix += "/"
-    if taxmatrix_prefix is not None and os.path.isdir(taxmatrix_prefix):
-        taxmatrix_prefix += "/"
 
-    if taxprof_prefix is not None:
-        # Sanitising can map different names to one file; check before writing.
-        owners: dict[Path, str] = {}
-        for sample in samples:
-            name = sample_name(sample)
-            path = taxprof_path(taxprof_prefix, name, taxonomies[0])
-            if path in owners:
-                raise TaxonomyError(
-                    f"sample names {owners[path]!r} and {name!r} would write the "
-                    f"same file {path.name}"
-                )
-            owners[path] = name
+    # Sanitising can map different names to one file; check before writing.
+    owners: dict[Path, str] = {}
+    for sample in samples:
+        name = sample_name(sample)
+        path = taxprof_path(taxprof_prefix, name, taxonomies[0])
+        if path in owners:
+            raise TaxonomyError(
+                f"sample names {owners[path]!r} and {name!r} would write the "
+                f"same file {path.name}"
+            )
+        owners[path] = name
 
     written: list[Path] = []
     for taxonomy in taxonomies:
         # The server aggregates (`/profile` `taxprof`): the CLI must not fold rows itself.
-        payloads = [(sample_name(sample), sample["taxprof"][taxonomy]) for sample in samples]
-        if taxprof_prefix is not None:
-            for name, payload in payloads:
-                path = taxprof_path(taxprof_prefix, name, taxonomy)
-                with open(path, "w", encoding="utf-8", newline="\n") as handle:
-                    handle.write(payload["sylphmpa"])
-                written.append(path)
-        table = [(name, clades_from_dict(payload["clades"])) for name, payload in payloads]
-        if taxmatrix_prefix is not None:
-            written.append(
-                write_taxmatrix(
-                    taxmatrix_path(taxmatrix_prefix, taxonomy), table, matrix_value
-                )
-            )
+        for sample in samples:
+            name = sample_name(sample)
+            payload = sample["taxprof"][taxonomy]
+            path = taxprof_path(taxprof_prefix, name, taxonomy)
+            with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(payload["sylphmpa"])
+            written.append(path)
     return written
 

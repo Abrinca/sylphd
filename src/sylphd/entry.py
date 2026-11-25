@@ -23,6 +23,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .parity import main as diff
 
         return diff(args[1:])
+    if args[:1] == ["taxmatrix"]:
+        # Pure standard library: works in the base install, without any extra.
+        from .taxmatrix import main as taxmatrix
+
+        return taxmatrix(args[1:])
     try:
         from .cli import main as run
     except ImportError as error:

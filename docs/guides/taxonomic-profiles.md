@@ -3,9 +3,10 @@
 `sylphd profile` writes per-rank taxonomic profiles that the **server** aggregates. The server is
 the only place the logic lives (`sylphd/taxonomy.py`): it folds its ANI hits into the clade tables
 and returns both the structured clades and the rendered `.sylphmpa` text in the `/profile`
-response (`params.taxprof`). The CLI writes that text and uses the clades for the matrix; it does
-not re-aggregate rows. The result mirrors `sylph-tax taxprof` and `sylph-tax merge`, but needs no
-extra tools and no server support beyond the metadata database.
+response (`params.taxprof`). The CLI writes that text directly; to merge profiles across samples
+(including across separate runs), use [`sylphd taxmatrix`](../commands/taxmatrix.md). The result
+mirrors `sylph-tax taxprof` and `sylph-tax merge`, but needs no extra tools and no server support
+beyond the metadata database.
 
 !!! note
     The server must run with `--meta`: the profiles come from the `gtdb_taxonomy` and
@@ -14,21 +15,20 @@ extra tools and no server support beyond the metadata database.
     `--fields` hides them from the main TSV. Only `profile` has these flags.
 
 ```bash
-sylphd profile -r sample.fq.gz \
+sylphd profile -r sample1.fq.gz sample2.fq.gz \
     --taxonomy gtdb,ncbi,tax \
-    --taxprof results/ \
-    --taxmatrix results/
+    --taxprof results/
+
+sylphd taxmatrix results/*.gtdb.sylphmpa -o results/gtdb.tsv
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
 | `--taxonomy LIST` | `gtdb,ncbi` (+ `tax`) | `gtdb`, `ncbi`, `tax`, comma-separated |
 | `--taxprof PREFIX` | none | one `.sylphmpa` file per sample and taxonomy |
-| `--taxmatrix PREFIX` | none | one clade × sample table per taxonomy |
-| `--taxmatrix-value relative\|sequence\|ani\|coverage` | `relative` | value used by `--taxmatrix` |
 | `--tax-source NAME` | all sources | with `--taxonomy tax`: restrict the merged profile to these sources (repeatable) |
 
-Both flags combine with the normal TSV or JSON output (`-o`, `--format`). The prefix is used
+`--taxprof` combines with the normal TSV or JSON output (`-o`, `--format`). The prefix is used
 verbatim, except that a prefix naming an existing directory (`results`) works like `results/`. To
 write into a directory, end the prefix with `/` or give the directory's name. The directory is
 **not** created.
@@ -73,17 +73,27 @@ returned). Only `t__` rows
 carry `Adjusted_ANI` and `Eff_cov` (or `True_cov`); the other rows have `NA` there.
 `sylph-tax merge` can read these files directly.
 
-## `--taxmatrix`: one table per taxonomy
+## `sylphd taxmatrix`: one table across samples
 
-`PREFIX<gtdb|ncbi>.tsv` has a `clade_name` column followed by one column per sample, in request
-order. Rows are all clades seen in any sample, and a clade missing from a sample is `0.0`. With
-two or more samples the rows are **sorted lexicographically** (what `sylph-tax merge` produces
-when pandas joins the profiles); with a single sample they keep the `.sylphmpa` order (rank by
-rank, then by decreasing abundance).
+[`sylphd taxmatrix`](../commands/taxmatrix.md) merges `.sylphmpa` files or saved `/profile` JSON
+documents offline — across a single run or across several runs, and without needing a server or
+`pysylph`:
 
-`--taxmatrix-value` selects the column, matching `sylph-tax merge --column`:
+```bash
+sylphd taxmatrix results/*.gtdb.sylphmpa -o results/gtdb.tsv
+sylphd taxmatrix --value ani results/*.gtdb.sylphmpa -o results/gtdb-ani.tsv
+sylphd taxmatrix --taxonomy gtdb run1.json run2.json -o results/gtdb.tsv
+```
 
-| Value | Column | `sylph-tax merge --column` |
+The output has a `clade_name` column followed by one column per sample, in input order. Rows are
+all clades seen in any sample, and a clade missing from a sample is `0.0`. With two or more samples
+the rows are **sorted lexicographically** (what `sylph-tax merge` produces when pandas joins the
+profiles); with a single sample they keep the `.sylphmpa` order (rank by rank, then by decreasing
+abundance).
+
+`--value` selects the column, matching `sylph-tax merge --column`:
+
+| `--value` | Column | `sylph-tax merge --column` |
 |---|---|---|
 | `relative` | `Taxonomic_abundance` | `relative_abundance` |
 | `sequence` | `Sequence_abundance` | `sequence_abundance` |
@@ -92,9 +102,12 @@ rank, then by decreasing abundance).
 
 Only `t__` rows carry an ANI and a coverage, so the `ani` and `coverage` matrices contain the
 strain-level rows alone: a clade without a value in *any* sample is dropped (pandas'
-`dropna(how="all")`), and a strain found in one sample but not another gets `0`, not `NA`. These
+`dropna(how="all")`), and a strain found in one sample but not another gets `0.0`, not `NA`. These
 files are what `sylph-tax merge --column ANI|Coverage` writes for the same profiles (the layout is
 identical; the values are as equivalent as the profiles).
+
+When reading a saved `/profile` JSON document that holds more than one taxonomy, pass `--taxonomy`
+(e.g. `--taxonomy gtdb` or `--taxonomy tax`) to choose which one to merge.
 
 ## Lineage rules
 
@@ -122,7 +135,8 @@ lineages, and `gtdb`/`ncbi` cannot express them (their ranks are dropped).
 
 ```bash
 sylphd profile -r sample.fq.gz --taxonomy tax --taxprof results/
-# results/sample.tax.sylphmpa, and with --taxmatrix results/ → results/tax.tsv
+# results/sample.tax.sylphmpa; merge across samples with:
+sylphd taxmatrix results/*.tax.sylphmpa -o results/tax.tsv
 ```
 
 The server resolves every hit to a source, a key and a lineage (`tax_lineage`, `tax_key`,

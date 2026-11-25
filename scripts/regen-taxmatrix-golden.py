@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the ``--taxmatrix`` goldens from the real ``sylph-tax merge``.
+"""Regenerate the ``sylphd taxmatrix`` goldens from the real ``sylph-tax merge``.
 
 Manual, not part of the test suite: the checked-in goldens are the output of
 ``sylph_tax.merge_sylph_taxprof.merge_data`` (the function behind
@@ -18,7 +18,7 @@ where ``.venv-sylph-tax`` is a venv with ``ref/sylph-tax`` installed
 
 Input: ``tests/data/taxmatrix/rows.json`` (samples of ``sylphd profile`` rows).
 Output: ``tests/data/taxmatrix/<case>.<value>.tsv`` for every
-``--taxmatrix-value``, written by pandas exactly as ``sylph-tax merge`` does.
+``sylphd taxmatrix --value``, written by pandas exactly as ``sylph-tax merge`` does.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from sylphd.taxonomy import MATRIX_VALUES, aggregate_samples, taxprof_lines
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "tests" / "data" / "taxmatrix"
 
-#: ``--taxmatrix-value`` to ``sylph-tax merge --column``.
+#: ``sylphd taxmatrix --value`` to ``sylph-tax merge --column``.
 SYLPH_TAX_COLUMNS = {
     "relative": "relative_abundance",
     "sequence": "sequence_abundance",

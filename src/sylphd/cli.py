@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from . import parity, per_contig_client
+from . import parity, per_contig_client, taxmatrix
 from .about import About, check_name
 from .assembly import gtdb_species, hit_lineage, species_caveat
 from .cli_parser import PROG, build_parser
@@ -101,7 +101,7 @@ def _check_output_file(path: str | None) -> None:
 
 
 def _check_output_prefix(prefix: str | None) -> None:
-    """Same for a ``--taxprof``/``--taxmatrix`` prefix (see ``write_outputs``)."""
+    """Same for a ``--taxprof`` prefix (see ``write_outputs``)."""
     if prefix is not None:
         directory = Path(prefix) if os.path.isdir(prefix) else Path(prefix + "x").parent
         _check_writable_dir(directory)
@@ -474,10 +474,7 @@ def cmd_contain(args: argparse.Namespace) -> int:
         screen_ani=args.screen_ani,
         no_adjust=args.no_adjust,
     )
-    write_taxonomy = mode == "profile" and (
-        getattr(args, "taxprof", None) is not None
-        or getattr(args, "taxmatrix", None) is not None
-    )
+    write_taxonomy = mode == "profile" and getattr(args, "taxprof", None) is not None
 
     # Everything that can fail without the server is checked before sketching.
     _check_output_file(args.output)
@@ -521,12 +518,11 @@ def _run_contain(
 ) -> _ContainRun:
     """Validate the taxonomy options, sketch locally and ask the server."""
     taxonomy_prefix = getattr(args, "taxprof", None)
-    matrix_prefix = getattr(args, "taxmatrix", None)
     taxonomies: tuple[str, ...] = ()
     tax_sources: tuple[str, ...] = ()
     if getattr(args, "tax_source", None) and not write_taxonomy:
         raise TaxonomyError(
-            "--tax-source needs --taxprof or --taxmatrix: it restricts the "
+            "--tax-source needs --taxprof: it restricts the "
             "sources of the aggregated 'tax' profile"
         )
     if write_taxonomy:
@@ -536,7 +532,6 @@ def _run_contain(
             None if args.taxonomy is None else parse_taxonomies(args.taxonomy)
         )
         _check_output_prefix(taxonomy_prefix)
-        _check_output_prefix(matrix_prefix)
     else:
         requested_taxonomies = None
     with _client_from_args(args) as client:
@@ -597,13 +592,11 @@ def _run_contain(
 
 
 def _write_taxonomy_outputs(args: argparse.Namespace, run: _ContainRun) -> None:
-    """Write the ``--taxprof``/``--taxmatrix`` files and the species caveats."""
+    """Write the ``--taxprof`` files and the species caveats."""
     written = write_outputs(
         run.result,
         taxonomies=run.taxonomies,
         taxprof_prefix=getattr(args, "taxprof", None),
-        taxmatrix_prefix=getattr(args, "taxmatrix", None),
-        matrix_value=getattr(args, "taxmatrix_value", "relative"),
         tax_sources=run.tax_sources,
     )
     for path in written:
@@ -761,7 +754,7 @@ def _request_fields(
 ) -> list[str]:
     """Metadata columns to request: the displayed ones plus the taxonomies.
 
-    ``--taxprof``/``--taxmatrix`` need ``gtdb_taxonomy``/``ncbi_taxonomy`` even
+    ``--taxprof`` needs ``gtdb_taxonomy``/``ncbi_taxonomy`` even
     when ``--fields`` hides them from the TSV, so ask for them explicitly.
     """
     extra = resolve_taxonomy_columns(taxonomies, metadata)
@@ -1394,6 +1387,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "setup": cmd_setup,
         "taxdb": cmd_taxdb,
         "taxonomy": cmd_taxonomy,
+        "taxmatrix": taxmatrix.run,
         "diff": parity.run,
     }
     try:

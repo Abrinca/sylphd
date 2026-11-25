@@ -1,9 +1,9 @@
 """The server-side ``taxprof`` payload: exact text, round-trippable clades.
 
 ``POST /profile`` aggregates the rows once, on the server, and returns both the
-structured clades and the rendered ``.sylphmpa`` text.  The CLI's
-``--taxprof``/``--taxmatrix`` then only writes what it got; these tests guard
-that split, including the matrix, without re-aggregating anything.
+structured clades and the rendered ``.sylphmpa`` text.  ``profile --taxprof``
+writes the text and ``sylphd taxmatrix`` merges clades; these tests guard that
+split without re-aggregating anything.
 """
 
 from __future__ import annotations
@@ -109,17 +109,15 @@ def test_clades_round_trip_for_the_matrix() -> None:
 
 
 def test_write_outputs_uses_the_server_payload(tmp_path: Path) -> None:
-    """The CLI writes the server's text/clades even when the rows carry no taxonomy."""
+    """The CLI writes the server's text even when the rows carry no taxonomy."""
     sample = {"name": "one", "rows": []}
     sample["taxprof"] = build_taxprof("one", ("gtdb",), rows())
     written = write_outputs(
         [sample],
         taxonomies=("gtdb",),
         taxprof_prefix=str(tmp_path / "p-"),
-        taxmatrix_prefix=str(tmp_path / "m-"),
     )
-    assert [path.name for path in written] == ["p-one.gtdb.sylphmpa", "m-gtdb.tsv"]
+    assert [path.name for path in written] == ["p-one.gtdb.sylphmpa"]
     assert (tmp_path / "p-one.gtdb.sylphmpa").read_text() == sample["taxprof"][
         "gtdb"
     ]["sylphmpa"]
-    assert (tmp_path / "m-gtdb.tsv").read_text().splitlines()[0] == "clade_name\tone"
