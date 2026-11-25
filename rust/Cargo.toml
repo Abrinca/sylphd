@@ -5,7 +5,7 @@ members = ["sylphd-core", "sylphd-wasm", "sylphd-client"]
 [workspace.package]
 # Kept in sync with `src/sylphd/__init__.py` (`__version__`); a test in
 # `sylphd-client` asserts the two match.
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 publish = false

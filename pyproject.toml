@@ -36,12 +36,12 @@ dependencies = [
 taxonomy = []
 # The command line against a server: sketches locally in the native client.
 client = [
-  "sylphd-bin==0.7.0",
+  "sylphd-bin==0.8.0",
 ]
 # `sylphd serve`, and everything `client` does. The server still sketches
 # uploaded sequences (pysylph) and parses them (dnaio).
 server = [
-  "sylphd-bin==0.7.0",
+  "sylphd-bin==0.8.0",
   "dnaio",
   "pysylph",
   "python-multipart",
