@@ -148,6 +148,31 @@ PARAM_KEYS = frozenset(
 #: Keys of one ``params.contigs`` entry.
 CONTIG_KEYS = frozenset({"name", "contig_kmers", "length", "gc"})
 
+#: Fixed leading columns of ``POST /contigs``'s flat per-hit table, followed by
+#: any requested metadata ``fields``.  Re-exported by ``per_contig_client.COLUMNS``.
+TABLE_COLUMNS: tuple[str, ...] = (
+    "contig",
+    "contig_length",
+    "gc",
+    "status",
+    "rank",
+    "ani",
+    "shared_kmers",
+    "contig_kmers",
+    "explained_fraction",
+    "reference_ani",
+    "relation",
+    "shared_rank",
+    "ani_species_level",
+    "accession",
+    "genome_id",
+    "gtdb_species",
+    "taxon",
+    "n_close",
+    "consensus_rank",
+    "consensus_taxon",
+)
+
 
 def ani_noise(shared: int, contig_kmers: int, k: int) -> float:
     """Standard deviation of the contig-relative ANI, in percentage points.
@@ -868,3 +893,75 @@ def caveats(records: Sequence[Mapping[str, Any]]) -> list[str]:
         if note and note not in notes:
             notes.append(note)
     return notes
+
+
+def contigs_table(
+    records: Sequence[Mapping[str, Any]], fields: Sequence[str] = ()
+) -> dict[str, Any]:
+    """Build the flat per-hit ``table`` of ``POST /contigs`` (orient="split").
+
+    One row per hit; a contig without hits (``no_hit`` or ``too_few_kmers``)
+    gets one row with ``None`` for every hit, consensus and metadata column.
+    """
+    extra = list(dict.fromkeys(fields))
+    columns = [*TABLE_COLUMNS, *extra]
+    empty = [None] * (len(columns) - 4)
+    data: list[list[Any]] = []
+    for record in records:
+        prefix = [
+            record["name"],
+            record["length"],
+            record["gc"],
+            record["status"],
+        ]
+        hits = record.get("hits") or ()
+        if not hits:
+            data.append([*prefix, *empty])
+            continue
+        cons = record.get("consensus") or {}
+        for hit in hits:
+            data.append(
+                [
+                    *prefix,
+                    hit["rank"],
+                    hit["ani"],
+                    hit["shared_kmers"],
+                    hit["contig_kmers"],
+                    hit["explained_fraction"],
+                    hit["reference_ani"],
+                    hit.get("relation"),
+                    hit.get("shared_rank"),
+                    hit.get("ani_species_level"),
+                    hit.get("accession"),
+                    hit.get("genome_id"),
+                    hit.get("gtdb_species") or None,
+                    hit.get("taxon"),
+                    cons.get("n_close"),
+                    cons.get("rank"),
+                    cons.get("taxon"),
+                    *[hit.get(column) for column in extra],
+                ]
+            )
+    return {"columns": columns, "data": data}
+
+
+def contigs_map(
+    records: Sequence[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Per-contig metadata and summaries keyed by contig name (request order)."""
+    out: dict[str, dict[str, Any]] = {}
+    for record in records:
+        entry: dict[str, Any] = {
+            "length": record["length"],
+            "gc": record["gc"],
+            "sketch_kmers": record["sketch_kmers"],
+            "contig_kmers": record["contig_kmers"],
+            "status": record["status"],
+            "assignment": record.get("assignment"),
+            "closest": record.get("closest"),
+            "consensus": record.get("consensus"),
+        }
+        if "reason" in record:
+            entry["reason"] = record["reason"]
+        out[str(record["name"])] = entry
+    return out

@@ -634,7 +634,8 @@ class TestReaderVersions:
                 files={"sketch": ("clodf13.sylsp", sketch.to_bytes())},
             )
         assert response.status_code == 200, response.text
-        rows = response.json()[0]["rows"]
+        table = response.json()["table"]
+        rows = [dict(zip(table["columns"], values)) for values in table["data"]]
         assert rows
         assert rows[0]["genome_size"] == 9957
         assert rows[0]["gtdb_taxonomy"] == "d__Bacteria;p__Test;c__Test"

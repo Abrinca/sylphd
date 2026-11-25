@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -27,12 +28,22 @@ MAX_MESSAGE_CHARS = 2000
 
 LEVELS = ("info", "warning", "danger")
 _KEYS = frozenset({"level", "title", "message"})
+_MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 
 log = logging.getLogger("uvicorn.error")
 
 
 class MessagesError(ValueError):
     """The ``--messages`` file is unusable."""
+
+
+def plain_text(markdown: str) -> str:
+    """Markdown as single-line plain text: links as ``text (url)``, emphasis dropped."""
+    text = _MARKDOWN_LINK.sub(
+        lambda m: m.group(2) if m.group(1) == m.group(2) else f"{m.group(1)} ({m.group(2)})",
+        markdown,
+    )
+    return " ".join(re.sub(r"(\*\*|__|`)", "", text).split())
 
 
 def parse_messages(text: str, where: str = "messages file") -> list[dict[str, str]]:
@@ -73,11 +84,13 @@ def parse_messages(text: str, where: str = "messages file") -> list[dict[str, st
                 )
         if any(ord(ch) < 32 or ord(ch) == 127 for ch in item["title"]):
             raise MessagesError(f"{label}: title must be a single line")
+        body = item["message"].strip()
         messages.append(
             {
                 "level": level,
                 "title": item["title"].strip(),
-                "message": item["message"].strip(),
+                "message": body,
+                "plain": plain_text(body),
             }
         )
     return messages

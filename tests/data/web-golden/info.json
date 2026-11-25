@@ -1,6 +1,7 @@
 {
   "service": "sylphd",
   "version": "<version>",
+  "api_version": 1,
   "pysylph_version": "<version>",
   "python_version": "<version>",
   "database": {
@@ -18,17 +19,30 @@
     "max_jobs": 2,
     "max_upload_mb": 512,
     "max_sketches": 4096,
+    "max_contigs": 4096,
+    "max_params_bytes": 1048576,
     "allow_sequences": false,
     "max_sequence_mb": null,
     "rate_limit": null,
     "max_queue": null
   },
+  "usage": {
+    "enabled": false
+  },
+  "taxonomy": {
+    "enabled": false
+  },
+  "access": {
+    "token_required": false
+  },
   "endpoints": [
     "/health",
     "/info",
+    "/messages",
     "/profile",
     "/query",
-    "/assembly"
+    "/assembly",
+    "/contigs"
   ],
   "params": {
     "/profile": [

@@ -219,10 +219,18 @@ class TestRetries:
 
     def test_retries_503_after_retry_after_then_succeeds(self, monkeypatch) -> None:
         busy = httpx.Response(503, json={"error": "busy"}, headers={"Retry-After": "3"})
-        sleeps: list[float] = []
-        client, calls = self._client(
-            [busy, busy, httpx.Response(200, json=[])], 2, sleeps, monkeypatch
+        ok = httpx.Response(
+            200,
+            json={
+                "api_version": 1,
+                "params": {},
+                "samples": [],
+                "table": {"columns": [], "data": []},
+                "caveats": [],
+            },
         )
+        sleeps: list[float] = []
+        client, calls = self._client([busy, busy, ok], 2, sleeps, monkeypatch)
         assert client.profile([("a", b"sketch")]) == []
         assert len(calls) == 3
         assert sleeps == [3.0, 3.0]

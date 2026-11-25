@@ -178,7 +178,9 @@ class TestPooledMatchesPysylph:
             with _app(specs) as client:
                 response = _post(client, mode, [("mix", MIX_SKETCH.read_bytes())], mode=mode)
         assert response.status_code == 200, response.text
-        assert _wire_fields(response.json()[0]["rows"], mode) == expected
+        table = response.json()["table"]
+        rows = [dict(zip(table["columns"], values)) for values in table["data"]]
+        assert _wire_fields(rows, mode) == expected
 
     def test_pooled_info(self) -> None:
         with _app(
@@ -266,7 +268,11 @@ class TestPooledMatchesPysylph:
         ) as client:
             response = _post(client, "profile", [("mix", MIX_SKETCH.read_bytes())])
         assert response.status_code == 200, response.text
-        rows = {row["Genome_file"]: row for row in response.json()[0]["rows"]}
+        table = response.json()["table"]
+        rows = {
+            row["Genome_file"]: row
+            for row in (dict(zip(table["columns"], values)) for values in table["data"])
+        }
         clodf13 = rows["src/pysylph/tests/clodf13.fna.gz"]
         assert clodf13["accession"] is None
         assert clodf13["gtdb_taxonomy"] is None
@@ -562,17 +568,6 @@ class TestSingleDatabaseGoldens:
             info = client.get("/info").json()
         assert "databases" in info
         info.pop("databases")
-        # Additive since the golden was captured: ``/contigs`` is one more
-        # POST endpoint and ``max_params_bytes``/``max_contigs`` two more
-        # limits.  The web app reads none of them, so the shape it depends on
-        # is unchanged.
-        info["endpoints"].remove("/contigs")
-        info["endpoints"].remove("/messages")
-        info["limits"].pop("max_params_bytes")
-        info["limits"].pop("max_contigs")
-        info.pop("usage")
-        info.pop("taxonomy")  # additive: the web app does not read it
-        info.pop("access")  # additive: read by the token control only
         assert web_golden.normalise(info) == web_golden.load("info")
 
     def test_assembly(self) -> None:

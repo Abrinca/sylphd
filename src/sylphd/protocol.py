@@ -12,12 +12,19 @@ Requests
 
 Responses
 ---------
-A JSON list with one object per sample::
+A JSON document with ``api_version``, effective ``params``, ``samples``,
+``table`` (``{"columns": [...], "data": [[...], ...]}``, pandas
+``orient="split"`` without an index), ``caveats``, and (on ``/profile`` with
+``taxprof``) ``taxprof``::
 
-    [{"name": "sample-a", "kind": "profile", "rows": [{...}, ...]}, ...]
+    {"api_version": 1, "params": {...}, "samples": [{"name": "sample-a"}],
+     "table": {"columns": ["Sample_file", ..., "Lambda_status", "accession", ...],
+               "data": [[...]]},
+     "caveats": []}
 
-Each row starts with the sylph columns (same names as sylph's TSV output),
-followed by ``accession`` and the selected metadata columns.
+``table.columns`` is the final ordered header (with ``True_cov`` in place of
+``Eff_cov`` when ``estimate_unknown`` or ``estimate_read_counts`` is set) plus
+``Lambda_status`` before ``accession``.
 """
 
 from __future__ import annotations
@@ -29,6 +36,10 @@ from dataclasses import dataclass, fields
 from typing import Any
 
 from .metadata import METADATA_COLUMNS, accession_from_genome_name
+
+#: Wire-protocol version reported by ``GET /info`` and every result document.
+#: Bump on any breaking change to the response shape.
+API_VERSION: int = 1
 
 #: Columns of ``sylph query`` output, in sylph's order.
 QUERY_COLUMNS: tuple[str, ...] = (
@@ -514,6 +525,22 @@ def header_for(
     return header
 
 
+def table_columns(
+    mode: str,
+    params: ProfileParams | None = None,
+    fields: Sequence[str] | None = None,
+    *,
+    metadata_columns: Sequence[str] | None = None,
+) -> list[str]:
+    """JSON table columns: :func:`header_for` plus ``Lambda_status`` before ``accession``."""
+    columns = [*columns_for_mode(mode, params), "Lambda_status", *EXTRA_COLUMNS]
+    if fields is not None:
+        columns.extend(fields)
+    elif metadata_columns is not None:
+        columns.extend(metadata_columns)
+    return columns
+
+
 def format_row(row: Mapping[str, Any], header: Sequence[str]) -> str:
     """Format a row as one TSV line (without the newline).
 
@@ -552,7 +579,7 @@ def rows_to_tsv_lines(
     """
     if fields is None and metadata_columns is None:
         sample_list = list(samples)
-        base = set(header_for(mode, params, []))
+        base = set(header_for(mode, params, [])) | {"Lambda_status"}
         inferred: list[str] = []
         for sample in sample_list:
             for row in sample.get("rows", ()):

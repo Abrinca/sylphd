@@ -64,7 +64,9 @@ job, however many contigs it carries.
 
 Reports:
 
-- `service`, `version`, `pysylph_version`, `python_version`;
+- `service`, `version`, `api_version` (integer, currently `1`: bumped on any change to the response
+  shape; distinct from the server software `version` and from `metadata.format_version`),
+  `pysylph_version`, `python_version`;
 - `database`: `name`, `size`, `sha256` (`null` unless `--hash`), `genomes`, `c`, `k`,
   `screen_c` (`null` for a plain `.syldb`) and `two_stage`. **No filesystem paths** are exposed:
   `/info` is public and names files, never directories (the full paths are in the server log). A
@@ -138,13 +140,14 @@ Reports:
 ## `GET /messages` { #get-messages }
 
 The operator's messages, for clients to show. The answer is `{"messages": [...]}`, an empty list
-when the server was started without `--messages`. Each message has exactly three fields:
+when the server was started without `--messages`. Each message has four fields:
 
 | Field | Meaning |
 |---|---|
 | `level` | `info`, `warning` or `danger` |
 | `title` | one line of text, at most 120 characters |
 | `message` | Markdown, at most 2000 characters; treat it as untrusted like `about` (the web page renders it with the same sanitising) |
+| `plain` | single-line plain text derived from `message` (Markdown links expanded as `text (url)`, emphasis stripped, whitespace collapsed), for terminals and other non-Markdown clients |
 
 There are no ids or dates: a client recognises a message by its content (the web page remembers
 a dismissed `info` or `warning` message by a hash of level, title and message, so changed text
@@ -237,9 +240,9 @@ At most 4096 sketches fit in one request. Non-file form fields such as `params` 
 | `screen_ani` | 0-100 (default `85`) |
 | `no_adjust` | boolean, report the naive ANI |
 | `names` | list with one name per sketch (defaults to the part file names, else `sample-N`) |
-| `fields` | list of metadata columns; omitted means all, `[]` means none; needs a metadata database |
+| `fields` | list of metadata columns; omitted means all, `[]` means none; needs a metadata database. Any requested field whose name collides with a fixed column of the response table (`accession`, `Sample_file`, `Lambda_status`, ...) is a `400` |
 | `tax_sources` | list of taxonomy source names: resolve hits against these sources only (default: all of them; an empty list is the same). Unknown names, or a server without sylph-tax sources, are a 400 |
-| `taxprof` | `profile` only: taxonomies to aggregate on the server, from `gtdb`, `ncbi`, `tax` and `tax:<source>` (listed in `/info` `metadata.taxonomies`). Validated against the metadata file's columns and sylph-tax sources (a 400 names what is missing). Each returned sample then carries `taxprof[taxonomy]` (see below) |
+| `taxprof` | `profile` only: taxonomies to aggregate on the server, from `gtdb`, `ncbi`, `tax` and `tax:<source>` (listed in `/info` `metadata.taxonomies`). Validated against the metadata file's columns and sylph-tax sources (a 400 names what is missing). The response document then carries `taxprof[sample_name][taxonomy]` (see below) |
 | `mode` | optional, must match the endpoint (`query` or `profile`) |
 
 Unknown keys are rejected with a 400. The client sketches with `database.c` and `database.k` from
@@ -254,34 +257,56 @@ sparser than a genome of a database whose genomes have different `c`: the respon
 pysylph's message, not a generic 500. `POST /query` and `POST /profile` run against the whole pool, i.e.
 `sylph query db1 db2 ...` / `sylph profile db1 db2 ...`.
 
-The response is a JSON list with one object per sample, in request order:
+The response is a single JSON document covering all samples in request order:
 
 ```json
-[{"name": "sample-a", "kind": "profile", "params": {"minimum_ani": null, "seq_id": null,
-   "estimate_unknown": false, "estimate_read_counts": false, "min_number_kmers": 10,
-   "min_contain": 7, "screen_ani": 85.0, "no_adjust": false}, "rows": [
-  {"Sample_file": "sample-a", "Genome_file": "...", "Adjusted_ANI": 99.79,
-   "ANI_5-95_percentile": [99.64, 99.95], "Eff_lambda": 0.36, "Lambda_status": "OK",
-   "Lambda_5-95_percentile": [0.34, 0.38], "Median_cov": 1.0, "Mean_cov_geq1": 1.187,
-   "Containment_ind": [6208, 21899], "Naive_ANI": 96.02, "Contig_name": "...",
-   "Taxonomic_abundance": 100.0, "Sequence_abundance": 100.0, "kmers_reassigned": 0,
-   "accession": "GCA_...", "gtdb_taxonomy": "..."}]}]
+{"api_version": 1,
+ "params": {"minimum_ani": null, "seq_id": null, "estimate_unknown": false,
+            "estimate_read_counts": false, "min_number_kmers": 10,
+            "min_contain": 7, "screen_ani": 85.0, "no_adjust": false},
+ "samples": [{"name": "sample-a"}, {"name": "sample-b"}],
+ "table": {
+   "columns": ["Sample_file", "Genome_file", "Taxonomic_abundance", "Sequence_abundance",
+               "Adjusted_ANI", "Eff_cov", "ANI_5-95_percentile", "Eff_lambda",
+               "Lambda_5-95_percentile", "Median_cov", "Mean_cov_geq1", "Containment_ind",
+               "Naive_ANI", "kmers_reassigned", "Contig_name", "Lambda_status",
+               "accession", "gtdb_taxonomy"],
+   "data": [
+     ["sample-a", "GCA_000005845.2_genomic.fna.gz", 100.0, 100.0,
+      99.79, 1.187, [99.64, 99.95], 0.36,
+      [0.34, 0.38], 1.0, 1.187, [6208, 21899],
+      96.02, 0, "NC_000913.3", "OK",
+      "GCA_000005845.2", "d__Bacteria;..."]
+   ]
+ },
+ "caveats": []}
 ```
 
-`kind` is `query` or `profile`. `params` echoes the **effective** profiling parameters, defaults
-included (the keys `/info` lists for the endpoint), so a client need not reproduce them.
-`Taxonomic_abundance`, `Sequence_abundance` and `kmers_reassigned`
-appear only for `profile`; with `estimate_read_counts`, `Sequence_abundance` holds the estimated
-number of reads per genome (a rounded float) instead of a relative abundance. Metadata columns
-follow `accession`. Rows keep sylph's column names; in JSON `Eff_cov` is never renamed to
-`True_cov` (that is a TSV header), and `Lambda_status` is an extra field not present in the TSV.
-The TSV renders missing values as sylph does: `Eff_lambda` is `HIGH` or `LOW` according to
-`Lambda_status` when it is `null`, a missing interval is `NA-NA`, and for a sketch without read
-statistics under `estimate_unknown` `True_cov` is `inf` and the abundances are `NaN` (in JSON all of
-these are `null`). The TSV also caps `Adjusted_ANI` at 100 as sylph does; JSON keeps the value.
-With `no_adjust`, `Adjusted_ANI` is the naive containment ANI, while `ANI_5-95_percentile` is still
-sylph's interval of the adjusted estimate (as in stock sylph's `--no-adjust`), so it can lie away
-from `Adjusted_ANI`. It is `null` only when sylph computes no interval.
+- **`api_version`** is the integer wire-protocol version (same as in `GET /info`).
+- **`params`** echoes the **effective** profiling parameters, defaults included, as provenance.
+- **`samples`** has one `{"name": ...}` entry per sample sent, in request order, so a sample
+  without hits is distinguishable from one that was never sent.
+- **`table`** holds every hit of every sample in one standard table (`{"columns": [...], "data": [[...], ...]}`,
+  pandas' `orient="split"` layout without an index; `pd.DataFrame(**doc["table"])` loads it directly).
+  Every row carries its `Sample_file`. `columns` is the final ordered header: `Taxonomic_abundance`,
+  `Sequence_abundance` and `kmers_reassigned` appear only for `/profile`; with `estimate_unknown` or
+  `estimate_read_counts`, the actual column name is `True_cov` (not `Eff_cov`); with
+  `estimate_read_counts`, `Sequence_abundance` holds the estimated number of reads per genome
+  (a rounded float) instead of a relative abundance. `Lambda_status` appears as a separate column
+  immediately before `accession`, keeping `Eff_lambda` numeric (or `null` when not estimable): this
+  is the only column difference between the JSON table and the TSV header. Selected metadata columns
+  follow `accession` in request or metadata order.
+- **`caveats`** is a list of distinct species-threshold warning strings for non-GTDB taxonomy
+  sources present among the hits (empty for GTDB-only hits or without metadata).
+- Missing or non-finite values are JSON `null` (`Eff_lambda` when `Lambda_status` is `HIGH` or
+  `LOW`, missing confidence intervals, and `True_cov`/abundances of a sketch without read statistics
+  under `estimate_unknown`). Interval columns (`ANI_5-95_percentile`, `Lambda_5-95_percentile`,
+  `Containment_ind`) stay two-element arrays. TSV renderers format `null` as sylph does (`HIGH`/`LOW`
+  from `Lambda_status`, `NA-NA`, `inf`, `NaN`) and cap `Adjusted_ANI` at 100 while JSON keeps the
+  unrounded/uncapped value. With `no_adjust`, `Adjusted_ANI` is the naive containment ANI while
+  `ANI_5-95_percentile` is still sylph's interval of the adjusted estimate (as in stock sylph's
+  `--no-adjust`), so it can lie away from `Adjusted_ANI`; it is `null` only when sylph computes no
+  interval.
 
 With sylph-tax taxonomy sources (see [the metadata reference](metadata.md#taxonomy-sources)), every row has four more columns, and
 they are listed in `metadata.columns` so `fields` can select them:
@@ -299,23 +324,25 @@ The server resolves them with sylph-tax's own probe rules over the hit's `Genome
 
 ### Server-side taxonomic profiles (`taxprof`) { #taxprof }
 
-With `"taxprof": ["gtdb", "ncbi", "tax"]` the server aggregates the sample's rows once and adds a
-`taxprof` object to the sample. It returns the structured clades **and** the rendered
-`.sylphmpa` text, so clients neither aggregate nor format:
+With `"taxprof": ["gtdb", "ncbi", "tax"]` the server aggregates each sample's hits once and adds a
+top-level `taxprof` object keyed by sample name and taxonomy. It returns the structured clades
+**and** the rendered `.sylphmpa` text, so clients neither aggregate nor format:
 
 ```json
 "taxprof": {
-  "gtdb": {
-    "columns": ["clade_name", "relative_abundance", "sequence_abundance",
-                "ANI (if strain-level)", "Coverage (if strain-level)"],
-    "taxonomies_used": ["gtdb"],
-    "clades": [
-      {"clade_name": "d__Bacteria", "relative_abundance": 100.0,
-       "sequence_abundance": 100.0, "ani": null, "coverage": null},
-      {"clade_name": "d__Bacteria|...|t__GCA_000005845.2", "relative_abundance": 100.0,
-       "sequence_abundance": 100.0, "ani": 99.79, "coverage": 1.234}
-    ],
-    "sylphmpa": "#SampleID\tsample-a\tTaxonomies_used:['gtdb']\nclade_name\t..."
+  "sample-a": {
+    "gtdb": {
+      "columns": ["clade_name", "relative_abundance", "sequence_abundance",
+                  "ANI (if strain-level)", "Coverage (if strain-level)"],
+      "taxonomies_used": ["gtdb"],
+      "clades": [
+        {"clade_name": "d__Bacteria", "relative_abundance": 100.0,
+         "sequence_abundance": 100.0, "ani": null, "coverage": null},
+        {"clade_name": "d__Bacteria|...|t__GCA_000005845.2", "relative_abundance": 100.0,
+         "sequence_abundance": 100.0, "ani": 99.79, "coverage": 1.234}
+      ],
+      "sylphmpa": "#SampleID\tsample-a\tTaxonomies_used:['gtdb']\nclade_name\t..."
+    }
   }
 }
 ```
@@ -325,8 +352,8 @@ carry `ani`/`coverage`), ordered as `sylph-tax taxprof` orders the file. The `ta
 that file, newline-terminated. For `tax`, `taxonomies_used` lists the source names
 the profile was resolved against (`tax_sources`, in `ord` order). `gtdb`/`ncbi` come from the
 metadata columns of the same name; `tax` needs a metadata file with sylph-tax sources. The
-server adds the taxonomy columns the requested taxonomies need to `rows` even when `fields` hides
-them. `taxprof` is `/profile` only (`/query` rejects it), and one requested taxonomy the metadata
+server fetches the taxonomy columns needed for aggregation internally even when `fields` hides
+them from `table`. `taxprof` is `/profile` only (`/query` rejects it), and one requested taxonomy the metadata
 file cannot provide is a 400.
 
 In `ncbi`, a hit with no NCBI lineage of its own that the metadata file gave a nearest NCBI taxon
@@ -402,7 +429,8 @@ carries `tax_lineage`/`tax_source` and is classified from that lineage: `taxonom
 [hit relations](#hit-relations)). A hit without any lineage stays `unknown lineage`.
 
 ```json
-{"query": {"name": "assembly", "records": 1, "length": 6013491,
+{"api_version": 1,
+ "query": {"name": "assembly", "records": 1, "length": 6013491,
            "gc": 50.76, "sketch_kmers": 200, "input": "sequence"},
  "database": {"name": "gtdb-r232-c200-dbv2.syl2db", "genomes": 199937,
               "c": 200, "k": 31},
@@ -418,18 +446,31 @@ carries `tax_lineage`/`tax_source` and is classified from that lineage: `taxonom
              "accession": "GCF_000005845.2", "ani": 98.65, "taxonomy": {"...": "..."},
              "taxonomy_source": "GTDB_r232"},
  "elapsed_ms": 412.7,
- "hits": [{"rank": 1, "ani": 98.65, "containment": [7096, 10826],
-           "containment_fraction": 0.655, "relation": "same species",
-           "shared_rank": "species", "ani_species_level": true,
-           "genome_file": "/db/GCA_000005845.2_genomic.fna.gz",
-           "accession": "GCF_000005845.2",
-           "genome_id": "GCF_000005845.2",
-           "gtdb_taxonomy": "d__Bacteria;...;s__Escherichia coli",
-           "taxonomy": {"domain": "Bacteria", "...": "...", "species": "Escherichia coli"},
-           "taxonomy_source": "GTDB_r232",
-           "ncbi_organism_name": "Escherichia coli K-12", "...": null}]}
+ "table": {
+   "columns": ["rank", "ani", "relation", "shared_rank", "accession", "genome_id",
+               "taxon", "gtdb_species", "taxonomy_source", "ncbi_organism_name", "ncbi_taxid",
+               "containment", "containment_fraction", "ani_species_level", "genome_file",
+               "taxonomy", "gtdb_taxonomy", "..."],
+   "data": [
+     [1, 98.65, "same species", "species", "GCF_000005845.2", "GCF_000005845.2",
+      "Escherichia coli", "Escherichia coli", "GTDB_r232", "Escherichia coli K-12", 511145,
+      [7096, 10826], 0.655, true, "/db/GCA_000005845.2_genomic.fna.gz",
+      {"domain": "Bacteria", "...": "...", "species": "Escherichia coli"},
+      "d__Bacteria;...;s__Escherichia coli", "..."]
+   ]
+ }}
 ```
 
+- **`api_version`** is the integer wire-protocol version (same as in `GET /info`).
+- **`table`** holds the hits in the standard `orient="split"` format (`{"columns": [...], "data": [[...], ...]}`).
+  The leading 11 columns match the CLI's hits TSV (`rank`, `ani`, `relation`, `shared_rank`,
+  `accession`, `genome_id`, `taxon`, `gtdb_species`, `taxonomy_source`, `ncbi_organism_name`,
+  `ncbi_taxid`), where the server computes **`taxon`** (the last named rank of the hit's lineage, or
+  `null`) and **`gtdb_species`** (the GTDB `s__` name, or `null`). Next come `containment`,
+  `containment_fraction`, `ani_species_level`, `genome_file`, `taxonomy`, and every remaining
+  metadata column of the server's metadata database (with `null` for missing values; a server
+  without `--meta` keeps the full standard metadata column list with `null` cells so the shape is
+  stable).
 - **`database`** is the pooled view (see `GET /info`); the response has no `databases` key, add
   `GET /info` when a client needs the per-database list.
 - **`query.input`** is `"sequence"` or `"sketch"`, how the assembly arrived. For a sketch,
@@ -449,8 +490,8 @@ carries `tax_lineage`/`tax_source` and is classified from that lineage: `taxonom
   fungal species). `taxonomy` is the lineage as `{rank: taxon}`, shallowest first — `{"domain":
   "Bacteria", ..., "species": "Escherichia coli"}` or `{"level 1": "vFAM-00013", ..., "level 5":
   "vOTU-052719"}` — and `taxonomy_source` the source that named it (`GTDB_r232`, `UHGV_default`,
-  ...). Both keys are **absent** when the hit has no lineage, so a metadata-less response keeps its
-  shape.
+  ...). On `assignment`/`closest` both keys are **absent** when the hit has no lineage; in `table`
+  their cells are `null`.
 - **`note`** (on `assignment`, or on `closest` when there is no assignment) explains what 95 % ANI
   means for a best hit that is **not** from GTDB: the vOTU convention for viruses (whose aligned
   fraction sylph's ANI ignores), a heuristic for fungi, a generic text for other sources. It is
@@ -462,9 +503,6 @@ carries `tax_lineage`/`tax_source` and is classified from that lineage: `taxonom
   an identifier: UHGV stores every genome in `votus_full.fna.gz`.
 - **`thresholds.imprecise_below`** (`85`) is only a hint that k-mer ANI below it is imprecise. It
   never changes an assignment.
-- **Metadata:** every metadata column of the server's metadata database is added flat to each hit,
-  or `null` when the accession has no metadata. A server without `--meta` returns all columns as
-  `null`, so the shape is stable.
 - Uploads are never logged.
 
 ### Raw sequence with curl { #raw-sequence-with-curl }
@@ -553,7 +591,7 @@ The body is `multipart/form-data`:
 | `min_ani` | minimum **contig-relative** ANI in percent, 70-100 (default `80`); a contig whose best hit is below it is `no_hit` |
 | `consensus_ratio` | the close-band ratio `R` of the consensus rule, `>= 1` (default `1.5`) |
 | `consensus_z` | the noise allowance `Z` of the consensus rule, `>= 0` (default `2`) |
-| `fields` | metadata columns added flat to every hit; omitted means all, `[]` means none; needs a metadata database |
+| `fields` | metadata columns appended to `table`; omitted means all, `[]` means none; needs a metadata database. Any requested field whose name collides with a fixed column of the table (`gc`, `taxon`, `accession`, ...) is a `400` |
 | `tax_sources` | like `/query`: resolve hits against these taxonomy sources only |
 
 Unknown keys are a 400. **A whole request is one job**, whatever its number of contigs: its
@@ -567,39 +605,63 @@ sketch (`k` must match, `c` must not be sparser than the database's), and the wh
 refused with a 400 if any entry is invalid (a count that does not match the sketch parts, a
 `contig_kmers` no sequence of that length can have, a duplicate name, ...).
 
-The response carries one result per contig, in request order, plus a summary of the request:
+The response is a JSON document holding a flat per-hit `table`, per-contig metadata and summaries
+keyed by contig name in `contigs` (in request order), and a per-request `summary`:
 
 ```json
-{"contigs": [{"name": "contig1", "length": 20000, "gc": 51.2,
-              "sketch_kmers": 95, "contig_kmers": 84,
-              "status": "ok", "hits": [{"rank": 1, "ani": 99.12,
-                  "shared_kmers": 78, "contig_kmers": 84, "explained_fraction": 0.9286,
-                  "reference_ani": 96.16, "reference_containment": [78, 8413],
-                  "relation": "same species", "shared_rank": "species",
-                  "ani_species_level": true, "genome_file": "...", "accession": "GCA_...",
-                  "genome_id": "GCA_...", "gtdb_species": "...", "taxon": "...", "...": "..."}],
-              "assignment": {"rank": "species", "taxon": "...", "accession": "...", "ani": 99.12},
-              "closest": {"...": "..."},
-              "consensus": {"rank": "family", "taxon": "Enterobacteriaceae",
-                            "n_close": 2, "species": ["...", "..."]}}],
- "summary": {"contigs": 1, "bp": 20000, "queried_contigs": 1, "queried_bp": 20000,
-             "too_few_kmers_contigs": 0, "too_few_kmers_bp": 0, "no_hit_contigs": 0,
-             "consensus_bp": [{"rank": "family", "taxon": "Enterobacteriaceae",
-                               "bp": 20000, "fraction": 1.0}]},
- "caveats": [], "database": {"name": "...", "genomes": 199937, "c": 200, "k": 31},
+{"api_version": 1,
  "params": {"top": 1, "min_ani": 80.0, "consensus_ratio": 1.5, "consensus_z": 2.0, "fields": []},
+ "table": {
+   "columns": ["contig", "contig_length", "gc", "status", "rank", "ani",
+               "shared_kmers", "contig_kmers", "explained_fraction", "reference_ani",
+               "relation", "shared_rank", "ani_species_level", "accession", "genome_id",
+               "gtdb_species", "taxon", "n_close", "consensus_rank", "consensus_taxon"],
+   "data": [
+     ["contig1", 20000, 51.2, "ok", 1, 99.12,
+      78, 84, 0.9286, 96.16,
+      "same species", "species", true, "GCA_...", "GCA_...",
+      "Escherichia coli", "Escherichia coli", 2, "family", "Enterobacteriaceae"],
+     ["contig2", 15000, 48.0, "no_hit", null, null,
+      null, null, null, null,
+      null, null, null, null, null,
+      null, null, null, null, null]
+   ]
+ },
+ "contigs": {
+   "contig1": {"length": 20000, "gc": 51.2, "sketch_kmers": 95, "contig_kmers": 84,
+               "status": "ok",
+               "assignment": {"rank": "species", "taxon": "...", "accession": "...", "ani": 99.12},
+               "closest": {"...": "..."},
+               "consensus": {"rank": "family", "taxon": "Enterobacteriaceae",
+                             "n_close": 2, "species": ["...", "..."]}},
+   "contig2": {"length": 15000, "gc": 48.0, "sketch_kmers": 80, "contig_kmers": 72,
+               "status": "no_hit",
+               "assignment": null, "closest": null, "consensus": null}
+ },
+ "summary": {"contigs": 2, "bp": 35000, "queried_contigs": 2, "queried_bp": 35000,
+             "too_few_kmers_contigs": 0, "too_few_kmers_bp": 0, "no_hit_contigs": 1,
+             "consensus_bp": [{"rank": "family", "taxon": "Enterobacteriaceae",
+                               "bp": 20000, "fraction": 0.5714},
+                              {"rank": null, "taxon": "unassigned",
+                               "bp": 15000, "fraction": 0.4286}]},
+ "caveats": [], "database": {"name": "...", "genomes": 199937, "c": 200, "k": 31},
  "thresholds": {"species": 95.0, "imprecise_below": 85.0},
  "elapsed_ms": 12.5}
 ```
 
+- **`api_version`** is the integer wire-protocol version (same as in `GET /info`).
+- **`table`** holds the flat per-hit table in `orient="split"` format: the 20 fixed columns above
+  plus any requested `fields`, one row per hit. A contig without hits (`no_hit` or `too_few_kmers`)
+  appears as one row with `null` in every hit, consensus, and metadata column.
+- **`contigs`** maps each contig name (in request order) to its measurements, `status`, optional
+  `reason` (for `too_few_kmers`), `assignment`, `closest`, and `consensus`.
 - **`status`** is `ok` (hits), `no_hit` (queried, nothing above `min_ani`) or `too_few_kmers` (the
   sketch holds fewer k-mers than sylph's floor of 10; such a contig is not queried, and `reason`
   says so).
 - **`ani`** is the contig-relative ANI, `100 * (shared / contig_kmers) ** (1/k)`, **not** sylph's
   `Naive_ANI`. `shared_kmers` is `Containment_ind[0]` (reference k-mers found in the contig),
-  `explained_fraction` is `shared / contig_kmers` (clamped at 1), `reference_ani` is sylph's
-  genome-denominator `Naive_ANI` in percent, and `reference_containment` is
-  `[shared, reference k-mers]`. An exact fragment scores exactly 100 %.
+  `explained_fraction` is `shared / contig_kmers` (clamped at 1), and `reference_ani` is sylph's
+  genome-denominator `Naive_ANI` in percent. An exact fragment scores exactly 100 %.
 - **Ranking.** Hits are ordered by the contig-relative ANI (equivalently by `shared`, the
   likelihood order). Hits within the consensus close band of the best hit (the same rule the
   consensus uses: `100 - ani <= R * (100 - ani_best) + Z * sqrt(sd_best^2 + sd^2)`) **and** with
@@ -667,7 +729,7 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 
 | Status | When |
 |---|---|
-| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request (or more than the server's `max_contigs` for `/contigs`); for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, malformed or non-`ACGTN` raw sequence, or a `Content-Length` that is not an integer; for `/contigs` a `contigs` list that does not match the sketch parts, a duplicate or unusable contig name, a `contig_kmers` that is not a positive integer or that no sequence of that `length` can have, or an out-of-range option |
+| `400` | bad parameters, invalid `params` JSON, unknown metadata columns, requested `fields` that collide with a fixed column of the response table (`gc`, `taxon`, `accession`, ...), a sketch with the wrong `c` or `k`, a malformed sketch, more than 4096 sketches in one request (or more than the server's `max_contigs` for `/contigs`); for `/assembly` an empty body, a malformed sketch (or one with the wrong `c` or `k`), invalid `records`/`length`/`gc`, malformed or non-`ACGTN` raw sequence, or a `Content-Length` that is not an integer; for `/contigs` a `contigs` list that does not match the sketch parts, a duplicate or unusable contig name, a `contig_kmers` that is not a positive integer or that no sequence of that `length` can have, or an out-of-range option |
 | `401` | `--require-token` and no valid token (`WWW-Authenticate: Bearer`) |
 | `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted); `GET /usage` without `--usage-db` |
 | `413` | the body exceeds `--max-upload-mb`, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |

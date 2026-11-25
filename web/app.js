@@ -1010,6 +1010,7 @@
         showHttpError(res.status, data && data.error, Number.isFinite(retry) ? retry : null, raw);
         return;
       }
+      data = fromAssemblyDoc(data);
       if (!data || !Array.isArray(data.hits)) throw new Error('Unexpected response from the server.');
       // the server never saw the sequence: fill in what this browser counted (unknown for an uploaded sketch)
       const q = data.query = data.query || {};
@@ -1755,10 +1756,60 @@
     download(exportAssembly('tsv'), `${rows.join('\n')}\n`, 'text/tab-separated-values');
   }
 
+  // Temporary Step-1 converters (document -> legacy shapes); deleted in Step 3.
+  const CONTIG_ROW_ONLY = new Set(['contig', 'contig_length', 'gc', 'status', 'n_close', 'consensus_rank', 'consensus_taxon']);
+  function tableToRows(table) {
+    const cols = table.columns;
+    return table.data.map((vals) => {
+      const row = {};
+      for (let i = 0; i < cols.length; i++) row[cols[i]] = vals[i];
+      return row;
+    });
+  }
+  function fromProfileDoc(doc) {
+    if (!doc || !doc.table || !Array.isArray(doc.table.columns) || !Array.isArray(doc.table.data) || !Array.isArray(doc.samples)) return null;
+    const bySample = new Map();
+    for (const row of tableToRows(doc.table)) {
+      const name = String(row.Sample_file ?? '');
+      if (!bySample.has(name)) bySample.set(name, []);
+      bySample.get(name).push(row);
+    }
+    const tp = doc.taxprof || {};
+    return doc.samples.map(({ name }) => {
+      const s = { name, kind: 'profile', params: doc.params || {}, rows: bySample.get(name) || [] };
+      if (tp[name]) s.taxprof = tp[name];
+      return s;
+    });
+  }
+  function fromAssemblyDoc(doc) {
+    if (!doc || !doc.table || !Array.isArray(doc.table.columns) || !Array.isArray(doc.table.data)) return null;
+    const out = Object.assign({}, doc, { hits: tableToRows(doc.table) });
+    delete out.table;
+    return out;
+  }
+  function fromContigsDoc(doc) {
+    if (!doc || !doc.table || !Array.isArray(doc.table.columns) || !Array.isArray(doc.table.data)
+      || !doc.contigs || typeof doc.contigs !== 'object' || Array.isArray(doc.contigs)) return null;
+    const byContig = new Map();
+    for (const row of tableToRows(doc.table)) {
+      if (row.rank == null) continue;
+      const name = String(row.contig);
+      const hit = {};
+      for (const [k, v] of Object.entries(row)) if (!CONTIG_ROW_ONLY.has(k)) hit[k] = v;
+      if (!byContig.has(name)) byContig.set(name, []);
+      byContig.get(name).push(hit);
+    }
+    const contigs = Object.entries(doc.contigs).map(([name, entry]) => Object.assign({ name }, entry, { hits: byContig.get(name) || [] }));
+    const out = Object.assign({}, doc, { contigs });
+    delete out.table;
+    return out;
+  }
+
   /* ----------------------------------------------- shared with the other scripts */
   window.Sylphd = {
     el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtPct, fmtSecs, fmtDur, isNum, has, notice,
     readChoice, writeChoice, choiceModal, stem, fileStem, exportName, download, downloadJson,
+    fromProfileDoc, fromContigsDoc,
     RANK_NAMES, DEPTH, rankTitle, parseLineage, lineageName, genericRanks, genericTaxon, hitSource, isGtdbTaxonomySource, nonGtdb, genomeFileId, relClass,
     exportButtons, seg, barRow, sortableTable,
     accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal, updateSubmit,

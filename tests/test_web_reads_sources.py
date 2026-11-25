@@ -67,28 +67,34 @@ def _taxprof(index: int, taxonomy: str, scale: float = 1.0) -> dict:
 
 SOURCES = ["GTDB_r232", "UHGV_default", "FungiRefSeq-latest"]
 
-def _profile(scale: float = 1.0) -> list[dict]:
+def _profile(scale: float = 1.0) -> dict:
     """The /profile answer; ``scale`` < 1 is sylph's --estimate-unknown, whose sequence
     abundances are shares of all reads (the rest are in no database)."""
-    profile = [{
-        "name": "sample",
-        "kind": "reads",
-        "params": {"estimate_unknown": scale != 1.0, "estimate_read_counts": False, "min_number_kmers": 10},
-        "rows": [
-            {
-                "Sample_file": "sample", "Genome_file": f"genome{i}.fna.gz", "Adjusted_ANI": 98.0, "Eff_cov": 1.0,
-                "Taxonomic_abundance": tax, "Sequence_abundance": seq * scale, "Contig_name": f"contig{i}",
-                "gtdb_taxonomy": gtdb, "ncbi_taxonomy": ncbi, "tax_source": source, "tax_lineage": own,
-            }
-            for i, (gtdb, ncbi, source, own, tax, seq) in enumerate(ROWS)
-        ],
-        "taxprof": {name: _taxprof(index, name, scale) for index, name in ((0, "gtdb"), (1, "ncbi"), (3, "tax"))},
-    }]
+    cov_col = "True_cov" if scale != 1.0 else "Eff_cov"
+    columns = [
+        "Sample_file", "Genome_file", "Taxonomic_abundance", "Sequence_abundance",
+        "Adjusted_ANI", cov_col, "Contig_name",
+        "gtdb_taxonomy", "ncbi_taxonomy", "tax_source", "tax_lineage",
+    ]
+    rows = [
+        {
+            "Sample_file": "sample", "Genome_file": f"genome{i}.fna.gz", "Adjusted_ANI": 98.0, cov_col: 1.0,
+            "Taxonomic_abundance": tax, "Sequence_abundance": seq * scale, "Contig_name": f"contig{i}",
+            "gtdb_taxonomy": gtdb, "ncbi_taxonomy": ncbi, "tax_source": source, "tax_lineage": own,
+        }
+        for i, (gtdb, ncbi, source, own, tax, seq) in enumerate(ROWS)
+    ]
+    taxprof = {name: _taxprof(index, name, scale) for index, name in ((0, "gtdb"), (1, "ncbi"), (3, "tax"))}
     # The one-source profiles come from the server's own code, as /profile returns them.
-    profile[0]["taxprof"].update(
-        build_taxprof("sample", [f"tax:{name}" for name in SOURCES], profile[0]["rows"])
-    )
-    return profile
+    taxprof.update(build_taxprof("sample", [f"tax:{name}" for name in SOURCES], rows))
+    return {
+        "api_version": 1,
+        "params": {"estimate_unknown": scale != 1.0, "estimate_read_counts": False, "min_number_kmers": 10},
+        "samples": [{"name": "sample"}],
+        "table": {"columns": columns, "data": [[row[col] for col in columns] for row in rows]},
+        "caveats": [],
+        "taxprof": {"sample": taxprof},
+    }
 
 
 PROFILE = _profile()
@@ -157,7 +163,12 @@ const pw = require('node:module').createRequire(process.env.PLAYWRIGHT_DIR + '/'
       // like the server: only the requested taxonomies come back
       requested = route.request().postData() || '';
       const asked = JSON.parse((requested.match(/\{"names".*\}/) || ['{}'])[0]).taxprof || [];
-      body = profile.map((sample) => ({ ...sample, taxprof: Object.fromEntries(asked.map((t) => [t, sample.taxprof[t]])) }));
+      body = {
+        ...profile,
+        taxprof: Object.fromEntries(
+          Object.entries(profile.taxprof).map(([name, tp]) => [name, Object.fromEntries(asked.map((t) => [t, tp[t]]))]),
+        ),
+      };
     }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });

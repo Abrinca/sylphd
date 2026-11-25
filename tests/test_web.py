@@ -74,6 +74,11 @@ class TestAssemblyDisabled:
             assert "/assembly" in test_client.get("/").json()["endpoints"]
 
 
+def _table_rows(doc: dict) -> list[dict]:
+    table = doc["table"]
+    return [dict(zip(table["columns"], values)) for values in table["data"]]
+
+
 class TestAssemblyUpload:
     def test_plain_fasta(self, assembly_client: TestClient) -> None:
         response = _post_assembly(assembly_client, _raw_fasta(), top=5, min_ani=80)
@@ -81,6 +86,7 @@ class TestAssemblyUpload:
         payload = response.json()
 
         assert set(payload) == {
+            "api_version",
             "query",
             "database",
             "params",
@@ -88,8 +94,9 @@ class TestAssemblyUpload:
             "assignment",
             "closest",
             "elapsed_ms",
-            "hits",
+            "table",
         }
+        assert payload["api_version"] == 1
         assert payload["query"]["name"] == "assembly"
         assert payload["query"]["records"] == 1
         assert payload["query"]["length"] == 9957
@@ -104,13 +111,28 @@ class TestAssemblyUpload:
         assert payload["thresholds"] == {"species": 95, "imprecise_below": 85}
         assert payload["elapsed_ms"] >= 0
 
-        (hit,) = payload["hits"]
+        assert payload["table"]["columns"][:11] == [
+            "rank",
+            "ani",
+            "relation",
+            "shared_rank",
+            "accession",
+            "genome_id",
+            "taxon",
+            "gtdb_species",
+            "taxonomy_source",
+            "ncbi_organism_name",
+            "ncbi_taxid",
+        ]
+        (hit,) = _table_rows(payload)
         assert hit["rank"] == 1
         assert hit["ani"] == pytest.approx(100.0, abs=0.01)
         assert hit["relation"] == "same species"
         assert hit["shared_rank"] == "species"
         assert hit["ani_species_level"] is True
         assert "interpretation" not in hit
+        assert hit["taxon"] == "Test"
+        assert hit["gtdb_species"] is None
         assert payload["assignment"]["rank"] == "species"
         assert payload["assignment"]["accession"] == "GCA_000000001.1"
         assert payload["assignment"]["ani"] == hit["ani"]
@@ -137,7 +159,7 @@ class TestAssemblyUpload:
         payload = response.json()
         assert payload["query"]["name"] == "zipped"
         assert payload["query"]["length"] == 9957
-        assert payload["hits"][0]["accession"] == "GCA_000000001.1"
+        assert _table_rows(payload)[0]["accession"] == "GCA_000000001.1"
 
     def test_fastq_is_accepted(self, assembly_client: TestClient) -> None:
         body = b"@r1\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n+\n" + b"I" * 40 + b"\n"
@@ -163,13 +185,46 @@ class TestAssemblyUpload:
         assert response.status_code == 400
         assert "error" in response.json()
 
+    def test_gtdb_species_and_taxon_in_table(
+        self, tiny_database: Path, tmp_path: Path
+    ) -> None:
+        """``/assembly`` computes ``taxon`` and ``gtdb_species`` server-side."""
+        from sylphd.metadata_build import build_metadata_db
+
+        tsv = tmp_path / "gtdb.tsv"
+        header = ["accession", *METADATA_COLUMNS]
+        row = ["RS_GCA_000000001.1"] + [""] * len(METADATA_COLUMNS)
+        row[1 + METADATA_COLUMNS.index("gtdb_taxonomy")] = (
+            "d__Bacteria;p__Test;c__Test;o__Test;f__Test;g__Testus;s__Testus alpha"
+        )
+        row[1 + METADATA_COLUMNS.index("ncbi_organism_name")] = "Testus alpha str. 1"
+        row[1 + METADATA_COLUMNS.index("ncbi_taxid")] = "12345"
+        tsv.write_text("\t".join(header) + "\n" + "\t".join(row) + "\n", encoding="utf-8")
+        meta = Path(build_metadata_db([tsv], tmp_path / "meta.sqlite", release=232)["path"])
+        app = create_app(
+            ServerConfig(db_path=tiny_database, meta_path=meta, allow_sequences=True)
+        )
+        with TestClient(app) as client:
+            response = _post_assembly(client, _raw_fasta(), top=5, min_ani=80)
+        assert response.status_code == 200
+        (hit,) = _table_rows(response.json())
+        assert hit["taxon"] == "Testus alpha"
+        assert hit["gtdb_species"] == "Testus alpha"
+        assert hit["taxonomy_source"] == "GTDB_r232"
+        assert hit["ncbi_organism_name"] == "Testus alpha str. 1"
+        assert hit["ncbi_taxid"] == 12345
+
     def test_min_ani_filters_hits(self, tiny_database: Path) -> None:
         app = create_app(ServerConfig(db_path=tiny_database, allow_sequences=True))
         with TestClient(app) as test_client:
             response = _post_assembly(test_client, b">a\n" + b"ACGT" * 2000 + b"\n")
             assert response.status_code == 200
             payload = response.json()
-            assert payload["hits"] == []
+            assert payload["table"]["data"] == []
+            assert payload["table"]["columns"][:11] == [
+                "rank", "ani", "relation", "shared_rank", "accession", "genome_id",
+                "taxon", "gtdb_species", "taxonomy_source", "ncbi_organism_name", "ncbi_taxid",
+            ]
 
 
 class TestAssemblyErrors:
@@ -259,16 +314,20 @@ class TestNoAdjust:
     def test_query_reports_naive_ani_with_sylphs_ci(self) -> None:
         app = create_app(ServerConfig(db_path=ECOLI_TWO_STAGE))
         with TestClient(app) as test_client:
-            default = test_client.post(
-                "/query",
-                data={"params": json.dumps({"names": ["o157"]})},
-                files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
-            ).json()[0]["rows"][0]
-            naive = test_client.post(
-                "/query",
-                data={"params": json.dumps({"names": ["o157"], "no_adjust": True})},
-                files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
-            ).json()[0]["rows"][0]
+            default = _table_rows(
+                test_client.post(
+                    "/query",
+                    data={"params": json.dumps({"names": ["o157"]})},
+                    files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
+                ).json()
+            )[0]
+            naive = _table_rows(
+                test_client.post(
+                    "/query",
+                    data={"params": json.dumps({"names": ["o157"], "no_adjust": True})},
+                    files=[("sketch", ("o157.sylsp", O157_SKETCH.read_bytes()))],
+                ).json()
+            )[0]
 
         assert default["Adjusted_ANI"] == pytest.approx(99.79, abs=0.01)
         assert naive["Adjusted_ANI"] == pytest.approx(96.02, abs=0.01)

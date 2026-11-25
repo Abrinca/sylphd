@@ -484,9 +484,9 @@ class SylphClient:
             headers={"content-type": content_type},
         )
         result = response.json()
-        if not isinstance(result, dict) or "hits" not in result:
+        if not isinstance(result, dict) or not isinstance(result.get("table"), dict):
             raise ClientError("unexpected response from /assembly")
-        return result
+        return _assembly_doc_to_legacy(result)
 
     def query_size(
         self,
@@ -538,9 +538,13 @@ class SylphClient:
             self._prepare_contigs(samples, contigs, options, fields, tax_sources)
         )
         result = response.json()
-        if not isinstance(result, dict) or "contigs" not in result:
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("table"), dict)
+            or not isinstance(result.get("contigs"), dict)
+        ):
             raise ClientError("unexpected response from /contigs")
-        return result
+        return _contigs_doc_to_legacy(result)
 
     def contigs_size(
         self,
@@ -630,9 +634,13 @@ class SylphClient:
             )
         )
         result = response.json()
-        if not isinstance(result, list):
-            raise ClientError(f"unexpected response from /{mode}: not a JSON list")
-        return result
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("table"), dict)
+            or not isinstance(result.get("samples"), list)
+        ):
+            raise ClientError(f"unexpected response from /{mode}")
+        return _profile_doc_to_samples(result, mode)
 
     def close(self) -> None:
         self._client.close()
@@ -642,6 +650,59 @@ class SylphClient:
 
     def __exit__(self, *exc_info: object) -> None:
         self.close()
+
+
+# Temporary Step-1 converters (document -> legacy shapes); deleted in Step 5.
+_CONTIG_ROW_ONLY = frozenset(
+    {"contig", "contig_length", "gc", "status", "n_close", "consensus_rank", "consensus_taxon"}
+)
+
+
+def _table_to_rows(table: Mapping[str, Any]) -> list[dict[str, Any]]:
+    columns = table["columns"]
+    return [dict(zip(columns, values, strict=True)) for values in table["data"]]
+
+
+def _profile_doc_to_samples(doc: Mapping[str, Any], mode: str) -> list[dict[str, Any]]:
+    by_sample: dict[str, list[dict[str, Any]]] = {}
+    for row in _table_to_rows(doc["table"]):
+        by_sample.setdefault(str(row.get("Sample_file", "")), []).append(row)
+    taxprof = doc.get("taxprof") or {}
+    params = doc.get("params") or {}
+    return [
+        {
+            "name": entry["name"],
+            "kind": mode,
+            "params": params,
+            "rows": by_sample.get(entry["name"], []),
+            **({"taxprof": taxprof[entry["name"]]} if entry["name"] in taxprof else {}),
+        }
+        for entry in doc["samples"]
+    ]
+
+
+def _assembly_doc_to_legacy(doc: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        **{key: value for key, value in doc.items() if key != "table"},
+        "hits": _table_to_rows(doc["table"]),
+    }
+
+
+def _contigs_doc_to_legacy(doc: Mapping[str, Any]) -> dict[str, Any]:
+    by_contig: dict[str, list[dict[str, Any]]] = {}
+    for row in _table_to_rows(doc["table"]):
+        if row.get("rank") is None:
+            continue
+        hit = {key: value for key, value in row.items() if key not in _CONTIG_ROW_ONLY}
+        by_contig.setdefault(str(row["contig"]), []).append(hit)
+    contigs = [
+        {"name": name, **entry, "hits": by_contig.get(name, [])}
+        for name, entry in doc["contigs"].items()
+    ]
+    return {
+        **{key: value for key, value in doc.items() if key not in ("table", "contigs")},
+        "contigs": contigs,
+    }
 
 
 def _retry_delay(response: httpx.Response, attempt: int) -> float:

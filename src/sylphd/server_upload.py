@@ -16,7 +16,7 @@ from starlette.requests import Request
 
 from . import per_contig
 from .metadata import MetadataDB
-from .protocol import ProfileParams, ProtocolError
+from .protocol import ProfileParams, ProtocolError, table_columns
 from .server_errors import RequestError, check_queue
 from .sketching import InputError, check_sample_name, sample_name_from_path
 from .taxonomy import TaxonomyError, parse_taxonomies, resolve_taxonomy_columns
@@ -141,7 +141,11 @@ async def read_contigs(
             )
         except ProtocolError as error:
             raise RequestError(str(error)) from None
-        fields = _validate_fields(params_data.get("fields"), state.metadata)
+        fields = _validate_fields(
+            params_data.get("fields"),
+            state.metadata,
+            fixed_columns=per_contig.TABLE_COLUMNS,
+        )
         tax_sources = _validate_tax_sources(
             params_data.get("tax_sources"), state.metadata
         )
@@ -182,7 +186,11 @@ async def read_upload(
                 f"params.mode is {declared_mode!r} but this is the /{mode} endpoint"
             )
 
-        fields = _validate_fields(params_data.get("fields"), state.metadata)
+        fields = _validate_fields(
+            params_data.get("fields"),
+            state.metadata,
+            fixed_columns=table_columns(mode, params),
+        )
         tax_sources = _validate_tax_sources(
             params_data.get("tax_sources"), state.metadata
         )
@@ -193,19 +201,37 @@ async def read_upload(
         return params, fields, names, payloads, tax_sources, taxprof
 
 
-def _validate_fields(value: Any, metadata: MetadataDB | None) -> Sequence[str] | None:
+def _validate_fields(
+    value: Any,
+    metadata: MetadataDB | None,
+    *,
+    fixed_columns: Sequence[str] = (),
+) -> Sequence[str] | None:
     """Validate ``params.fields``: metadata column names, in request order.
 
     Duplicates are removed (a repeated column must not duplicate the key of a
-    hit or the work of the metadata join), and the result cannot be longer
-    than the number of columns the server's metadata file has.
+    hit or the work of the metadata join), requested names that collide with a
+    fixed column of the response table are rejected with 400 so column names in
+    a table are always unique, and the result cannot be longer than the number
+    of columns the server's metadata file has.
     """
+    fixed = frozenset(fixed_columns)
     if value is None:
-        return None if metadata is None else tuple(metadata.field_columns)
+        if metadata is None:
+            return None
+        return tuple(
+            column for column in metadata.field_columns if column not in fixed
+        )
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise RequestError("'params.fields' must be a list of column names")
     if not value:
         return ()
+    collisions = list(dict.fromkeys(column for column in value if column in fixed))
+    if collisions:
+        raise RequestError(
+            "requested field(s) collide with fixed table column(s): "
+            + ", ".join(collisions)
+        )
     if metadata is None:
         raise RequestError(
             "this server has no metadata database; --fields is not available"

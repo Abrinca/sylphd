@@ -51,28 +51,7 @@ DEFAULT_CONSENSUS_Z = per_contig.DEFAULT_CONSENSUS_Z
 DEFAULT_PARAMS_BUDGET = 900 * 1024
 
 #: Leading TSV columns, followed by the metadata columns selected by ``--fields``.
-COLUMNS: tuple[str, ...] = (
-    "contig",
-    "contig_length",
-    "gc",
-    "status",
-    "rank",
-    "ani",
-    "shared_kmers",
-    "contig_kmers",
-    "explained_fraction",
-    "reference_ani",
-    "relation",
-    "shared_rank",
-    "ani_species_level",
-    "accession",
-    "genome_id",
-    "gtdb_species",
-    "taxon",
-    "n_close",
-    "consensus_rank",
-    "consensus_taxon",
-)
+COLUMNS: tuple[str, ...] = per_contig.TABLE_COLUMNS
 
 
 @dataclass(frozen=True)

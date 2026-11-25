@@ -1634,8 +1634,8 @@ def test_floor_contigs_never_reach_the_profiler(
         {"contigs": [_contig_spec("tiny", sequence, kmers, gc)]},
     )
     assert response.status_code == 200
-    (result,) = response.json()["contigs"]
-    assert result["status"] == "too_few_kmers"
+    body = response.json()
+    assert body["contigs"]["tiny"]["status"] == "too_few_kmers"
     assert calls == []
 
 
@@ -1666,6 +1666,8 @@ def test_contigs_endpoint_response(endpoint_app, endpoint_data) -> None:
     assert response.status_code == 200
     body = response.json()
     assert set(body) == {
+        "api_version",
+        "table",
         "contigs",
         "summary",
         "caveats",
@@ -1674,6 +1676,7 @@ def test_contigs_endpoint_response(endpoint_app, endpoint_data) -> None:
         "thresholds",
         "elapsed_ms",
     }
+    assert body["api_version"] == 1
     assert body["database"] == {
         "name": ani_name(endpoint_app),
         "genomes": 3,
@@ -1691,8 +1694,8 @@ def test_contigs_endpoint_response(endpoint_app, endpoint_data) -> None:
     assert body["caveats"] == []
     assert body["elapsed_ms"] >= 0
 
-    (result,) = body["contigs"]
-    assert result["name"] == "contig1"
+    assert list(body["contigs"]) == ["contig1"]
+    result = body["contigs"]["contig1"]
     assert result["status"] == "ok"
     assert result["length"] == spec["length"]
     assert result["contig_kmers"] == spec["contig_kmers"]
@@ -1700,13 +1703,17 @@ def test_contigs_endpoint_response(endpoint_app, endpoint_data) -> None:
     assert result["assignment"]["accession"] == "GCA_000000900.1"
     assert result["closest"]["accession"] == "GCA_000000900.1"
 
-    hit = result["hits"][0]
+    table = body["table"]
+    assert table["columns"] == list(per_contig.TABLE_COLUMNS)
+    rows = [dict(zip(table["columns"], values)) for values in table["data"]]
+    hit = rows[0]
+    assert hit["contig"] == "contig1"
+    assert hit["status"] == "ok"
     assert hit["rank"] == 1
     assert hit["accession"] == "GCA_000000900.1"
     assert hit["ani"] == pytest.approx(100.0, abs=0.05)
     assert hit["shared_kmers"] == hit["contig_kmers"] == spec["contig_kmers"]
     assert hit["explained_fraction"] == pytest.approx(1.0, abs=0.01)
-    assert hit["reference_containment"] == [spec["contig_kmers"], hit["reference_containment"][1]]
     assert hit["taxon"] is None  # no metadata on this server
     assert "gtdb_taxonomy" not in hit  # and no metadata columns were requested
 
@@ -1738,11 +1745,18 @@ def test_contigs_endpoint_too_few_kmers(endpoint_app: TestClient) -> None:
     )
     assert response.status_code == 200
     body = response.json()
-    (result,) = body["contigs"]
+    result = body["contigs"]["tiny"]
     assert result["status"] == "too_few_kmers"
     assert "too few k-mers" in result["reason"]
-    assert result["hits"] == []
     assert result["consensus"] is None
+    # Contig without hits appears as one row with null hit columns.
+    (row_vals,) = body["table"]["data"]
+    row = dict(zip(body["table"]["columns"], row_vals))
+    assert row["contig"] == "tiny"
+    assert row["status"] == "too_few_kmers"
+    assert row["rank"] is None
+    assert row["ani"] is None
+    assert row["consensus_rank"] is None
     assert body["summary"]["too_few_kmers_contigs"] == 1
     assert body["summary"]["queried_contigs"] == 0
 
@@ -1797,7 +1811,31 @@ def test_duplicate_fields_are_deduplicated(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["params"]["fields"] == ["gtdb_taxonomy"]
-    assert body["contigs"][0]["hits"][0]["gtdb_taxonomy"]
+    row = dict(zip(body["table"]["columns"], body["table"]["data"][0]))
+    assert row["gtdb_taxonomy"]
+
+
+@pytest.mark.parametrize("field", ["gc", "taxon", "accession", "contig", "status"])
+def test_contigs_field_collision_is_400(
+    tiny_database, tiny_metadata, genome, field: str
+) -> None:
+    """A requested field colliding with a fixed /contigs table column is a 400."""
+    with TestClient(
+        create_app(ServerConfig(db_path=tiny_database, meta_path=tiny_metadata))
+    ) as client:
+        sequence = genome[:40_000]
+        payload, kmers, gc = _sketch_contig(sequence, "c1")
+        response = _post_contigs(
+            client,
+            [("c1", payload)],
+            {
+                "contigs": [_contig_spec("c1", sequence, kmers, gc)],
+                "fields": [field],
+            },
+        )
+    assert response.status_code == 400, response.text
+    assert "collide" in response.json()["error"]
+    assert field in response.json()["error"]
 
 
 def test_contigs_endpoint_requires_multipart(endpoint_app: TestClient) -> None:
@@ -1886,7 +1924,7 @@ def test_contigs_request_is_one_job(ani_data: AniData, endpoint_data) -> None:
             {"contigs": specs},
         )
         assert response.status_code == 200, response.text
-        assert [result["name"] for result in response.json()["contigs"]] == [
+        assert list(response.json()["contigs"]) == [
             item["name"] for item in specs
         ]
 

@@ -60,7 +60,7 @@ from .profiling import (
     run_contig_query,
     run_sample,
 )
-from .protocol import PROFILE_PARAM_KEYS, ProfileParams
+from .protocol import API_VERSION, PROFILE_PARAM_KEYS, ProfileParams, table_columns
 from .server_errors import RequestError, answers_errors, check_queue, job_errors
 from .server_middleware import AccessLogMiddleware, BodyLimitMiddleware
 from .server_taxonomy import TAXONOMY_PATHS, taxonomy_routes
@@ -221,6 +221,7 @@ async def _info(request: Request) -> JSONResponse:
         {
             "service": "sylphd",
             "version": __version__,
+            "api_version": API_VERSION,
             **description,
             "pysylph_version": pysylph.__version__,
             "python_version": ".".join(str(part) for part in sys.version_info[:3]),
@@ -447,6 +448,7 @@ async def _assembly(request: Request) -> JSONResponse:
     elapsed_ms = round((time.perf_counter() - start) * 1000.0, 1)
     return JSONResponse(
         {
+            "api_version": API_VERSION,
             "query": result["query"],
             "assignment": result["assignment"],
             "closest": result["closest"],
@@ -454,7 +456,7 @@ async def _assembly(request: Request) -> JSONResponse:
             "params": {"top": top, "min_ani": min_ani},
             "thresholds": dict(INTERPRETATION_THRESHOLDS),
             "elapsed_ms": elapsed_ms,
-            "hits": result["hits"],
+            "table": result["table"],
         }
     )
 
@@ -576,10 +578,7 @@ async def _contigs(request: Request) -> JSONResponse:
     contig_results = [result for result in results if result is not None]
     return JSONResponse(
         {
-            "contigs": contig_results,
-            "summary": per_contig.summarize(contig_results),
-            "caveats": per_contig.caveats(contig_results),
-            "database": _database_summary(state.database),
+            "api_version": API_VERSION,
             "params": {
                 "top": options.top,
                 "min_ani": options.min_ani,
@@ -587,6 +586,11 @@ async def _contigs(request: Request) -> JSONResponse:
                 "consensus_z": options.consensus_z,
                 "fields": list(options.fields),
             },
+            "table": per_contig.contigs_table(contig_results, options.fields),
+            "contigs": per_contig.contigs_map(contig_results),
+            "summary": per_contig.summarize(contig_results),
+            "caveats": per_contig.caveats(contig_results),
+            "database": _database_summary(state.database),
             "thresholds": dict(INTERPRETATION_THRESHOLDS),
             "elapsed_ms": elapsed_ms,
         }
@@ -681,7 +685,36 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
         samples=len(payloads),
         sketch_bytes=sum(len(payload) for payload in payloads),
     )
-    return JSONResponse(samples)
+    completed = [sample for sample in samples if sample is not None]
+    columns = table_columns(mode, params, fields)
+    data: list[list[Any]] = []
+    caveats: list[str] = []
+    taxprof_by_sample: dict[str, Any] = {}
+    for sample in completed:
+        for row in sample.get("rows") or ():
+            data.append(
+                [
+                    row.get("Eff_cov")
+                    if column == "True_cov" and "True_cov" not in row
+                    else row.get(column)
+                    for column in columns
+                ]
+            )
+        for note in sample.get("caveats") or ():
+            if note not in caveats:
+                caveats.append(note)
+        if "taxprof" in sample:
+            taxprof_by_sample[sample["name"]] = sample["taxprof"]
+    document: dict[str, Any] = {
+        "api_version": API_VERSION,
+        "params": params.to_dict(),
+        "samples": [{"name": name} for name in names],
+        "table": {"columns": columns, "data": data},
+        "caveats": caveats,
+    }
+    if taxprof:
+        document["taxprof"] = taxprof_by_sample
+    return JSONResponse(document)
 
 
 

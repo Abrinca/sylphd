@@ -17,7 +17,14 @@ from conftest import CLODF13_FASTA, ECOLI_TWO_STAGE, K12_R1, MIX_SKETCH, O157_SK
 from starlette.testclient import TestClient
 
 from sylphd.metadata import METADATA_COLUMNS
-from sylphd.protocol import ProfileParams, columns_for_mode, format_row, format_value
+from sylphd.protocol import (
+    API_VERSION,
+    ProfileParams,
+    columns_for_mode,
+    format_row,
+    format_value,
+    table_columns,
+)
 from sylphd.server import ServerConfig, create_app
 from sylphd.server_launch import (
     _socket_identity,
@@ -37,6 +44,11 @@ def _post(client: TestClient, endpoint: str, payloads: list[tuple[str, bytes]], 
     body = {"params": json.dumps(params)}
     files = [("sketch", (f"{name}.sylsp", data)) for name, data in payloads]
     return client.post(f"/{endpoint}", data=body, files=files)
+
+
+def _table_rows(doc: dict) -> list[dict]:
+    table = doc["table"]
+    return [dict(zip(table["columns"], values, strict=True)) for values in table["data"]]
 
 
 @pytest.fixture(scope="module")
@@ -112,6 +124,8 @@ class TestBasics:
 
     def test_info(self, client: TestClient) -> None:
         info = client.get("/info").json()
+        assert info["api_version"] == API_VERSION
+        assert isinstance(info["api_version"], int)
         assert info["database"]["name"] == "ecoli.syl2db"
         assert info["database"]["c"] == 200
         assert info["database"]["k"] == 31
@@ -160,11 +174,13 @@ class TestProfileQuery:
         payload = O157_SKETCH.read_bytes()
         response = _post(client, "query", [("o157", payload)], names=["o157"])
         assert response.status_code == 200
-        samples = response.json()
-        assert len(samples) == 1
-        assert samples[0]["name"] == "o157"
-        assert samples[0]["kind"] == "query"
-        rows = samples[0]["rows"]
+        doc = response.json()
+        assert set(doc) == {"api_version", "params", "samples", "table", "caveats"}
+        assert doc["api_version"] == API_VERSION
+        assert doc["samples"] == [{"name": "o157"}]
+        assert doc["caveats"] == []
+        assert doc["table"]["columns"] == table_columns("query")
+        rows = _table_rows(doc)
         assert len(rows) == 3
         assert rows[0]["Sample_file"] == "o157"
         assert rows[0]["Adjusted_ANI"] == pytest.approx(99.79, abs=0.01)
@@ -178,7 +194,12 @@ class TestProfileQuery:
         payload = O157_SKETCH.read_bytes()
         response = _post(client, "profile", [("o157", payload)], names=["o157"])
         assert response.status_code == 200
-        rows = response.json()[0]["rows"]
+        doc = response.json()
+        assert doc["api_version"] == API_VERSION
+        assert doc["samples"] == [{"name": "o157"}]
+        assert doc["table"]["columns"] == table_columns("profile")
+        assert "taxprof" not in doc
+        rows = _table_rows(doc)
         assert len(rows) == 1
         assert rows[0]["Taxonomic_abundance"] == pytest.approx(100.0)
         assert rows[0]["Sequence_abundance"] == pytest.approx(100.0)
@@ -203,8 +224,9 @@ class TestProfileQuery:
                 taxprof=["gtdb"],
             )
         assert response.status_code == 200
-        sample = response.json()[0]
-        payload = sample["taxprof"]["gtdb"]
+        doc = response.json()
+        rows = _table_rows(doc)
+        payload = doc["taxprof"]["clodf13"]["gtdb"]
         assert payload["taxonomies_used"] == ["gtdb"]
         assert payload["columns"][0] == "clade_name"
         assert next(clade["clade_name"] for clade in payload["clades"]) == "d__Bacteria"
@@ -217,13 +239,38 @@ class TestProfileQuery:
         }
         expected = "\n".join(
             taxprof_lines(
-                "clodf13", "gtdb", aggregate_rows(sample["rows"], "gtdb")
+                "clodf13", "gtdb", aggregate_rows(rows, "gtdb")
             )
         ) + "\n"
         assert payload["sylphmpa"] == expected
         assert payload["sylphmpa"].startswith(
             "#SampleID\tclodf13\tTaxonomies_used:['gtdb']\n"
         )
+
+    def test_taxprof_with_empty_fields_keeps_table_columns_clean(
+        self, tiny_database, tiny_metadata
+    ) -> None:
+        """``fields=[]`` hides metadata from ``table`` while ``taxprof`` still aggregates."""
+        app = create_app(
+            ServerConfig(db_path=tiny_database, meta_path=tiny_metadata)
+        )
+        sketch = pysylph.Sketcher(c=200, k=31).sketch_single(
+            "clodf13", _reads(CLODF13_FASTA)
+        ).to_bytes()
+        with TestClient(app) as test_client:
+            response = _post(
+                test_client,
+                "profile",
+                [("clodf13", sketch)],
+                names=["clodf13"],
+                fields=[],
+                taxprof=["gtdb"],
+            )
+        assert response.status_code == 200
+        doc = response.json()
+        assert doc["table"]["columns"] == table_columns("profile", fields=[])
+        assert "gtdb_taxonomy" not in doc["table"]["columns"]
+        assert doc["taxprof"]["clodf13"]["gtdb"]["clades"]
 
     def test_taxprof_of_one_source(self, tiny_database, tiny_metadata) -> None:
         """`tax:<source>` is that source alone, with its ranks; /info lists it."""
@@ -251,7 +298,7 @@ class TestProfileQuery:
                 taxprof=["tax:NoSuchSource"],
             )
         assert response.status_code == 200
-        payload = response.json()[0]["taxprof"][f"tax:{source}"]
+        payload = response.json()["taxprof"]["clodf13"][f"tax:{source}"]
         assert payload["taxonomies_used"] == [source]
         assert payload["sylphmpa"].startswith(f"#SampleID\tclodf13\tTaxonomies_used:['{source}']\n")
         assert payload["ranks"] == ["d", "p", "c"]
@@ -315,7 +362,7 @@ class TestProfileQuery:
             minimum_ani=90.0,
         )
         assert response.status_code == 200
-        params = response.json()[0]["params"]
+        params = response.json()["params"]
         assert params["estimate_read_counts"] is True
         assert params["minimum_ani"] == 90.0
         # defaults are echoed too, so a client need not know them
@@ -325,7 +372,7 @@ class TestProfileQuery:
         assert params["no_adjust"] is False
         # /query accepts the same keys and echoes them as well
         query = _post(client, "query", [("o157", O157_SKETCH.read_bytes())])
-        assert query.json()[0]["params"]["estimate_unknown"] is False
+        assert query.json()["params"]["estimate_unknown"] is False
 
     def test_estimate_read_counts(self, client: TestClient) -> None:
         """``estimate_read_counts`` reports read counts and implies ``True_cov``.
@@ -343,7 +390,10 @@ class TestProfileQuery:
             estimate_read_counts=True,
         )
         assert response.status_code == 200
-        rows = response.json()[0]["rows"]
+        doc = response.json()
+        assert "True_cov" in doc["table"]["columns"]
+        assert "Eff_cov" not in doc["table"]["columns"]
+        rows = _table_rows(doc)
         assert len(rows) == 1
         assert rows[0]["Taxonomic_abundance"] == pytest.approx(100.0)
         assert rows[0]["Sequence_abundance"] == pytest.approx(1149.0)
@@ -359,7 +409,7 @@ class TestProfileQuery:
             client, "query", [("o157", payload)], names=["o157"], minimum_ani=99.0
         )
         assert response.status_code == 200
-        assert len(response.json()[0]["rows"]) == 1
+        assert len(response.json()["table"]["data"]) == 1
 
     def test_multiple_samples_keep_order(self, client: TestClient) -> None:
         o157 = O157_SKETCH.read_bytes()
@@ -368,13 +418,31 @@ class TestProfileQuery:
             client, "query", [("first", o157), ("second", mix)], names=["first", "second"]
         )
         assert response.status_code == 200
-        names = [sample["name"] for sample in response.json()]
-        assert names == ["first", "second"]
-        assert all(sample["rows"] for sample in response.json())
+        doc = response.json()
+        assert doc["samples"] == [{"name": "first"}, {"name": "second"}]
+        rows = _table_rows(doc)
+        seen_samples = list(dict.fromkeys(row["Sample_file"] for row in rows))
+        assert seen_samples == ["first", "second"]
+
+    def test_samples_without_hits_stay_visible(self, client: TestClient) -> None:
+        """A sample with zero hits stays in ``samples`` while ``table.data`` holds only hits."""
+        o157 = O157_SKETCH.read_bytes()
+        empty = pysylph.Sketcher(c=200, k=31).sketch_single("empty", ["ACGT" * 200]).to_bytes()
+        response = _post(
+            client,
+            "profile",
+            [("o157", o157), ("empty", empty)],
+            names=["o157", "empty"],
+        )
+        assert response.status_code == 200
+        doc = response.json()
+        assert doc["samples"] == [{"name": "o157"}, {"name": "empty"}]
+        rows = _table_rows(doc)
+        assert {row["Sample_file"] for row in rows} == {"o157"}
 
     def test_name_falls_back_to_filename(self, client: TestClient) -> None:
         response = _post(client, "query", [("from-file", O157_SKETCH.read_bytes())])
-        assert response.json()[0]["name"] == "from-file"
+        assert response.json()["samples"] == [{"name": "from-file"}]
 
 
 class TestErrors:
@@ -617,7 +685,7 @@ class TestMetadataJoin:
                 joined, "query", [("mix", MIX_SKETCH.read_bytes())], names=["mix"]
             )
             assert response.status_code == 200
-            row = response.json()[0]["rows"][0]
+            row = _table_rows(response.json())[0]
             assert row["accession"] == "GCA_000000001.1"
             assert row["gtdb_taxonomy"] == "d__Bacteria;p__Test;c__Test"
             assert row["genome_size"] == 9957
@@ -632,7 +700,7 @@ class TestMetadataJoin:
                 names=["mix"],
                 fields=["gtdb_taxonomy", "genome_size"],
             )
-            row = response.json()[0]["rows"][0]
+            row = _table_rows(response.json())[0]
             assert set(row) & set(METADATA_COLUMNS) == {"gtdb_taxonomy", "genome_size"}
 
             # unknown column
@@ -682,6 +750,35 @@ class TestFields:
             )
         assert response.status_code == 400
         assert "unknown metadata column" in response.json()["error"]
+
+    @pytest.mark.parametrize(
+        ("endpoint", "field", "extra"),
+        [
+            ("query", "accession", {}),
+            ("query", "Sample_file", {}),
+            ("query", "Lambda_status", {}),
+            ("query", "Eff_cov", {}),
+            ("profile", "accession", {}),
+            ("profile", "Taxonomic_abundance", {}),
+            ("profile", "True_cov", {"estimate_unknown": True}),
+        ],
+    )
+    def test_field_collision_with_fixed_column_is_400(
+        self, tiny_database: Path, tiny_metadata: Path, endpoint: str, field: str, extra: dict
+    ) -> None:
+        """Requesting a field with the same name as a fixed table column is a 400."""
+        app = create_app(ServerConfig(db_path=tiny_database, meta_path=tiny_metadata))
+        with TestClient(app) as test_client:
+            response = _post(
+                test_client,
+                endpoint,
+                [("x", O157_SKETCH.read_bytes())],
+                fields=[field],
+                **extra,
+            )
+        assert response.status_code == 400, response.text
+        assert "collide" in response.json()["error"]
+        assert field in response.json()["error"]
 
 
 class TestFormatting:
@@ -833,10 +930,15 @@ def test_unknown_estimate_of_a_contig_sketch_is_null(tiny_database) -> None:
     with TestClient(app) as test_client:
         response = _post(test_client, "profile", [("clodf13", sketch.to_bytes())], estimate_unknown=True)
     assert response.status_code == 200
-    (row,) = response.json()[0]["rows"]
-    assert row["Eff_cov"] is None
+    doc = response.json()
+    assert "True_cov" in doc["table"]["columns"]
+    assert "Eff_cov" not in doc["table"]["columns"]
+    (row,) = _table_rows(doc)
+    assert row["True_cov"] is None
     assert row["Sequence_abundance"] is None
     assert row["Taxonomic_abundance"] is None
+    assert row["Eff_lambda"] is None
+    assert row["Lambda_status"] == "LOW"
     assert row["Adjusted_ANI"] == pytest.approx(100.0)
     header = columns_for_mode("profile", ProfileParams(estimate_unknown=True))
     cells = dict(zip(header, format_row(row, header).split("\t")))

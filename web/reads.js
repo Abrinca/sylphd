@@ -570,6 +570,7 @@
       if (res.status < 200 || res.status >= 300) {
         return uploadProblem(run, httpProblem(run, res.status, data && data.error, Number.isFinite(res.retryAfter) ? res.retryAfter : null, res.text));
       }
+      data = S.fromProfileDoc(data);
       if (!Array.isArray(data) || !data[0] || !Array.isArray(data[0].rows)) throw new Error('Unexpected response from the server.');
       run.profileMs = performance.now() - t;
       finishRun(run, data, params);

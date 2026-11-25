@@ -34,9 +34,12 @@ from .assembly import (
     DECOMPRESSION_FACTOR,
     classify_hits,
     genome_id,
+    gtdb_species,
     gunzip_limited,
+    hit_lineage,
     is_gzip,
     parse_assembly,
+    species_caveat,
 )
 from .catalog import DATABASES
 from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
@@ -642,6 +645,32 @@ def assembly_params(min_ani: float) -> ProfileParams:
     )
 
 
+#: Leading columns of ``POST /assembly``'s hits table (matching ``cli._write_hits_tsv``).
+ASSEMBLY_TSV_COLUMNS: tuple[str, ...] = (
+    "rank",
+    "ani",
+    "relation",
+    "shared_rank",
+    "accession",
+    "genome_id",
+    "taxon",
+    "gtdb_species",
+    "taxonomy_source",
+    "ncbi_organism_name",
+    "ncbi_taxid",
+)
+
+#: Additional hit columns of ``POST /assembly`` after :data:`ASSEMBLY_TSV_COLUMNS`,
+#: before the remaining metadata columns.
+ASSEMBLY_EXTRA_COLUMNS: tuple[str, ...] = (
+    "containment",
+    "containment_fraction",
+    "ani_species_level",
+    "genome_file",
+    "taxonomy",
+)
+
+
 def _assembly_hits(
     databases: DatabaseSet,
     metadata: MetadataDB | None,
@@ -700,7 +729,20 @@ def _assembly_hits(
         hits.append(row)
 
     assignment, closest = classify_hits(hits)
-    return {"assignment": assignment, "closest": closest, "hits": hits}
+    for hit in hits:
+        hit["taxon"] = hit_lineage(hit).taxon
+        hit["gtdb_species"] = gtdb_species(hit.get("gtdb_taxonomy")) or None
+        hit.setdefault("taxonomy", None)
+        hit.setdefault("taxonomy_source", None)
+
+    lead = [*ASSEMBLY_TSV_COLUMNS, *ASSEMBLY_EXTRA_COLUMNS]
+    seen = set(lead)
+    table_cols = [*lead, *(column for column in columns if column not in seen)]
+    table = {
+        "columns": table_cols,
+        "data": [[hit.get(column) for column in table_cols] for hit in hits],
+    }
+    return {"assignment": assignment, "closest": closest, "table": table}
 
 
 def run_sample(
@@ -721,26 +763,27 @@ def run_sample(
     ``taxprof`` asks for the server-side taxonomic aggregation: the sample
     then carries a ``taxprof`` object with the structured clades and the
     rendered ``.sylphmpa`` text of every requested taxonomy.  The taxonomy
-    columns it needs are added to ``fields`` when the client hid them.
+    columns it needs are fetched internally for aggregation without altering
+    the response table's selected ``fields``.
     """
     sketch, _ = _decode_sketch(databases, name, payload)
 
-    if taxprof:
-        fields = _taxprof_fields(taxprof, metadata, fields)
+    row_fields = _taxprof_fields(taxprof, metadata, fields) if taxprof else fields
     profiler = databases.profiler(params)
     results = _run_profiler(profiler, sketch, mode)
-    rows = result_rows(
+    rows, caveats = _result_rows_with_caveats(
         metadata,
         results,
         name,
         mode=mode,
-        fields=fields,
+        fields=row_fields,
         tax_sources=tax_sources,
     )
     sample: dict[str, Any] = {
         "name": name,
         "kind": mode,
         "rows": rows,
+        "caveats": caveats,
         "params": params.to_dict(),
     }
     if taxprof:
@@ -832,6 +875,52 @@ def run_contig_query(
     }
 
 
+def _result_rows_with_caveats(
+    metadata: MetadataDB | None,
+    results: Sequence[Any],
+    name: str,
+    *,
+    mode: str = "query",
+    fields: Sequence[str] | None = None,
+    tax_sources: Sequence[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Convert ``pysylph`` results into JSON rows and collect species caveats."""
+    if metadata is None:
+        return (
+            [result_row(result, name, mode=mode) for result in results],
+            [],
+        )
+    accessions = [
+        accession_from_genome_name(result.genome_sketch.name) for result in results
+    ]
+    found = metadata.lookup(accession for accession in accessions if accession)
+    resolved = metadata.resolve(
+        [
+            (result.genome_sketch.name, result.genome_sketch.description)
+            for result in results
+        ],
+        sources=tax_sources,
+    )
+    rows: list[dict[str, Any]] = []
+    caveats: list[str] = []
+    for result, accession, taxonomy in zip(results, accessions, resolved):
+        record: dict[str, Any] = dict(found.get(accession, {})) if accession else {}
+        record.update(taxonomy.columns())
+        note = species_caveat(hit_lineage(record))
+        if note and note not in caveats:
+            caveats.append(note)
+        rows.append(
+            result_row(
+                result,
+                name,
+                mode=mode,
+                metadata=record,
+                fields=fields,
+            )
+        )
+    return rows, caveats
+
+
 def result_rows(
     metadata: MetadataDB | None,
     results: Sequence[Any],
@@ -847,34 +936,13 @@ def result_rows(
     one, the hit's metadata record and the taxonomy a sylph-tax source
     resolved for it are merged first, so ``fields`` selects from both.
     """
-    if metadata is None:
-        return [
-            result_row(result, name, mode=mode)
-            for result in results
-        ]
-    accessions = [
-        accession_from_genome_name(result.genome_sketch.name) for result in results
-    ]
-    found = metadata.lookup(accession for accession in accessions if accession)
-    resolved = metadata.resolve(
-        [
-            (result.genome_sketch.name, result.genome_sketch.description)
-            for result in results
-        ],
-        sources=tax_sources,
+    rows, _ = _result_rows_with_caveats(
+        metadata,
+        results,
+        name,
+        mode=mode,
+        fields=fields,
+        tax_sources=tax_sources,
     )
-    rows: list[dict[str, Any]] = []
-    for result, accession, taxonomy in zip(results, accessions, resolved):
-        record: dict[str, Any] = dict(found.get(accession, {})) if accession else {}
-        record.update(taxonomy.columns())
-        rows.append(
-            result_row(
-                result,
-                name,
-                mode=mode,
-                metadata=record,
-                fields=fields,
-            )
-        )
     return rows
 

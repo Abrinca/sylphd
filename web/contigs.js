@@ -1070,7 +1070,7 @@
       const retry = parseInt(res.headers.get('Retry-After'), 10);
       throw httpError(res.status, data && data.error, Number.isFinite(retry) ? retry : null, raw);
     }
-    return data;
+    return S.fromContigsDoc(data);
   }
 
   // Copies the server's answer for a batch into its records.

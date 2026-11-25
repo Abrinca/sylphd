@@ -28,6 +28,10 @@ INFO = {"level": "info", "title": "Licence", "message": "CC BY-SA, [terms](https
 WARNING = {"level": "warning", "title": "Slow", "message": "Expect **delays**."}
 DANGER = {"level": "danger", "title": "Down", "message": "Maintenance tonight."}
 
+INFO_WIRE = {**INFO, "plain": "CC BY-SA, terms (https://example.org)"}
+WARNING_WIRE = {**WARNING, "plain": "Expect delays."}
+DANGER_WIRE = {**DANGER, "plain": "Maintenance tonight."}
+
 
 def _write(path: Path, items) -> Path:
     path.write_text(json.dumps(items), encoding="utf-8")
@@ -54,23 +58,37 @@ def test_empty_without_the_option() -> None:
 def test_valid_file(tmp_path: Path) -> None:
     path = _write(tmp_path / "m.json", [INFO, WARNING, DANGER])
     with TestClient(_app(path)) as client:
-        assert client.get("/messages").json() == {"messages": [INFO, WARNING, DANGER]}
+        assert client.get("/messages").json() == {
+            "messages": [INFO_WIRE, WARNING_WIRE, DANGER_WIRE]
+        }
+
+
+def test_plain_strips_markdown_and_collapses_whitespace(tmp_path: Path) -> None:
+    item = {
+        "level": "info",
+        "title": "Notes",
+        "message": "See [docs](https://example.org/d), [https://a.test](https://a.test),\n**bold**, __under__ and `code`.",
+    }
+    path = _write(tmp_path / "m.json", [item])
+    with TestClient(_app(path)) as client:
+        (got,) = client.get("/messages").json()["messages"]
+    assert got["plain"] == "See docs (https://example.org/d), https://a.test, bold, under and code."
 
 
 def test_reload_on_change_and_keep_last_good(tmp_path: Path, caplog) -> None:
     path = _write(tmp_path / "m.json", [INFO])
     with TestClient(_app(path)) as client:
-        assert client.get("/messages").json()["messages"] == [INFO]
+        assert client.get("/messages").json()["messages"] == [INFO_WIRE]
         _write(path, [INFO, DANGER])
-        assert client.get("/messages").json()["messages"] == [INFO, DANGER]
+        assert client.get("/messages").json()["messages"] == [INFO_WIRE, DANGER_WIRE]
         # invalid at runtime: the last good list stays, one warning however often asked
         path.write_text("{not json", encoding="utf-8")
         with caplog.at_level("WARNING"):
             for _ in range(3):
-                assert client.get("/messages").json()["messages"] == [INFO, DANGER]
+                assert client.get("/messages").json()["messages"] == [INFO_WIRE, DANGER_WIRE]
         assert len([r for r in caplog.records if "keeping the previous" in r.message]) == 1
         path.unlink()
-        assert client.get("/messages").json()["messages"] == [INFO, DANGER]
+        assert client.get("/messages").json()["messages"] == [INFO_WIRE, DANGER_WIRE]
         _write(path, [])
         assert client.get("/messages").json() == {"messages": []}
 
@@ -267,7 +285,7 @@ def test_info_shows_all_messages_and_json_carries_them(tmp_path: Path) -> None:
         assert "[warning] Slow: Expect delays." in text
         assert "[danger] Down: Maintenance tonight." in text
         document = json.loads(_info(socket_path, "--json").stdout)
-        assert document["messages"] == [INFO, WARNING, DANGER]
+        assert document["messages"] == [INFO_WIRE, WARNING_WIRE, DANGER_WIRE]
         assert "usage" in document
     finally:
         process.terminate()

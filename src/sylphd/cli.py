@@ -7,7 +7,6 @@ import csv
 import json
 import logging
 import os
-import re
 import sqlite3
 import sys
 import time
@@ -44,7 +43,7 @@ from .download import (
     taxonomy_table,
 )
 from .limits import load_token_digests
-from .messages import Messages
+from .messages import Messages, plain_text
 from .metadata_build import build_metadata_db, update_metadata_db
 from .ncbitax import Taxonomy
 from .paths import check_socket_path, default_socket_path, parse_tcp
@@ -322,7 +321,7 @@ def _print_messages(messages: list[dict[str, str]]) -> None:
         return
     print("messages:")
     for item in messages:
-        body = " ".join(_plain_text(item["message"]).split())
+        body = item.get("plain") or plain_text(item["message"])
         print(f"  [{item['level']}] {item['title']}: {body}")
 
 
@@ -632,18 +631,6 @@ def _profile_caveats(samples: Sequence[dict[str, Any]]) -> list[str]:
     return notes
 
 
-_MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
-
-
-def _plain_text(markdown: str) -> str:
-    """Markdown as plain text for a terminal: links as ``text (url)``, emphasis dropped."""
-    text = _MARKDOWN_LINK.sub(
-        lambda m: m.group(2) if m.group(1) == m.group(2) else f"{m.group(1)} ({m.group(2)})",
-        markdown,
-    )
-    return re.sub(r"(\*\*|__|`)", "", text)
-
-
 def _note_messages(client: Any, *, quiet: bool = False) -> None:
     """Print the server's warning and danger messages on stderr, once per run.
 
@@ -656,7 +643,7 @@ def _note_messages(client: Any, *, quiet: bool = False) -> None:
         if item["level"] == "info":
             continue
         label = "DANGER" if item["level"] == "danger" else "warning"
-        body = " ".join(_plain_text(item["message"]).split())
+        body = item.get("plain") or plain_text(item["message"])
         print(f"{PROG}: {label}: {item['title']}: {body}", file=sys.stderr)
 
 

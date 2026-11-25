@@ -90,7 +90,8 @@ class TestSketchUpload:
             "input": "sketch",
         }
         assert payload["query"]["sketch_kmers"] > 0
-        (hit,) = payload["hits"]
+        table = payload["table"]
+        (hit,) = [dict(zip(table["columns"], values)) for values in table["data"]]
         assert hit["accession"] == "GCA_000000001.1"
         assert hit["ani"] == pytest.approx(100.0, abs=0.01)
         assert payload["assignment"]["accession"] == "GCA_000000001.1"
@@ -104,7 +105,7 @@ class TestSketchUpload:
         by_sequence = _post_raw(sequences_client, _fasta()).json()
         for payload in (by_sketch, by_sequence):
             payload.pop("elapsed_ms")
-        assert by_sketch["hits"] == by_sequence["hits"]
+        assert by_sketch["table"] == by_sequence["table"]
         assert by_sketch["assignment"] == by_sequence["assignment"]
         assert by_sketch["closest"] == by_sequence["closest"]
         assert by_sketch["database"] == by_sequence["database"]
@@ -130,7 +131,7 @@ class TestSketchUpload:
         ) as seq:
             a = _post_sketch(plain, sketch, min_ani=70, top=20).json()
             b = _post_raw(seq, fastq, min_ani=70, top=20).json()
-        assert a["hits"] == b["hits"] and a["hits"]
+        assert a["table"] == b["table"] and a["table"]["data"]
         assert a["closest"] == b["closest"]
 
     def test_sketch_limit_is_the_general_upload_limit(self, tiny_database, tmp_path) -> None:

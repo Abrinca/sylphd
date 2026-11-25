@@ -476,6 +476,11 @@ def _app(meta_path: Path):
     return TestClient(create_app(ServerConfig(db_path=ECOLI_TWO_STAGE, meta_path=meta_path)))
 
 
+def _table_rows(doc: dict) -> list[dict]:
+    table = doc["table"]
+    return [dict(zip(table["columns"], values)) for values in table["data"]]
+
+
 class TestServerRows:
     def test_info_exposes_the_tax_columns(self, tmp_path: Path) -> None:
         metadata = _source_metadata(tmp_path)
@@ -488,7 +493,8 @@ class TestServerRows:
         with _app(metadata) as client:
             response = _post(client, [("mix", MIX_SKETCH.read_bytes())])
         assert response.status_code == 200, response.text
-        rows = response.json()[0]["rows"]
+        doc = response.json()
+        rows = _table_rows(doc)
         by_genome = {row["Genome_file"]: row for row in rows}
         ecoli = by_genome["test_files/e.coli-K12.fasta.gz"]
         assert ecoli["tax_source"] == "second"
@@ -497,6 +503,7 @@ class TestServerRows:
         assert ecoli["tax_host"] == "Mus musculus"
         # the strain level of the tax profile is the key, not the accession
         assert ecoli["accession"] is None
+        assert doc["caveats"]  # non-GTDB viral source produces a caveat
 
     def test_tax_sources_param_restricts_resolution(self, tmp_path: Path) -> None:
         metadata = _source_metadata(tmp_path)
@@ -507,7 +514,7 @@ class TestServerRows:
                 tax_sources=["first"],
             )
         assert response.status_code == 200, response.text
-        rows = {row["Genome_file"]: row for row in response.json()[0]["rows"]}
+        rows = {row["Genome_file"]: row for row in _table_rows(response.json())}
         ecoli = rows["test_files/e.coli-K12.fasta.gz"]
         assert (ecoli["tax_source"], ecoli["tax_lineage"]) == (
             "first",
@@ -535,15 +542,18 @@ class TestServerRows:
                 fields=["genome_size", *HIT_TAXONOMY_COLUMNS],
             )
         assert response.status_code == 200, response.text
-        assert response.json()[0]["rows"]
+        assert _table_rows(response.json())
 
     def test_fields_none_leaves_the_tax_columns_out(self, tmp_path: Path) -> None:
         metadata = _source_metadata(tmp_path)
         with _app(metadata) as client:
             response = _post(client, [("mix", MIX_SKETCH.read_bytes())], fields=[])
-        row = response.json()[0]["rows"][0]
-        assert "tax_lineage" not in row
-        assert "gtdb_taxonomy" not in row
+        doc = response.json()
+        assert "tax_lineage" not in doc["table"]["columns"]
+        assert "gtdb_taxonomy" not in doc["table"]["columns"]
+        # Server computes caveats from resolved lineages even when fields=[] hides them.
+        assert doc["caveats"]
+        assert any("viruses" in note for note in doc["caveats"])
 
     def test_assembly_hits_carry_the_taxonomy(self, tmp_path: Path) -> None:
         metadata = _source_metadata(tmp_path)
@@ -557,7 +567,9 @@ class TestServerRows:
                 headers={"Content-Type": SKETCH_CONTENT_TYPE},
             )
         assert response.status_code == 200, response.text
-        hits = {hit["genome_file"]: hit for hit in response.json()["hits"]}
+        hits = {hit["genome_file"]: hit for hit in _table_rows(response.json())}
         ecoli = hits["test_files/e.coli-K12.fasta.gz"]
         assert ecoli["tax_lineage"] == "vFAM-9;vOTU-OTHER"
         assert ecoli["tax_host"] == "Mus musculus"
+        assert ecoli["taxon"] == "vOTU-OTHER"
+        assert ecoli["gtdb_species"] is None
