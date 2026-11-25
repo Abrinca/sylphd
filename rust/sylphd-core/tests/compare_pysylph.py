@@ -33,7 +33,7 @@ import pysylph
 from sylphd.sketchcheck import parse_sketch_header
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent.parent
+ROOT = HERE.parent.parent.parent
 
 
 def sorted_bytes(data: bytes) -> bytes:

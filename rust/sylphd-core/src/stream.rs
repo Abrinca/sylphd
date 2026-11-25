@@ -9,12 +9,17 @@
 //! feed the mate that is behind: `unmatched()` says which one.
 
 use std::collections::VecDeque;
+#[cfg(feature = "io")]
+use std::io::Read;
+#[cfg(feature = "io")]
+use std::path::Path;
 
 use sylph::seeding::Seeding;
 
-use crate::gzip::GzipDecoder;
+#[cfg(feature = "io")]
+use crate::io::{open_maybe_gzip, MaybeGzReader};
 use crate::parser::RecordParser;
-use crate::sketch::{SketchBuilder, DEFAULT_FPR};
+use crate::sketch::{default_fpr, SketchBuilder};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Mode {
@@ -51,15 +56,12 @@ pub struct StreamSketcher {
     queue2: VecDeque<Vec<u8>>,
     /// Interleaved mode: first mate waiting for its partner.
     held: Option<Vec<u8>>,
-    /// Gzip decoders, for `push*_gz` (stream 1 / stream 2).
-    gz1: Option<GzipDecoder>,
-    gz2: Option<GzipDecoder>,
 }
 
 impl StreamSketcher {
     pub fn new(c: usize, k: usize, deduplicate: bool) -> Result<Self, String> {
-        // x86_64/pysylph parity is the browser's default (see lib.rs)
-        Self::with_options(c, k, deduplicate, DEFAULT_FPR, Seeding::Avx2Compat)
+        // x86_64/pysylph parity is the default (see `sylph::seeding::Seeding`)
+        Self::with_options(c, k, deduplicate, default_fpr(), Seeding::Avx2Compat)
     }
 
     pub fn with_options(
@@ -77,8 +79,6 @@ impl StreamSketcher {
             queue1: VecDeque::new(),
             queue2: VecDeque::new(),
             held: None,
-            gz1: None,
-            gz2: None,
         })
     }
 
@@ -108,38 +108,6 @@ impl StreamSketcher {
 
     pub fn push_interleaved(&mut self, data: &[u8]) -> Result<(), String> {
         self.push_stream(Stream::Interleaved, data)
-    }
-
-    /// Like `push`, but `data` is a chunk of a (possibly multi-member) gzip file.
-    pub fn push_gz(&mut self, data: &[u8]) -> Result<(), String> {
-        self.push_stream_gz(Stream::Single, data)
-    }
-
-    pub fn push_r1_gz(&mut self, data: &[u8]) -> Result<(), String> {
-        self.push_stream_gz(Stream::R1, data)
-    }
-
-    pub fn push_r2_gz(&mut self, data: &[u8]) -> Result<(), String> {
-        self.push_stream_gz(Stream::R2, data)
-    }
-
-    pub fn push_interleaved_gz(&mut self, data: &[u8]) -> Result<(), String> {
-        self.push_stream_gz(Stream::Interleaved, data)
-    }
-
-    fn push_stream_gz(&mut self, stream: Stream, data: &[u8]) -> Result<(), String> {
-        self.set_mode(stream.mode())?;
-        let mut decoder = self.gz_slot(stream).take().unwrap_or_default();
-        let result = decoder.push(data, &mut |plain| self.push_stream(stream, plain));
-        *self.gz_slot(stream) = Some(decoder);
-        result
-    }
-
-    fn gz_slot(&mut self, stream: Stream) -> &mut Option<GzipDecoder> {
-        match stream {
-            Stream::R2 => &mut self.gz2,
-            _ => &mut self.gz1,
-        }
     }
 
     fn push_stream(&mut self, stream: Stream, data: &[u8]) -> Result<(), String> {
@@ -190,12 +158,6 @@ impl StreamSketcher {
     /// pushed into one sketch, like `sylph sketch a.fq b.fq`. For a
     /// single-file sample calling `finish` alone is enough.
     pub fn end_file(&mut self) -> Result<(), String> {
-        // a file that was pushed as gzip must end on a member boundary
-        for decoder in [&mut self.gz1, &mut self.gz2] {
-            if let Some(mut decoder) = decoder.take() {
-                decoder.finish()?;
-            }
-        }
         match self.mode {
             Mode::Unset => Ok(()),
             Mode::Single => {
@@ -266,5 +228,157 @@ impl StreamSketcher {
             sample_name,
             self.mode != Mode::Single && self.mode != Mode::Unset,
         ))
+    }
+
+    /// Reads one single-end FASTA/FASTQ stream (plain or gzip, multi-member
+    /// supported) to EOF and finishes the file so more files can follow.
+    #[cfg(feature = "io")]
+    pub fn push_reader<R: Read>(&mut self, reader: R) -> Result<(), String> {
+        let mut reader = MaybeGzReader::new(reader).map_err(|e| e.to_string())?;
+        let mut buf = vec![0u8; 128 * 1024];
+        loop {
+            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            self.push(&buf[..n])?;
+        }
+        self.end_file()
+    }
+
+    /// Reads one paired-end `(r1, r2)` lane (plain or gzip, multi-member
+    /// supported) to EOF, feeding whichever mate is behind to keep queued
+    /// mates bounded, then finishes the lane.
+    #[cfg(feature = "io")]
+    pub fn push_paired_readers<R1: Read, R2: Read>(
+        &mut self,
+        r1: R1,
+        r2: R2,
+    ) -> Result<(), String> {
+        let mut r1 = MaybeGzReader::new(r1).map_err(|e| e.to_string())?;
+        let mut r2 = MaybeGzReader::new(r2).map_err(|e| e.to_string())?;
+        let mut buf = vec![0u8; 128 * 1024];
+        let (mut done1, mut done2) = (false, false);
+        while !done1 || !done2 {
+            let read_first = if done1 {
+                false
+            } else if done2 {
+                true
+            } else {
+                self.unmatched() <= 0
+            };
+            if read_first {
+                let n = r1.read(&mut buf).map_err(|e| e.to_string())?;
+                if n == 0 {
+                    done1 = true;
+                } else {
+                    self.push_r1(&buf[..n])?;
+                }
+            } else {
+                let n = r2.read(&mut buf).map_err(|e| e.to_string())?;
+                if n == 0 {
+                    done2 = true;
+                } else {
+                    self.push_r2(&buf[..n])?;
+                }
+            }
+        }
+        self.end_file()
+    }
+
+    /// Reads one interleaved paired-end stream (plain or gzip, multi-member
+    /// supported) to EOF and finishes the file.
+    #[cfg(feature = "io")]
+    pub fn push_interleaved_reader<R: Read>(&mut self, reader: R) -> Result<(), String> {
+        let mut reader = MaybeGzReader::new(reader).map_err(|e| e.to_string())?;
+        let mut buf = vec![0u8; 128 * 1024];
+        loop {
+            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            self.push_interleaved(&buf[..n])?;
+        }
+        self.end_file()
+    }
+
+    /// Reads one single-end file (plain or gzip) into this sketch.
+    #[cfg(feature = "io")]
+    pub fn push_file(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
+        let path = path.as_ref();
+        let reader = open_maybe_gzip(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut buf = vec![0u8; 128 * 1024];
+        let mut reader = reader;
+        loop {
+            let n = reader
+                .read(&mut buf)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            if n == 0 {
+                break;
+            }
+            self.push(&buf[..n])?;
+        }
+        self.end_file()
+    }
+
+    /// Reads one paired-end `(r1, r2)` file pair (plain or gzip) into this sketch.
+    #[cfg(feature = "io")]
+    pub fn push_paired_files(
+        &mut self,
+        r1: impl AsRef<Path>,
+        r2: impl AsRef<Path>,
+    ) -> Result<(), String> {
+        let (r1, r2) = (r1.as_ref(), r2.as_ref());
+        let mut f1 = open_maybe_gzip(r1).map_err(|e| format!("{}: {e}", r1.display()))?;
+        let mut f2 = open_maybe_gzip(r2).map_err(|e| format!("{}: {e}", r2.display()))?;
+        let mut buf = vec![0u8; 128 * 1024];
+        let (mut done1, mut done2) = (false, false);
+        while !done1 || !done2 {
+            let read_first = if done1 {
+                false
+            } else if done2 {
+                true
+            } else {
+                self.unmatched() <= 0
+            };
+            if read_first {
+                let n = f1
+                    .read(&mut buf)
+                    .map_err(|e| format!("{}: {e}", r1.display()))?;
+                if n == 0 {
+                    done1 = true;
+                } else {
+                    self.push_r1(&buf[..n])?;
+                }
+            } else {
+                let n = f2
+                    .read(&mut buf)
+                    .map_err(|e| format!("{}: {e}", r2.display()))?;
+                if n == 0 {
+                    done2 = true;
+                } else {
+                    self.push_r2(&buf[..n])?;
+                }
+            }
+        }
+        self.end_file()
+    }
+
+    /// Reads one interleaved paired-end file (plain or gzip) into this sketch.
+    #[cfg(feature = "io")]
+    pub fn push_interleaved_file(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
+        let path = path.as_ref();
+        let mut reader = open_maybe_gzip(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut buf = vec![0u8; 128 * 1024];
+        loop {
+            let n = reader
+                .read(&mut buf)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            if n == 0 {
+                break;
+            }
+            self.push_interleaved(&buf[..n])?;
+        }
+        self.end_file()
     }
 }

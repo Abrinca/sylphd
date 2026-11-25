@@ -1,10 +1,13 @@
-# sketch-wasm: sylph read sketching in the browser
+# rust: `sylphd-core` and `sylphd-wasm`
 
-Feasibility spike: sketch FASTQ/FASTA(.gz) reads **locally in the browser**
+Cargo workspace for sylphd's client-side Rust crates:
+
+* **`sylphd-core/`** — pure library (no `wasm-bindgen`, no networking): FASTA/FASTQ streaming parser, sylph read and per-contig sketchers (over the `sylph` library core), sample naming and input specification parsing, assembly stats, `.sylsp` header validation, per-contig batch planning, and optional native `std::io::Read` + `flate2` (`io` feature) and `rayon` parallel sketching (`rayon` feature).
+* **`sylphd-wasm/`** — browser WebAssembly bindings (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`) plus the push/pull multi-member gzip decoder used by the web app (`web/`, "Reads" and "Assembly" modes).
+
+Originally built as a feasibility spike (`sketch-wasm/`) to sketch FASTQ/FASTA(.gz) reads **locally in the browser**
 (WebAssembly, in Web Workers) and send only the sketch to the existing sylphd
-`POST /profile` endpoint. The spike is integrated into the production page (`web/`, "Reads" mode, see
-below); the workers in `web/` are the only copy of the pipeline (the separate demo page that the
-spike started with is gone: it duplicated `web/sketching.js` and the workers).
+`POST /profile` endpoint. The workers in `web/` are the only copy of the pipeline.
 
 **Result: it works.** The sketches are byte-identical to pysylph's (after
 sorting the k-mer entries), a 1.55 GB ONT file is sketched in Chromium in **9.7 s** with a
@@ -17,33 +20,36 @@ pure-Rust `zlib-rs` backend, compiled to wasm. Details below.
 
 | Path | |
 |---|---|
-| `src/sketch.rs` | thin adapter over sylph's `ReadSketcher` / `PairedReadSketcher`: progress counters (reads/bases/gc), pysylph's mean read length, deterministic bincode `SequencesSketch` writer |
-| `src/contig.rs` | per-contig mode: each FASTA/FASTQ record as its own sample sketch (`ReadSketcher`), plus its genome-style k-mer count (sylph's `GenomeSketcher`: duplicate removal + 30 bp minimum spacing, as `Sketcher.sketch_genome`) |
-| `src/parser.rs` | streaming FASTQ/FASTA record parser (chunk-safe, CRLF, multi-line FASTA, header/name) |
-| `src/gzip.rs` | push/pull multi-member gzip decoder: own header/trailer/member loop around `flate2`'s raw inflate (`zlib-rs` backend), CRC32 inline, deferred or off |
-| `src/stream.rs` | single / two-stream paired / interleaved front end |
-| `src/lib.rs` | `wasm-bindgen` API (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`) |
-| `tests/` | native equality tests against pysylph, node check of the wasm build, per-contig parity (`contigs_check.mjs`, `contigs_pipeline_check.mjs`), gzip tests, `browser_check.mjs` (`web/sketching.js` and its workers in Firefox/Chromium via playwright-core), `bench_gunzip.mjs`, `make_fixtures.py` |
+| `sylphd-core/src/sketch.rs` | thin adapter over sylph's `ReadSketcher` / `PairedReadSketcher`: progress counters (reads/bases/gc), pysylph's mean read length, deterministic bincode `SequencesSketch` writer |
+| `sylphd-core/src/contig.rs` | per-contig mode: each FASTA/FASTQ record as its own sample sketch (`ReadSketcher`), plus its genome-style k-mer count (sylph's `GenomeSketcher`: duplicate removal + 30 bp minimum spacing, as `Sketcher.sketch_genome`) |
+| `sylphd-core/src/parser.rs` | streaming FASTQ/FASTA record parser (chunk-safe, CRLF, multi-line FASTA, header/name) |
+| `sylphd-core/src/stream.rs` | single / two-stream paired / interleaved front end (push API + native `Read` / `flate2` helpers behind the `io` feature) |
+| `sylphd-core/src/io.rs` | native `MaybeGzReader` (`flate2::read::MultiGzDecoder`, auto-detecting gzip magic) |
+| `sylphd-core/src/input.rs` | sample naming, `--sample` spec parsing, paired-path resolution, assembly stats, contig filtering/skip counters, native/rayon sample sketching |
+| `sylphd-core/src/sketchcheck.rs` | `.sylsp` header validation and `c`/`k` compatibility checks |
+| `sylphd-core/src/batch.rs` | per-contig greedy batch planner (`max_contigs`, `params` JSON budget, `max_upload_mb`) |
+| `sylphd-core/tests/` | native equality tests against pysylph (`pysylph_equality.rs`), stream tests, input/sketchcheck/batch unit tests |
+| `sylphd-wasm/src/gzip.rs` | push/pull multi-member gzip decoder: own header/trailer/member loop around `flate2`'s raw inflate (`zlib-rs` backend), CRC32 inline, deferred or off |
+| `sylphd-wasm/src/lib.rs` | `wasm-bindgen` API (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`) |
+| `sylphd-wasm/tests/` | gzip tests (`gzip.rs`), node check of the wasm build (`node_check.mjs`), per-contig parity (`contigs_check.mjs`, `contigs_pipeline_check.mjs`), `browser_check.mjs` (`web/sketching.js` and its workers in Firefox/Chromium via playwright-core), `bench_gunzip.mjs`, `make_fixtures.py` |
 | `.cargo/config.toml` | builds wasm32 with `+simd128` |
 
 The k-mer seeding, read/duplicate handling and genome-style sketching are not
 reimplemented here: they come from the
 [sylph](https://github.com/bluenote-1577/sylph) library core (MIT OR
-Apache-2.0, (c) 2023 Jim Shaw; fork `MrTomRod/sylph`, branch `sketch-core`),
+Apache-2.0, (c) 2023 Jim Shaw; fork `MrTomRod/sylph`, pinned `rev` from branch `sketch-core`),
 the same kernels pysylph exposes. `sylph` is pulled with
 `default-features = false` (no needletail/rayon/clap/zlib-ng stack) plus
 `approx-dedup` (the seeded cuckoo filter behind pysylph's paired default).
-The rest of the dependencies are `wasm-bindgen` (+`js-sys` for the per-contig
-record objects), `memchr`, `flate2` (+`zlib-rs`) and `getrandom` (a custom,
-non-random backend for the filter's discarded `thread_rng()` seeding). All
-build for `wasm32-unknown-unknown`.
+`getrandom`'s `custom` backend (for the filter's discarded `thread_rng()` seeding) is only
+enabled in `sylphd-wasm` for `wasm32`.
 
 ## Build and run
 
 ```bash
 # once: wasm-bindgen-cli, same version as the crate (Cargo.toml pins `=0.2.129`)
 cargo install wasm-bindgen-cli --version 0.2.129
-./build.sh                      # -> ../web/wasm/ (ES module, --target web; gitignored)
+./sylphd-wasm/build.sh          # -> ../web/wasm/ (ES module, --target web; gitignored)
 python3 -m http.server -d ../web 8799
 # open http://127.0.0.1:8799/ (the page needs a sylphd server for /info)
 ```
@@ -51,9 +57,8 @@ python3 -m http.server -d ../web 8799
 `build.sh` runs `wasm-opt -O3` if it is on `PATH` (not used for the numbers below).
 Any static file server works as long as it serves `.wasm` as `application/wasm`.
 
-The `sylph` dependency is a git dependency on branch `sketch-core`; `build.sh`
-uses `--locked`, so `Cargo.lock` pins that branch's commit. After the branch is
-pushed, regenerate the lock if its tip changed (`cargo update -p sylph`).
+The `sylph` dependency is pinned to a specific commit (`rev`) in `rust/Cargo.toml`, and
+`build.sh` uses `--locked`.
 
 JS API. The whole pipeline is in `web/` (`sketching.js` starts `decompress-worker.js` -> `sketch-worker.js`); the pieces:
 
@@ -122,8 +127,8 @@ caller must not accumulate the records).
 
 ## Equality with pysylph
 
-`cargo test --release` (from `sketch-wasm/`) sketches the inputs with this crate natively
-and runs `tests/compare_pysylph.py` with the sylphd venv (`../.venv`, or `SYLPHD_PYTHON`).
+`cargo test --release` (from `rust/`) sketches the inputs with `sylphd-core` natively
+and runs `sylphd-core/tests/compare_pysylph.py` with the sylphd venv (`../.venv`, or `SYLPHD_PYTHON`).
 Reference sketches come from `pysylph.Sketcher(c, k, deduplicate).sketch_single` /
 `.sketch_paired`, fed with `dnaio` exactly as `sylphd.sketching` does. pysylph's bytes are
 re-emitted with the k-mer entries sorted (this crate always writes them sorted, sylph writes hash-map
@@ -142,10 +147,10 @@ All of these are identical (`SKETCH_WASM_BIG=1` adds a large ONT file, which you
 | the same inputs fed as raw `.gz` through the wasm gzip decoder; `cat a.gz a.gz`; BGZF-like multi-member | |
 | ONT `FAM20866/reads.fastq.gz` (1.55 GB, 254k reads, 2.14 Gbp) | 482,270 k-mers, 5.79 MB, same as pysylph |
 
-`node tests/node_check.mjs [--big]` (after `./build.sh` and `cargo test`) loads the **wasm32
+`node sylphd-wasm/tests/node_check.mjs [--big]` (after `./sylphd-wasm/build.sh` and `cargo test`) loads the **wasm32
 build** in node and compares its output byte for byte with the native sketches (32-bit
 `usize`, hashing etc. all agree, including paired mode).
-`tests/gzip.rs`, and the parser tests in `tests/pysylph_equality.rs`, cover chunk boundaries
+`sylphd-wasm/tests/gzip.rs`, and the parser tests in `sylphd-core/tests/pysylph_equality.rs`, cover chunk boundaries
 (1-byte chunks), CRLF, missing final newline, multi-line FASTA, quality lines starting with `@`,
 corrupt/truncated gzip and a few malformed inputs.
 The sketches also pass `sylphd.sketchcheck` and `SampleSketch.from_bytes`, and the live server
@@ -247,7 +252,7 @@ Chromium 155 (Playwright), Linux, 16 cores, test page served locally, server =
 `FAM20866/reads.fastq.gz`: 1,550,645,339 bytes gzip, 4,295,587,662 bytes of FASTQ, 254,233
 reads, 2.14 Gbp, mean read length 8.4 kb. Wasm built with `simd128`.
 
-**Gunzip alone** (worker, nothing else running, with the former `bench.html`; node: `tests/bench_gunzip.mjs`):
+**Gunzip alone** (worker, nothing else running, with the former `bench.html`; node: `sylphd-wasm/tests/bench_gunzip.mjs`):
 
 | | time | compressed MB/s | decompressed MB/s |
 |---|---|---|---|
@@ -294,7 +299,7 @@ pysylph's own sketch (checked with `curl`). k12 paired gave one hit (100 %, ANI 
 Gzip flavours checked in Chromium **and** Firefox through the pipeline (SHA-256 of the k-mer
 entries equal to the native `sim_single` sketch): single-member gzip, real BGZF (64 KiB blocks +
 EOF block, 24.9 MB), three `cat`ed gzips, plain text; k12 paired and k12 x2 / multi-file single
-(`tests/browser_check.mjs`, fixtures from `tests/make_fixtures.py`).
+(`sylphd-wasm/tests/browser_check.mjs`, fixtures from `sylphd-wasm/tests/make_fixtures.py`).
 
 Memory: peak RSS of the biggest Chromium process was ~0.8-1.1 GB in the previous sequential runs
 (it includes the browser's stream buffers and file cache). Not re-measured for the pipeline;
@@ -339,11 +344,11 @@ chunk into wasm memory (1.5 GB, ~0.1-0.2 s); below the 0.5 s threshold.
 Done on branch `wasm-sketch`: the web page has a **Reads** mode (`web/reads.js`; it charts the
 server's `taxprof` clades) next to the **Assembly** mode.
 
-* Build: `./build.sh ../web/wasm` writes the module and glue into `web/wasm/` (gitignored).
+* Build: `./sylphd-wasm/build.sh` writes the module and glue into `web/wasm/` (gitignored).
   `scripts/preview-pages.sh` and `.github/workflows/pages.yml` run it (Rust toolchain and
   `wasm-bindgen-cli` pinned there; the CLI is the prebuilt release binary, checked by sha256).
 * One copy of the workers: `web/decompress-worker.js` / `web/sketch-worker.js` (module path
-  `./wasm/`; the sketch worker also supports interleaved input). `tests/browser_check.mjs` runs
+  `./wasm/`; the sketch worker also supports interleaved input). `sylphd-wasm/tests/browser_check.mjs` runs
   them through `web/sketching.js`.
 * `c`/`k` come from `/info`; paired detection, memory guard (warn at 1.5 GB, abort at 3.6 GB of
   wasm memory), cancellation, `429`/`503`/network retry with the sketch kept in memory and the

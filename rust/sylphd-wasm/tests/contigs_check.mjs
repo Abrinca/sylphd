@@ -2,7 +2,7 @@
 // wasm module's per-contig API and prints the records as JSON, for the Python
 // parity test (tests/test_web_contigs_js.py).
 //
-//   node sketch-wasm/tests/contigs_check.mjs FILE C K MIN_LENGTH CHUNK plain|gz [scalar]
+//   node rust/sylphd-wasm/tests/contigs_check.mjs FILE C K MIN_LENGTH CHUNK plain|gz [scalar]
 //
 // Output: {"records":[{index,name,length,gcCount,contigKmers,sketch}],...}
 // where sketch is base64 or null, plus counters that check the streaming API
@@ -10,10 +10,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { initSync, WasmContigSketcher } from "../../web/wasm/sylph_sketch.js";
+import { initSync, WasmContigSketcher } from "../../../web/wasm/sylph_sketch.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-initSync({ module: readFileSync(path.join(here, "../../web/wasm/sylph_sketch_bg.wasm")) });
+initSync({ module: readFileSync(path.join(here, "../../../web/wasm/sylph_sketch_bg.wasm")) });
 
 const [file, c, k, minLength, chunk, mode = "plain", scalar = "0"] = process.argv.slice(2);
 const data = readFileSync(file);

@@ -1,6 +1,6 @@
 //! Small behaviours of `StreamSketcher` that need no fixture files.
 
-use sylph_sketch_wasm::stream::StreamSketcher;
+use sylphd_core::stream::StreamSketcher;
 
 fn fastq(reads: usize, len: usize) -> Vec<u8> {
     let (seq, qual) = ("ACGT".repeat(len)[..len].to_string(), "I".repeat(len));

@@ -1,8 +1,8 @@
 // Browser check of the production pipeline (web/sketching.js and its workers, Firefox or Chromium)
 // with playwright-core.
-//   ./build.sh && cargo test --release && python3 tests/make_fixtures.py   (in sketch-wasm/)
-//   python3 -m http.server -d ../web 8799 &                                (in sketch-wasm/)
-//   PLAYWRIGHT_DIR=/path/to/node_modules node tests/browser_check.mjs [firefox|chromium] [--big | --only-big]
+//   ./sylphd-wasm/build.sh && cargo test --release && python3 sylphd-wasm/tests/make_fixtures.py  (in rust/)
+//   python3 -m http.server -d ../web 8799 &                                                        (in rust/)
+//   PLAYWRIGHT_DIR=/path/to/node_modules node sylphd-wasm/tests/browser_check.mjs [firefox|chromium] [--big | --only-big]
 // Compares the SHA-256 of the k-mer entries of every sketch with the native sketch that
 // `cargo test` wrote to target/equality, and expects the corrupt gzip fixtures to fail.
 // Exits non-zero on a mismatch, an error or a timeout. Needs the fixtures in scratch/wasm,
@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const require = createRequire((process.env.PLAYWRIGHT_DIR || '.') + '/');
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const R = (f) => path.join(root, f);
 const kind = process.argv.includes('chromium') ? 'chromium' : 'firefox';
 const { [kind]: browserType } = require('playwright-core');
@@ -74,7 +74,7 @@ for (const [name, files, paired, native] of runs) {
     continue;
   }
   if (r.error) { fail(r.error); continue; }
-  const want = digest(readFileSync(R(`sketch-wasm/target/equality/${native}.sylsp`)));
+  const want = digest(readFileSync(R(`rust/target/equality/${native}.sylsp`)));
   console.log(r.sha === want ? 'OK  ' : 'FAIL', name, JSON.stringify(r));
   if (r.sha !== want) { failed++; console.log('     expected', want, `(${native})`); }
 }

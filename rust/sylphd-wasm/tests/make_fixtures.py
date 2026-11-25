@@ -9,7 +9,7 @@ import struct
 import zlib
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / "scratch" / "wasm"
 OUT.mkdir(parents=True, exist_ok=True)
 k12 = (ROOT / "tests/data/k12.R1.fq.gz").read_bytes()
@@ -37,7 +37,7 @@ def bgzf(data: bytes) -> bytes:
 
 
 (OUT / "k12_bgzf_like.fq.gz").write_bytes(bgzf(k12_plain))
-sim = ROOT / "sketch-wasm/target/synth/sim_R1.fq"
+sim = ROOT / "rust/target/synth/sim_R1.fq"
 if sim.exists():
     data = sim.read_bytes()
     (OUT / "sim_R1.bgzf.fq.gz").write_bytes(bgzf(data))

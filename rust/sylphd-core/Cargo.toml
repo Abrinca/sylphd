@@ -1,0 +1,24 @@
+[package]
+name = "sylphd-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Core client library for sylphd: FASTA/FASTQ parsing, sylph sketching, input handling, .sylsp validation and per-contig batch planning."
+
+[features]
+default = ["approx-dedup", "io"]
+# Seeded cuckoo-filter paired-read dedup matching pysylph's `sketch_paired` default.
+approx-dedup = ["sylph/approx-dedup"]
+# Native `std::io::Read` and file helpers with `flate2` gzip auto-detection.
+io = ["dep:flate2"]
+# Parallel multi-sample sketching (native only).
+rayon = ["io", "dep:rayon"]
+
+[dependencies]
+sylph = { workspace = true }
+memchr = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+flate2 = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }

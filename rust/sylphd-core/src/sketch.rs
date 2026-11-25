@@ -20,10 +20,38 @@ use sylph::types::Kmer;
 
 pub use sylph::constants::DEFAULT_FPR;
 
-pub(crate) fn count_gc(seq: &[u8]) -> u64 {
+/// Default paired-read dedup false positive rate for this build (`DEFAULT_FPR`
+/// when `approx-dedup` is enabled, `0.0` for exact dedup otherwise).
+pub const fn default_fpr() -> f64 {
+    #[cfg(feature = "approx-dedup")]
+    {
+        DEFAULT_FPR
+    }
+    #[cfg(not(feature = "approx-dedup"))]
+    {
+        0.0
+    }
+}
+
+/// Counts G and C bases (either case) in a DNA sequence.
+pub fn count_gc(seq: &[u8]) -> u64 {
     seq.iter()
         .filter(|b| matches!(b, b'G' | b'C' | b'g' | b'c'))
         .count() as u64
+}
+
+/// GC percentage rounded to 2 decimal places (ties to even, matching Python's
+/// `round(100.0 * gc / length, 2)`). Returns `0.0` when `length == 0`.
+pub fn gc_percent(gc_count: u64, length: u64) -> f64 {
+    if length == 0 {
+        return 0.0;
+    }
+    round_ties_even_2(100.0 * gc_count as f64 / length as f64)
+}
+
+/// Round to 2 decimal places, ties to even (matching Python's `round(x, 2)`).
+pub(crate) fn round_ties_even_2(x: f64) -> f64 {
+    (x * 100.0).round_ties_even() / 100.0
 }
 
 /// Accumulator behind both `sketch_single` and `sketch_paired`.
@@ -64,6 +92,13 @@ impl SketchBuilder {
         }
         if !(0.0..1.0).contains(&fpr) {
             return Err(format!("invalid fpr: {fpr}"));
+        }
+        #[cfg(not(feature = "approx-dedup"))]
+        if fpr != 0.0 {
+            return Err(
+                "approximate read deduplication (fpr != 0) requires the `approx-dedup` feature"
+                    .into(),
+            );
         }
         Ok(Self {
             c,
@@ -122,8 +157,6 @@ impl SketchBuilder {
         let sketcher = match self.paired.as_mut() {
             Some(sketcher) => sketcher,
             None => {
-                // `approx-dedup` is always enabled for this crate, so the
-                // constructor cannot reject the configuration.
                 let paired = PairedReadSketcher::new(
                     self.c,
                     self.k,
@@ -131,7 +164,7 @@ impl SketchBuilder {
                     self.fpr,
                     self.seeding,
                 )
-                .expect("approximate dedup is enabled in this build");
+                .expect("fpr was validated in SketchBuilder::new");
                 self.paired.insert(paired)
             }
         };

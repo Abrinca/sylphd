@@ -19,13 +19,18 @@
 //! `sketch_genome_individual`).
 
 use std::collections::VecDeque;
+#[cfg(feature = "io")]
+use std::io::Read;
+#[cfg(feature = "io")]
+use std::path::Path;
 
 use sylph::seeding::Seeding;
 use sylph::sketchers::GenomeSketcher;
 
-use crate::gzip::GzipDecoder;
+#[cfg(feature = "io")]
+use crate::io::{open_maybe_gzip, MaybeGzReader};
 use crate::parser::{record_name, RecordParser};
-use crate::sketch::{count_gc, SketchBuilder, DEFAULT_FPR};
+use crate::sketch::{count_gc, default_fpr, gc_percent, SketchBuilder};
 
 /// pysylph's `Sketcher` (and sylph's CLI default) minimum spacing.
 pub const DEFAULT_MIN_SPACING: usize = 30;
@@ -77,8 +82,22 @@ pub struct ContigRecord {
     pub sketch: Option<Vec<u8>>,
 }
 
-/// Streaming per-contig sketcher: FASTQ/FASTA (plain or gzip), one record at
-/// a time, bounded memory (the largest record plus the queued output).
+impl ContigRecord {
+    /// GC percentage rounded to 2 decimal places (`0.0` for empty records).
+    pub fn gc_percent(&self) -> f64 {
+        gc_percent(self.gc_count, self.length)
+    }
+
+    /// Number of k-mers in the sample sketch (`None` when not sketched).
+    pub fn sketch_kmers(&self) -> Option<u64> {
+        let bytes = self.sketch.as_deref()?;
+        let prefix: [u8; 8] = bytes.get(..8)?.try_into().ok()?;
+        Some(u64::from_le_bytes(prefix))
+    }
+}
+
+/// Streaming per-contig sketcher: FASTQ/FASTA, one record at a time, bounded
+/// memory (the largest record plus the queued output).
 ///
 /// ```text
 /// push(chunk); while let Some(record) = take_next() { ... }   // per chunk
@@ -95,7 +114,6 @@ pub struct ContigSketcher {
     /// Longest single record in bases (`MAX_RECORD_LENGTH` by default).
     max_record_length: usize,
     parser: RecordParser,
-    gz: Option<GzipDecoder>,
     queue: VecDeque<ContigRecord>,
     /// Records seen so far (1-based `index` of the last one).
     pub seen: u64,
@@ -138,7 +156,7 @@ impl ContigSketcher {
         max_record_length: usize,
     ) -> Result<Self, String> {
         // validate through the same constructor the read sketcher uses
-        SketchBuilder::new(c, k, true, DEFAULT_FPR, seeding)?;
+        SketchBuilder::new(c, k, true, default_fpr(), seeding)?;
         Ok(Self {
             c,
             k,
@@ -148,7 +166,6 @@ impl ContigSketcher {
             max_records,
             max_record_length,
             parser: RecordParser::new().with_max_sequence(max_record_length),
-            gz: None,
             queue: VecDeque::new(),
             seen: 0,
             sketched: 0,
@@ -176,21 +193,9 @@ impl ContigSketcher {
         }
     }
 
-    /// Feeds raw chunks of a (possibly multi-member) gzip file.
-    pub fn push_gz(&mut self, data: &[u8]) -> Result<(), String> {
-        let mut decoder = self.gz.take().unwrap_or_default();
-        let result = decoder.push(data, &mut |plain| self.push(plain));
-        self.gz = Some(decoder);
-        result
-    }
-
-    /// Ends the current file (all streams): flushes a last line without
-    /// newline, a pending FASTA record, and checks that the gzip data is
-    /// complete.
+    /// Ends the current file: flushes a last line without newline and any
+    /// pending FASTA record.
     pub fn end_file(&mut self) -> Result<(), String> {
-        if let Some(mut decoder) = self.gz.take() {
-            decoder.finish()?;
-        }
         let mut parser = std::mem::take(&mut self.parser);
         let mut error = None;
         let result = parser.finish(&mut |seq, header| {
@@ -206,6 +211,72 @@ impl ContigSketcher {
             Some(e) => Err(e),
             None => Ok(()),
         }
+    }
+
+    /// Streams records from a `Read` source (plain or gzip, multi-member
+    /// supported), invoking `on_record` as each contig finishes so memory
+    /// stays bounded by one record.
+    #[cfg(feature = "io")]
+    pub fn push_reader<R, E>(
+        &mut self,
+        reader: R,
+        mut on_record: impl FnMut(ContigRecord) -> Result<(), E>,
+    ) -> Result<(), E>
+    where
+        R: Read,
+        E: From<String>,
+    {
+        let mut reader = MaybeGzReader::new(reader).map_err(|e| E::from(e.to_string()))?;
+        let mut buf = vec![0u8; 128 * 1024];
+        loop {
+            let n = reader.read(&mut buf).map_err(|e| E::from(e.to_string()))?;
+            if n == 0 {
+                break;
+            }
+            self.push(&buf[..n]).map_err(E::from)?;
+            while let Some(record) = self.take_next() {
+                on_record(record)?;
+            }
+        }
+        self.end_file().map_err(E::from)?;
+        while let Some(record) = self.take_next() {
+            on_record(record)?;
+        }
+        Ok(())
+    }
+
+    /// Streams records from a FASTA/FASTQ file (plain or gzip), invoking
+    /// `on_record` as each contig finishes.
+    #[cfg(feature = "io")]
+    pub fn push_file<E>(
+        &mut self,
+        path: impl AsRef<Path>,
+        mut on_record: impl FnMut(ContigRecord) -> Result<(), E>,
+    ) -> Result<(), E>
+    where
+        E: From<String>,
+    {
+        let path = path.as_ref();
+        let mut reader = open_maybe_gzip(path)
+            .map_err(|e| E::from(format!("{}: {e}", path.display())))?;
+        let mut buf = vec![0u8; 128 * 1024];
+        loop {
+            let n = reader
+                .read(&mut buf)
+                .map_err(|e| E::from(format!("{}: {e}", path.display())))?;
+            if n == 0 {
+                break;
+            }
+            self.push(&buf[..n]).map_err(E::from)?;
+            while let Some(record) = self.take_next() {
+                on_record(record)?;
+            }
+        }
+        self.end_file().map_err(E::from)?;
+        while let Some(record) = self.take_next() {
+            on_record(record)?;
+        }
+        Ok(())
     }
 
     fn add_record(&mut self, header: &[u8], seq: &[u8]) -> Result<(), String> {
@@ -230,7 +301,8 @@ impl ContigSketcher {
         let name = record_name(header);
         let gc_count = count_gc(seq);
         let (sketch, contig_kmers) = if length > 0 && length >= self.min_length {
-            let mut builder = SketchBuilder::new(self.c, self.k, true, DEFAULT_FPR, self.seeding)?;
+            let mut builder =
+                SketchBuilder::new(self.c, self.k, true, default_fpr(), self.seeding)?;
             builder.add_single(seq);
             let kmers = genome_kmers(self.seeding, seq, self.c, self.k, self.min_spacing);
             self.sketched += 1;
@@ -358,7 +430,7 @@ mod tests {
         let tandem: Vec<u8> = unit.iter().copied().cycle().take(3000).collect();
         assert!(genome_kmers(Seeding::Avx2Compat, &tandem, 1, 31, 30).is_empty());
         // ... while the sample sketch keeps them
-        let mut builder = SketchBuilder::new(1, 31, true, DEFAULT_FPR, Seeding::Avx2Compat).unwrap();
+        let mut builder = SketchBuilder::new(1, 31, true, default_fpr(), Seeding::Avx2Compat).unwrap();
         builder.add_single(&tandem);
         assert!(builder.kmers() > 0);
     }

@@ -3,7 +3,7 @@
 // node:worker_threads instead of Web Workers, and `fetch` is shimmed for the
 // local wasm file. Prints the delivered contigs and the done stats as JSON.
 //
-//   node sketch-wasm/tests/contigs_pipeline_check.mjs FILE C K MIN_LENGTH
+//   node rust/sylphd-wasm/tests/contigs_pipeline_check.mjs FILE C K MIN_LENGTH
 //
 // Used by tests/test_web_contigs_js.py; it checks the worker protocol
 // (batching, ack/backpressure, gzip in the decompress worker) as well as the
@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const web = path.resolve(here, "../../web");
+const web = path.resolve(here, "../../../web");
 const wasm = path.join(web, "wasm/sylph_sketch_bg.wasm");
 
 // A Worker that executes the real worker module in a node worker thread.

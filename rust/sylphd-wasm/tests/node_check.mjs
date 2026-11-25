@@ -2,18 +2,18 @@
 // byte with the ones written by the native `cargo test` (target/equality/*.sylsp),
 // i.e. checks that wasm32 and x86_64 agree (32-bit FxHash, usize, ...).
 //
-//   ./build.sh && cargo test --release && node tests/node_check.mjs [--big]
+//   ./sylphd-wasm/build.sh && cargo test --release && node sylphd-wasm/tests/node_check.mjs [--big]
 import { readFileSync, createReadStream } from "node:fs";
 import { gunzipSync, createGunzip } from "node:zlib";
-import { initSync, WasmSketcher, WasmGunzip, WasmCrc } from "../../web/wasm/sylph_sketch.js";
+import { initSync, WasmSketcher, WasmGunzip, WasmCrc } from "../../../web/wasm/sylph_sketch.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, "../..");
-initSync({ module: readFileSync(path.join(here, "../../web/wasm/sylph_sketch_bg.wasm")) });
+const root = path.resolve(here, "../../..");
+initSync({ module: readFileSync(path.join(here, "../../../web/wasm/sylph_sketch_bg.wasm")) });
 
-const cases = JSON.parse(readFileSync(path.join(here, "cases.json"), "utf8"));
+const cases = JSON.parse(readFileSync(path.join(here, "../../sylphd-core/tests/cases.json"), "utf8"));
 const abs = (f) => (path.isAbsolute(f) ? f : path.join(root, f));
 const load = (f) => { const b = readFileSync(abs(f)); return b[0] === 0x1f && b[1] === 0x8b ? gunzipSync(b) : b; };
 let failed = 0;
@@ -26,7 +26,7 @@ function chunks(buf, size) {
 
 for (const c of cases) {
   if (c.big && !process.argv.includes("--big")) continue;
-  const expected = readFileSync(path.join(here, "../target/equality", c.name + ".sylsp"));
+  const expected = readFileSync(path.join(here, "../../target/equality", c.name + ".sylsp"));
   const s = new WasmSketcher(c.c ?? 200, c.k ?? 31, c.deduplicate ?? true);
   const t0 = performance.now();
   // raw_gz cases go through WasmGunzip (the browser worker's path) instead of
