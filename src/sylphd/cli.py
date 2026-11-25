@@ -1,29 +1,28 @@
-"""Command line interface: ``sylphd {serve,info,profile,query,download,setup}``."""
+"""Python commands of ``sylphd``: ``serve``, ``setup``, ``download``, ``taxdb``, ``taxonomy``.
+
+The query commands (``profile``, ``query``, ``assembly``, ``info``, ``render``) are not
+here: ``sylphd.entry`` forwards them to the native ``sylphd-client``.
+"""
 
 from __future__ import annotations
 
 import argparse
 import csv
-import json
 import logging
 import os
 import sqlite3
 import sys
 import time
 import warnings
-from collections.abc import Iterator, Sequence
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import httpx
 
-from . import parity, per_contig_client, taxmatrix
+from . import parity, taxmatrix
 from .about import About, check_name
-from .assembly import gtdb_species, hit_lineage, species_caveat
 from .cli_parser import PROG, build_parser
 from .client import ClientError, TokenWarning, connect
 from .download import (
@@ -43,34 +42,18 @@ from .download import (
     taxonomy_table,
 )
 from .limits import load_token_digests
-from .messages import Messages, plain_text
+from .messages import Messages
 from .metadata_build import build_metadata_db, update_metadata_db
 from .ncbitax import Taxonomy
 from .paths import check_socket_path, default_socket_path, parse_tcp
-from .profiling import DatabaseSet, DatabaseSpec
-from .protocol import ProfileParams, ProtocolError, rows_to_tsv_lines
-from .sketching import (
-    InputError,
-    SampleInput,
-    build_sample_inputs,
-    check_sketch,
-    sample_name_from_path,
-    sketch_assembly,
-    sketch_sample,
-)
+from .protocol import ProfileParams, ProtocolError
+from .samples import InputError
 from .taxdb import build_taxdb
-from .taxonomy import (
-    TaxonomyError,
-    default_taxonomies,
-    is_sylphtax,
-    parse_taxonomies,
-    resolve_taxonomy_columns,
-    write_outputs,
-)
 from .taxonomy_sources import TaxonomySource
 from .usage import Usage
 
 if TYPE_CHECKING:
+    from .profiling import DatabaseSet, DatabaseSpec
     from .server import ServerConfig
 
 log = logging.getLogger("sylphd")
@@ -82,42 +65,6 @@ log = logging.getLogger("sylphd")
 
 def _print_error(message: str) -> None:
     print(f"{PROG}: error: {message}", file=sys.stderr)
-
-
-def _check_writable_dir(directory: Path) -> None:
-    if not directory.is_dir():
-        raise OSError(f"cannot write into {directory}: not a directory")
-    if not os.access(directory, os.W_OK | os.X_OK):
-        raise OSError(f"cannot write into {directory}: permission denied")
-
-
-def _check_output_file(path: str | None) -> None:
-    """Fail on an unwritable ``-o`` before the expensive work, not after it."""
-    if path is None or path == "-":
-        return
-    if os.path.isdir(path):
-        raise OSError(f"cannot write {path}: is a directory")
-    _check_writable_dir(Path(path).parent)
-
-
-def _check_output_prefix(prefix: str | None) -> None:
-    """Same for a ``--taxprof`` prefix (see ``write_outputs``)."""
-    if prefix is not None:
-        directory = Path(prefix) if os.path.isdir(prefix) else Path(prefix + "x").parent
-        _check_writable_dir(directory)
-
-
-@contextmanager
-def _open_output(path: str | None) -> Iterator[Any]:
-    """stdout for ``None``/``-``, else the file ``path``; flushed on exit."""
-    if path is None or path == "-":
-        try:
-            yield sys.stdout
-        finally:
-            sys.stdout.flush()
-    else:
-        with open(path, "w", encoding="utf-8", newline="\n") as handle:
-            yield handle
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +84,10 @@ def _configure_logging(level: str) -> None:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    # The server needs starlette and uvicorn (the server extra). Imported here so
-    # that client commands work with the client extra alone.
+    # The server needs starlette, uvicorn and pysylph (the server extra). Imported
+    # here so that the other Python commands work without them and entry.py can
+    # turn a missing package into a friendly message.
+    from .profiling import DatabaseSet
     from .server import ServerConfig, create_app
     from .server_launch import serve
 
@@ -231,6 +180,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def parse_db_specs(values: Sequence[str]) -> tuple[DatabaseSpec, ...]:
     """Turn the repeated ``--db`` values into specs, rejecting duplicate names."""
+    from .profiling import DatabaseSpec
+
     specs = tuple(DatabaseSpec.parse(value) for value in values)
     if not specs:
         raise ValueError("at least one --db is required")
@@ -294,360 +245,8 @@ def _log_startup(
 
 
 # ---------------------------------------------------------------------------
-# info
+# taxonomy client plumbing (the query commands live in sylphd-client)
 # ---------------------------------------------------------------------------
-
-
-def cmd_info(args: argparse.Namespace) -> int:
-    with _client_from_args(args) as client:
-        info = client.info()
-        # Every level, so that agents and scripts can show them before analysing.
-        messages = client.messages()
-    if args.json:
-        json.dump({**info, "messages": messages}, sys.stdout, indent=2, sort_keys=False)
-        sys.stdout.write("\n")
-        return 0
-    _print_database(info)
-    _print_metadata(info.get("metadata"))
-    _print_limits(info)
-    _print_usage(info["usage"])
-    _print_messages(messages)
-    return 0
-
-
-def _print_messages(messages: list[dict[str, str]]) -> None:
-    """The operator's messages, all levels, as plain text (``info`` only)."""
-    if not messages:
-        return
-    print("messages:")
-    for item in messages:
-        body = item.get("plain") or plain_text(item["message"])
-        print(f"  [{item['level']}] {item['title']}: {body}")
-
-
-def _print_usage(usage: dict[str, Any]) -> None:
-    if not usage["enabled"]:
-        print("usage statistics: off")
-        return
-    print(
-        f"usage statistics: on (policy {usage['policy']}, "
-        f"{usage['window_minutes']}-minute windows, public at /usage)"
-    )
-
-
-def _print_database(info: dict[str, Any]) -> None:
-    database = info.get("database", {})
-    print(f"database: {database.get('name')}")
-    print(f"  size: {format_size(int(database.get('size') or 0))}")
-    print(f"  genomes: {database.get('genomes')}")
-    print(
-        "  c: {c}  k: {k}  screen_c: {screen_c}  two-stage: {two_stage}".format(
-            c=database.get("c"),
-            k=database.get("k"),
-            screen_c=database.get("screen_c") if database.get("screen_c") is not None else "-",
-            two_stage="yes" if database.get("two_stage") else "no",
-        )
-    )
-    print(f"  sha256: {database.get('sha256') or '-'}")
-
-    databases = info.get("databases") or []
-    if len(databases) > 1:
-        print(f"databases: {len(databases)}")
-        for entry in databases:
-            kind = "two-stage" if entry.get("two_stage") else "plain"
-            print(
-                "  {name}: {file} ({kind}, c={c}, k={k}, {genomes} genomes)".format(
-                    name=entry.get("name"),
-                    file=entry.get("file"),
-                    kind=kind,
-                    c=entry.get("c"),
-                    k=entry.get("k"),
-                    genomes=entry.get("genomes"),
-                )
-            )
-
-
-def _print_metadata(metadata: dict[str, Any] | None) -> None:
-    if metadata is None:
-        print("metadata: none")
-        return
-    print(
-        f"metadata: {metadata.get('file')} "
-        f"(release {metadata.get('release') or '?'}, "
-        f"{metadata.get('rows')} rows, built {metadata.get('built') or '?'})"
-    )
-    print(f"  columns: {len(metadata.get('columns') or [])}")
-    sources = metadata.get("taxonomy_sources") or []
-    if sources:
-        print(f"  taxonomy sources: {len(sources)}")
-        for source in sources:
-            keys = source.get("keys")
-            details = [f"{keys:,} keys" if keys is not None else "key count unknown"]
-            if source.get("kind") == "metadata":
-                details.append("virtual, from -m")
-            if source.get("has_host"):
-                details.append("with hosts")
-            if source.get("md5"):
-                details.append(f"md5 {source['md5']}")
-            ncbi = source.get("ncbi")
-            if ncbi:
-                details.append(f"NCBI: {_ncbi_counts_text(ncbi)}")
-            nearest = source.get("ncbi_nearest")
-            if nearest:
-                details.append(_nearest_counts_text(nearest))
-            print(f"    {source.get('name')}: " + ", ".join(details))
-    overlaps = metadata.get("taxonomy_overlaps") or []
-    if overlaps:
-        print(f"  taxonomy overlaps: {len(overlaps)}")
-        for pair in overlaps:
-            names = " and ".join(str(name) for name in pair.get("sources") or ())
-            examples = pair.get("examples") or []
-            details = [f"{int(pair.get('keys') or 0):,} shared keys"]
-            if examples:
-                details.append("examples: " + ", ".join(str(key) for key in examples))
-            details.append("the source imported later wins")
-            print(f"    {names}: " + "; ".join(details))
-
-
-def _print_limits(info: dict[str, Any]) -> None:
-    limits = info.get("limits", {})
-    print(
-        f"versions: sylphd {info.get('version')}, pysylph {info.get('pysylph_version')}, "
-        f"python {info.get('python_version')}"
-    )
-    print(
-        f"limits: max-jobs {limits.get('max_jobs')}, "
-        f"max-contigs {limits.get('max_contigs')}, "
-        f"max-upload {limits.get('max_upload_mb')} MB, "
-        f"max-sketches {limits.get('max_sketches')}"
-    )
-    rate_limit = limits.get("rate_limit")
-    rate = (
-        "off"
-        if not rate_limit
-        else f"{rate_limit['count']}/{int(rate_limit['window_seconds'])}s"
-    )
-    sequences = (
-        f"on (max {limits.get('max_sequence_mb')} MB)"
-        if limits.get("allow_sequences")
-        else "off"
-    )
-    print(
-        f"web: raw-sequence assembly {sequences}, "
-        f"rate-limit {rate}, "
-        f"max-queue {limits.get('max_queue') if limits.get('max_queue') is not None else 'unlimited'}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# profile / query
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class _ContainRun:
-    """What the server answered for ``profile``/``query``, and how it was asked."""
-
-    result: list[dict[str, Any]]
-    fields: list[str] | None
-    metadata_columns: list[str]
-    taxonomies: tuple[str, ...]
-    tax_sources: tuple[str, ...]
-
-
-def cmd_contain(args: argparse.Namespace) -> int:
-    mode = args.command  # "profile" or "query"
-    try:
-        samples = _load_samples(args)
-    except InputError as error:
-        _print_error(str(error))
-        return 2
-
-    params = ProfileParams(
-        minimum_ani=args.minimum_ani,
-        seq_id=args.seq_id,
-        estimate_unknown=args.estimate_unknown,
-        # ``profile`` only, like the taxonomy flags.
-        estimate_read_counts=getattr(args, "estimate_read_counts", False),
-        min_number_kmers=args.min_number_kmers,
-        min_contain=args.min_contain,
-        screen_ani=args.screen_ani,
-        no_adjust=args.no_adjust,
-    )
-    write_taxonomy = mode == "profile" and getattr(args, "taxprof", None) is not None
-
-    # Everything that can fail without the server is checked before sketching.
-    _check_output_file(args.output)
-    try:
-        run = _run_contain(args, mode, samples, params, write_taxonomy)
-    except (ClientError, InputError, ProtocolError, TaxonomyError) as error:
-        _print_error(str(error))
-        return 1
-
-    _write_result(
-        run.result, mode, params, run.fields, args, metadata_columns=run.metadata_columns
-    )
-    if write_taxonomy:
-        _write_taxonomy_outputs(args, run)
-    return 0
-
-
-def _load_samples(args: argparse.Namespace) -> list[SampleInput]:
-    """The samples named on the command line, with ``--sample-name`` applied."""
-    samples = build_sample_inputs(
-        files=args.files,
-        reads=args.reads,
-        first=args.first,
-        second=args.second,
-        interleaved=args.interleaved,
-        specs=args.sample,
-    )
-    if args.sample_name is None:
-        return samples
-    if len(samples) != 1:
-        raise InputError("--sample-name requires exactly one input sample")
-    return [replace(samples[0], name=args.sample_name)]
-
-
-def _run_contain(
-    args: argparse.Namespace,
-    mode: str,
-    samples: Sequence[SampleInput],
-    params: ProfileParams,
-    write_taxonomy: bool,
-) -> _ContainRun:
-    """Validate the taxonomy options, sketch locally and ask the server."""
-    taxonomy_prefix = getattr(args, "taxprof", None)
-    taxonomies: tuple[str, ...] = ()
-    tax_sources: tuple[str, ...] = ()
-    if getattr(args, "tax_source", None) and not write_taxonomy:
-        raise TaxonomyError(
-            "--tax-source needs --taxprof: it restricts the "
-            "sources of the aggregated 'tax' profile"
-        )
-    if write_taxonomy:
-        # A bad --taxonomy must fail before the server is contacted; only
-        # the *default* depends on what the server has.
-        requested_taxonomies = (
-            None if args.taxonomy is None else parse_taxonomies(args.taxonomy)
-        )
-        _check_output_prefix(taxonomy_prefix)
-    else:
-        requested_taxonomies = None
-    with _client_from_args(args) as client:
-        info = client.info()
-        _note_messages(client, quiet=getattr(args, "quiet", False))
-        _note_usage(client, info)
-        database = info["database"]
-        metadata = info.get("metadata")
-        fields = _resolve_fields(args.fields, metadata)
-        metadata_columns = list((metadata or {}).get("columns") or [])
-        if write_taxonomy:
-            taxonomies = (
-                requested_taxonomies
-                if requested_taxonomies is not None
-                else default_taxonomies(metadata)
-            )
-            tax_sources = _select_tax_sources(
-                getattr(args, "tax_source", None) or (), taxonomies, metadata
-            )
-            request_fields = _request_fields(fields, taxonomies, metadata)
-        else:
-            request_fields = fields
-        if args.verbose:
-            print(
-                f"{PROG}: database {database['name']} (c={database['c']}, "
-                f"k={database['k']}); sketching {len(samples)} sample(s) "
-                f"with {args.threads} thread(s)",
-                file=sys.stderr,
-            )
-        sketches = _sketch_all(
-            samples, c=int(database["c"]), k=int(database["k"]), threads=args.threads,
-            verbose=args.verbose,
-        )
-        limit = int(info["limits"]["max_upload_mb"]) * 1024 * 1024
-        total = sum(len(payload) for _, payload in sketches)
-        if total > limit:
-            raise ClientError(
-                f"sketches total {format_size(total)}, above the server's "
-                f"{format_size(limit)} upload limit; send fewer samples per request"
-            )
-        if args.verbose:
-            print(
-                f"{PROG}: sending {len(sketches)} sketch(es), "
-                f"{format_size(total)}",
-                file=sys.stderr,
-            )
-        if mode == "profile":
-            result = client.profile(
-                sketches,
-                params=params,
-                fields=request_fields,
-                tax_sources=tax_sources or None,
-                taxprof=list(taxonomies) if write_taxonomy else None,
-            )
-        else:
-            result = client.query(sketches, params=params, fields=request_fields)
-    return _ContainRun(result, fields, metadata_columns, taxonomies, tax_sources)
-
-
-def _write_taxonomy_outputs(args: argparse.Namespace, run: _ContainRun) -> None:
-    """Write the ``--taxprof`` files and the species caveats."""
-    written = write_outputs(
-        run.result,
-        taxonomies=run.taxonomies,
-        taxprof_prefix=getattr(args, "taxprof", None),
-        tax_sources=run.tax_sources,
-    )
-    for path in written:
-        print(f"{PROG}: wrote {path}", file=sys.stderr)
-    if any(is_sylphtax(taxonomy) for taxonomy in run.taxonomies):
-        # The 95 % threshold is a prokaryote convention: say so once per
-        # source the merged profile actually used (design note B6).
-        for note in _profile_caveats(run.result):
-            print(f"{PROG}: warning: {note}", file=sys.stderr)
-
-
-def _profile_caveats(samples: Sequence[dict[str, Any]]) -> list[str]:
-    """Distinct species-threshold caveats of a merged ``tax`` profile.
-
-    One line per non-GTDB source, however many rows it has.  The rows carry
-    ``tax_source``/``tax_lineage`` because ``--taxonomy tax`` requests them
-    (``--fields`` does not matter).
-    """
-    notes: list[str] = []
-    for sample in samples:
-        for row in sample.get("rows") or ():
-            note = species_caveat(hit_lineage(row))
-            if note and note not in notes:
-                notes.append(note)
-    return notes
-
-
-def _note_messages(client: Any, *, quiet: bool = False) -> None:
-    """Print the server's warning and danger messages on stderr, once per run.
-
-    ``info`` messages are for the web page only.  Never fails a run: a server
-    without ``/messages`` (or a slow one) simply prints nothing.
-    """
-    if quiet:
-        return
-    for item in client.messages():
-        if item["level"] == "info":
-            continue
-        label = "DANGER" if item["level"] == "danger" else "warning"
-        body = item.get("plain") or plain_text(item["message"])
-        print(f"{PROG}: {label}: {item['title']}: {body}", file=sys.stderr)
-
-
-def _note_usage(client: Any, info: dict[str, Any], *, quiet: bool = False) -> None:
-    """Say once per run that the server keeps usage statistics, and where to read them."""
-    if info["usage"]["enabled"] and not quiet:
-        where = f"{client.base_url}/usage" if client.base_url else "GET /usage"
-        print(
-            f"{PROG}: note: this server keeps usage statistics, see {where}",
-            file=sys.stderr,
-        )
 
 
 def _client_token(args: argparse.Namespace) -> str | None:
@@ -684,347 +283,6 @@ def _client_from_args(args: argparse.Namespace):
     if env_socket:
         return connect(socket_path=env_socket, **options)
     return connect(socket_path=default_socket_path(), **options)
-
-
-def _resolve_fields(text: str | None, metadata: dict[str, Any] | None) -> list[str] | None:
-    """Turn ``--fields`` into the list of metadata columns to request."""
-    available = list((metadata or {}).get("columns") or [])
-    raw = (text or "all").strip()
-    if raw.lower() in {"all", ""}:
-        if metadata is not None:
-            return list((metadata or {}).get("columns") or [])
-        return []
-    if raw.lower() in {"none", "-"}:
-        return []
-    if metadata is None:
-        raise ClientError("the server has no metadata database; --fields is not available")
-    requested = [part.strip() for part in raw.split(",") if part.strip()]
-    unknown = [name for name in requested if name not in available]
-    if unknown:
-        raise ClientError(
-            "unknown metadata column(s): "
-            + ", ".join(unknown)
-            + f" (available: {', '.join(available)})"
-        )
-    # The server normalises duplicates too; do it here so the TSV header and
-    # the request cannot disagree.
-    return list(dict.fromkeys(requested))
-
-
-def _select_tax_sources(
-    values: Sequence[str],
-    taxonomies: Sequence[str],
-    metadata: dict[str, Any] | None,
-) -> tuple[str, ...]:
-    """The sources ``--tax-source`` restricts to, in the file's ``ord`` order.
-
-    Without the flag that is every source (sylph-tax given every file).  The
-    order is not the order of the flags: sylph-tax resolves a key found in
-    several files by the order it was given them, which here is the ``setup``
-    order of the metadata file, so that is what the header must list too.
-    """
-    if "tax" not in taxonomies:
-        if values:
-            raise TaxonomyError(
-                "--tax-source only applies to '--taxonomy tax' (it restricts "
-                "which sources the merged profile uses)"
-            )
-        return ()
-    available = [
-        str(source["name"])
-        for source in (metadata or {}).get("taxonomy_sources") or ()
-    ]
-    if not values:
-        return tuple(available)
-    unknown = [name for name in values if name not in available]
-    if unknown:
-        raise TaxonomyError(
-            "unknown taxonomy source(s): "
-            + ", ".join(unknown)
-            + f" (available: {', '.join(available) or 'none'})"
-        )
-    selected = set(values)
-    return tuple(name for name in available if name in selected)
-
-
-def _request_fields(
-    fields: Sequence[str],
-    taxonomies: Sequence[str],
-    metadata: dict[str, Any] | None,
-) -> list[str]:
-    """Metadata columns to request: the displayed ones plus the taxonomies.
-
-    ``--taxprof`` needs ``gtdb_taxonomy``/``ncbi_taxonomy`` even
-    when ``--fields`` hides them from the TSV, so ask for them explicitly.
-    """
-    extra = resolve_taxonomy_columns(taxonomies, metadata)
-    return list(dict.fromkeys([*fields, *extra]))
-
-
-def _sketch_all(
-    samples: Sequence[SampleInput],
-    *,
-    c: int,
-    k: int,
-    threads: int,
-    verbose: bool = False,
-) -> list[tuple[str, bytes]]:
-    """Sketch every sample, in parallel, keeping the input order."""
-
-    def sketch_one(sample: SampleInput) -> tuple[str, bytes]:
-        sketch = sketch_sample(sample, c=c, k=k)
-        check_sketch(sketch, c=c, k=k, name=sample.name)
-        payload = sketch.to_bytes()
-        if verbose:
-            print(
-                f"{PROG}: {sample.name}: sketch c={sketch.c} k={sketch.k} "
-                f"({format_size(len(payload))})",
-                file=sys.stderr,
-            )
-        return sample.name, payload
-
-    workers = max(1, min(threads, len(samples)))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(sketch_one, samples))
-
-
-def _write_result(
-    samples: Sequence[dict[str, Any]],
-    mode: str,
-    params: ProfileParams,
-    fields: Sequence[str] | None,
-    args: argparse.Namespace,
-    *,
-    metadata_columns: Sequence[str] | None = None,
-) -> None:
-    with _open_output(args.output) as out:
-        if args.format == "json":
-            json.dump(samples, out, indent=None)
-            out.write("\n")
-        else:
-            for line in rows_to_tsv_lines(
-                samples,
-                mode,
-                params=params,
-                fields=fields,
-                metadata_columns=metadata_columns,
-            ):
-                out.write(line + "\n")
-
-
-def _write_hits_tsv(result: dict[str, Any], output: Any) -> None:
-    """The single-assembly hits table of ``sylphd assembly``."""
-    output.write(
-        "rank\tani\trelation\tshared_rank\taccession\tgenome_id\ttaxon\tgtdb_species\t"
-        "taxonomy_source\tncbi_organism_name\tncbi_taxid\n"
-    )
-    for hit in result.get("hits", ()):
-        output.write(
-            "\t".join(
-                [
-                    str(hit.get("rank", "")),
-                    f"{float(hit.get('ani', 0.0)):.2f}",
-                    str(hit.get("relation") or ""),
-                    str(hit.get("shared_rank") or ""),
-                    str(hit.get("accession") or ""),
-                    str(hit.get("genome_id") or ""),
-                    str(_taxon(hit) or ""),
-                    gtdb_species(hit.get("gtdb_taxonomy")),
-                    str(hit.get("taxonomy_source") or ""),
-                    str(hit.get("ncbi_organism_name") or ""),
-                    "" if hit.get("ncbi_taxid") is None else str(hit["ncbi_taxid"]),
-                ]
-            )
-            + "\n"
-        )
-
-
-# ---------------------------------------------------------------------------
-# assembly
-# ---------------------------------------------------------------------------
-
-
-def cmd_assembly(args: argparse.Namespace) -> int:
-    path = Path(args.file)
-    if args.per_contig:
-        return _cmd_assembly_per_contig(args, path)
-    for flag, value in (
-        ("--fields", args.fields),
-        ("--min-contig-length", args.min_contig_length),
-        ("--consensus-ratio", args.consensus_ratio),
-        ("--consensus-z", args.consensus_z),
-    ):
-        if value is not None:
-            _print_error(f"{flag} is only available with --per-contig")
-            return 2
-
-    name = args.name or sample_name_from_path(path.name)
-    top = args.top if args.top is not None else 10
-    _check_output_file(args.output)
-    with _client_from_args(args) as client:
-        info = client.info()
-        _note_messages(client, quiet=args.quiet)
-        _note_usage(client, info, quiet=args.quiet or args.json)
-        if args.local_sketch:
-            # The assembly is sketched here and only the sketch is uploaded: the sequence
-            # never leaves this machine and has no size limit.
-            database = info["database"]
-            sketch, stats = sketch_assembly(
-                path, name, c=int(database["c"]), k=int(database["k"])
-            )
-            payload = sketch.to_bytes()
-            limit = int((info.get("limits") or {}).get("max_upload_mb") or 0) * 1024 * 1024
-            if limit and len(payload) > limit:
-                raise ClientError(
-                    f"the sketch is {len(payload)} bytes, over the server's "
-                    f"{limit // (1024 * 1024)} MB upload limit"
-                )
-            result = client.assembly_sketch(
-                payload,
-                top=top,
-                min_ani=args.min_ani,
-                name=name,
-                records=stats.records,
-                length=stats.length,
-                gc=stats.gc,
-            )
-        else:
-            # --no-local-sketch: raw upload, which only servers with --allow-sequences take
-            try:
-                payload = path.read_bytes()
-            except OSError as error:
-                _print_error(f"cannot read {path}: {error}")
-                return 1
-            content_type = (
-                "application/gzip" if payload[:2] == b"\x1f\x8b" else "application/octet-stream"
-            )
-            result = client.assembly(
-                payload,
-                top=top,
-                min_ani=args.min_ani,
-                name=name,
-                content_type=content_type,
-            )
-    if args.json:
-        with _open_output(args.output) as output:
-            json.dump(result, output, indent=None)
-            output.write("\n")
-    else:
-        with _open_output(args.output) as output:
-            _write_hits_tsv(result, output)
-    # JSON is a machine-readable document and has always been silent on stderr.
-    if not args.json and not args.quiet:
-        print(_assignment_summary(result), file=sys.stderr)
-        note = _species_note(result)
-        if note:
-            print(f"{PROG}: warning: {note}", file=sys.stderr)
-    return 0
-
-
-def _taxon(hit: dict[str, Any]) -> str | None:
-    """The hit's last named rank from the additive ``taxonomy`` object."""
-    taxonomy = hit.get("taxonomy")
-    if not isinstance(taxonomy, dict) or not taxonomy:
-        return None
-    return str(next(reversed(taxonomy.values())))
-
-
-def _species_note(result: dict[str, Any]) -> str | None:
-    """The 95 % caveat of the best hit, or ``None`` for GTDB/no lineage (B6).
-
-    ``classify_hits`` puts it on ``assignment`` when the query was assigned and
-    on ``closest`` otherwise.
-    """
-    for key in ("assignment", "closest"):
-        summary = result.get(key)
-        if isinstance(summary, dict) and summary.get("note"):
-            return str(summary["note"])
-    return None
-
-
-def _assignment_summary(result: dict[str, Any]) -> str:
-    """One human line for stderr: the species assignment, or its absence."""
-    assignment = result.get("assignment")
-    if assignment:
-        taxon = assignment.get("taxon") or assignment.get("accession") or "the best hit"
-        if assignment.get("note"):
-            # Not GTDB: the 95 % threshold is a heuristic there, and the taxon is
-            # the last named rank of the source, which need not be a species.
-            return (
-                f"assigned to {taxon} at the 95 % species threshold "
-                f"({float(assignment['ani']):.2f} % ANI)"
-            )
-        return f"assigned to species {taxon} ({float(assignment['ani']):.2f} % ANI)"
-    closest = result.get("closest")
-    if closest:
-        taxon = closest.get("taxon") or closest.get("accession") or "the best hit"
-        return (
-            f"no species-level match (< {(result.get('thresholds') or {}).get('species', 95):g} % ANI); "
-            f"closest relative {taxon} ({float(closest['ani']):.2f} % ANI)"
-        )
-    return "no hits"
-
-
-# ---------------------------------------------------------------------------
-# assembly --per-contig
-# ---------------------------------------------------------------------------
-
-
-def _cmd_assembly_per_contig(args: argparse.Namespace, path: Path) -> int:
-    """Validate the per-contig options and hand the workflow to ``per_contig_client``."""
-    if not args.local_sketch:
-        _print_error(
-            "--per-contig always sketches locally; --no-local-sketch cannot be used with it"
-        )
-        return 2
-    if args.name is not None:
-        _print_error(
-            "--name cannot be combined with --per-contig: every contig is a sample "
-            "named after its record id"
-        )
-        return 2
-
-    min_length = (
-        per_contig_client.DEFAULT_MIN_LENGTH
-        if args.min_contig_length is None
-        else args.min_contig_length
-    )
-    _check_output_file(args.output)
-    with _client_from_args(args) as client:
-        info = client.info()
-        _note_messages(client, quiet=args.quiet)
-        _note_usage(client, info, quiet=args.quiet or args.json)
-        metadata = info.get("metadata")
-        options = per_contig_client.PerContigOptions(
-            top=args.top if args.top is not None else per_contig_client.DEFAULT_TOP,
-            min_ani=args.min_ani,
-            min_length=min_length,
-            fields=tuple(_resolve_fields(args.fields, metadata) or ()),
-            consensus_ratio=(
-                per_contig_client.DEFAULT_CONSENSUS_RATIO
-                if args.consensus_ratio is None
-                else args.consensus_ratio
-            ),
-            consensus_z=(
-                per_contig_client.DEFAULT_CONSENSUS_Z
-                if args.consensus_z is None
-                else args.consensus_z
-            ),
-        )
-        result = per_contig_client.run(client, path, options, info=info)
-
-    if args.json:
-        with _open_output(args.output) as output:
-            json.dump(result.document(path), output, indent=None)
-            output.write("\n")
-    else:
-        with _open_output(args.output) as output:
-            result.write_tsv(output)
-    # JSON is a machine-readable document and is silent on stderr, exactly as
-    # in single-assembly mode; its summary is part of the document.
-    if not args.json and not args.quiet:
-        result.print_summary()
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1379,10 +637,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     commands = {
         "serve": cmd_serve,
-        "info": cmd_info,
-        "profile": cmd_contain,
-        "query": cmd_contain,
-        "assembly": cmd_assembly,
         "download": cmd_download,
         "setup": cmd_setup,
         "taxdb": cmd_taxdb,

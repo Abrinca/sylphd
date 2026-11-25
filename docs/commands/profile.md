@@ -5,6 +5,12 @@ sylphd profile [inputs] [options] [--estimate-read-counts] [--taxonomy LIST]
                [--tax-source NAME] [--taxprof PREFIX]
 ```
 
+This command is the native `sylphd-client`: the `sylphd` command runs the server and admin commands
+in Python and forwards this one, argv unchanged (same exit codes, same stdin and stdout), and
+`sylphd-client` is the same program for machines without Python. The client renders the output, so
+it depends on the client version rather than the server's. `--json` saves the server's document
+unchanged; [`render`](render.md) turns a saved document into the table later, without a server.
+
 Taxonomic profile of one or more samples: the equivalent of `sylph profile`, with
 `Taxonomic_abundance`, `Sequence_abundance` and `kmers_reassigned` columns, joined with the
 metadata. With `--estimate-read-counts` the `Sequence_abundance` column holds the estimated number

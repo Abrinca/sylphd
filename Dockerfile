@@ -1,5 +1,7 @@
 # sylphd from prebuilt wheels: no Rust, no compiler. Put the wheels in dist/
-# (the release workflow does this; see docs/install.md for a local build).
+# (the release workflow does this): the pure `sylphd` wheel, `sylphd-bin` for this
+# platform (the native client), and the server's pysylph/dnaio wheels. See
+# docs/install.md for a local build.
 FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends procps \

@@ -32,7 +32,6 @@ from pathlib import Path
 import pytest
 
 from sylphd.metadata import MetadataDB
-from sylphd.protocol import format_value
 from sylphd.metadata_build import build_metadata_db
 from sylphd.taxonomy_sources import TaxonomySource
 from sylphd.taxonomy import (
@@ -238,6 +237,19 @@ def test_matrix_golden(rows: list[dict], value: str, case: str) -> None:
     assert produced == (DATA / f"{case}.matrix.{value}.tsv").read_text()
 
 
+#: Sylph's digits per column, as ``sylphd-core``'s renderer prints them.
+PRECISION = {
+    "Taxonomic_abundance": 4,
+    "Sequence_abundance": 4,
+    "Adjusted_ANI": 2,
+    "Eff_cov": 3,
+}
+
+
+def _printed(column: str, value: float) -> str:
+    return f"{value:.{PRECISION[column]}f}"
+
+
 def _write_inputs(directory: Path) -> None:
     for source in CASES["sources"]:
         (directory / source["name"]).write_text(
@@ -253,10 +265,10 @@ def _write_inputs(directory: Path) -> None:
                     [
                         sample["name"],
                         row["Genome_file"],
-                        format_value("Taxonomic_abundance", row["Taxonomic_abundance"]),
-                        format_value("Sequence_abundance", row["Sequence_abundance"]),
-                        format_value("Adjusted_ANI", row["Adjusted_ANI"]),
-                        format_value("Eff_cov", row["Eff_cov"]),
+                        _printed("Taxonomic_abundance", row["Taxonomic_abundance"]),
+                        _printed("Sequence_abundance", row["Sequence_abundance"]),
+                        _printed("Adjusted_ANI", row["Adjusted_ANI"]),
+                        _printed("Eff_cov", row["Eff_cov"]),
                         row["Contig_name"],
                     ]
                 )

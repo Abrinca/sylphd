@@ -1,5 +1,17 @@
 # Quick start
 
+## Install
+
+```bash
+uv tool install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z \
+               'sylphd[client]==X.Y.Z'
+sylphd --version
+```
+
+The `client` extra installs `sylphd` (pure Python) and `sylphd-bin`, the native client: no Rust
+toolchain, no pysylph, no compiler. The machine that runs `sylphd serve` installs
+`sylphd[server]` instead. See [Install](install.md) for the placeholders and the other platforms.
+
 ## Get a database
 
 `sylphd` serves a sylph database that you provide: a two-stage `.syl2db` or a plain `.syldb`. The
@@ -67,6 +79,10 @@ sylphd query -1 sample_R1.fq.gz -2 sample_R2.fq.gz
 # taxonomic abundances (sylph profile)
 sylphd profile -r sample.fq.gz -o sample.profile.tsv
 ```
+
+The sketching and the tables are the native `sylphd-client`'s (`sylphd` forwards to it); every
+command takes `--json` for the server's document, and `sylphd render FILE.json` turns such a
+document back into the table, without a server.
 
 Clients find the server at `$SYLPHD_SOCKET`, else the default socket path. A client on another
 machine uses `--tcp HOST:PORT` or `--url`; see [Server address](commands/address.md). The output is a

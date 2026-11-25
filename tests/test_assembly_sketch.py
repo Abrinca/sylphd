@@ -1,26 +1,23 @@
 """``POST /assembly`` with a precomputed sketch (``application/vnd.sylph.sketch``).
 
 The sketch path must return exactly what the raw-sequence path returns for the same
-assembly, and must work on a server started without ``--allow-sequences``.
+assembly, and must work on a server started without ``--allow-sequences``. The
+client that makes the sketch is the native ``sylphd-client`` (tested in
+``tests/test_client_binary.py``); here the sketch is built with pysylph directly.
 """
 
 from __future__ import annotations
 
 import gzip
-import json
-import socket
-import subprocess
-import sys
-import time
+import random
 from pathlib import Path
 
 import pysylph
 import pytest
 from starlette.testclient import TestClient
 
-from sylphd.client import SKETCH_CONTENT_TYPE
-from sylphd.server import ServerConfig, create_app
-from sylphd.sketching import InputError, sketch_assembly
+from sylphd.assembly import parse_assembly
+from sylphd.server import SKETCH_CONTENT_TYPE, ServerConfig, create_app
 
 from conftest import CLODF13_FASTA, ECOLI_TWO_STAGE, K12_R1
 
@@ -32,9 +29,11 @@ def _fasta() -> bytes:
 def _sketch(
     tmp_path: Path, data: bytes, *, c: int = 200, k: int = 31, name: str = "assembly", suffix: str = ".fa"
 ):
+    """A sketch of ``data`` and the records/length/GC the client would report."""
     path = tmp_path / f"input{suffix}"
     path.write_bytes(data)
-    sketch, stats = sketch_assembly(path, name, c=c, k=k)
+    stats = parse_assembly(data)
+    sketch = pysylph.Sketcher(c=c, k=k).sketch_single(name, list(stats.sequences))
     return sketch.to_bytes(), stats
 
 
@@ -143,8 +142,6 @@ class TestSketchUpload:
 
     def test_not_limited_by_the_sequence_limit(self, tiny_database, tmp_path) -> None:
         # --max-sequence-mb 1 must not apply to sketches: a >1 MB sketch is accepted
-        import random
-
         rng = random.Random(1)
         fasta = b">big\n" + "".join(rng.choice("ACGT") for _ in range(2_500_000)).encode() + b"\n"
         sketch, _ = _sketch(tmp_path, fasta, c=200)
@@ -205,157 +202,8 @@ class TestSketchErrors:
         assert SKETCH_CONTENT_TYPE in response.json()["error"]
 
 
-def test_sketch_assembly_matches_the_servers_sketch(tmp_path) -> None:
-    """The client-side sketch equals what the server builds from the same FASTA."""
-    from sylphd.assembly import parse_assembly
-
-    data = _fasta()
-    local, stats = _sketch(tmp_path, data)
-    parsed = parse_assembly(data)
-    server_side = pysylph.Sketcher(c=200, k=31).sketch_single("assembly", list(parsed.sequences))
-    assert pysylph.SampleSketch.from_bytes(local).kmer_counts == server_side.kmer_counts
-    assert (stats.records, stats.length, stats.gc) == (parsed.records, parsed.length, parsed.gc)
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 
-def _wait_for_socket(path: Path, timeout: float = 120.0) -> None:
-    """Wait until ``path`` exists *and* accepts connections.
-
-    ``serve`` binds the socket before uvicorn starts listening, so the file can
-    exist for a moment without a listener.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.is_socket():
-            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            probe.settimeout(0.2)
-            try:
-                probe.connect(str(path))
-            except (FileNotFoundError, ConnectionRefusedError):
-                pass
-            else:
-                return
-            finally:
-                probe.close()
-        time.sleep(0.1)
-    raise AssertionError(f"server did not create {path} in time")
-
-
-def _serve(tmp_path_factory, tiny_database, tiny_metadata, *extra: str):
-    directory = tmp_path_factory.mktemp("asm-sketch-server")
-    socket_path = directory / "sylphd.sock"
-    process = subprocess.Popen(
-        [
-            sys.executable, "-m", "sylphd", "serve",
-            "--db", str(tiny_database), "--meta", str(tiny_metadata),
-            "--socket", str(socket_path), "--log-level", "warning", *extra,
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        _wait_for_socket(socket_path)
-        yield socket_path
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-
-
-@pytest.fixture(scope="module")
-def cli_sketch_only_server(tmp_path_factory, tiny_database, tiny_metadata):
-    yield from _serve(tmp_path_factory, tiny_database, tiny_metadata)
-
-
-@pytest.fixture(scope="module")
-def cli_sequences_server(tmp_path_factory, tiny_database, tiny_metadata):
-    yield from _serve(tmp_path_factory, tiny_database, tiny_metadata, "--allow-sequences")
-
-
-def _assembly(socket: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, "-m", "sylphd", "assembly", str(CLODF13_FASTA), "--socket", str(socket), "--json", *args],
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-
-
-class TestCLI:
-    def test_default_sketches_locally(self, cli_sketch_only_server) -> None:
-        result = _assembly(cli_sketch_only_server)  # the server has no --allow-sequences
-        assert result.returncode == 0, result.stderr
-        payload = json.loads(result.stdout)
-        assert payload["query"]["input"] == "sketch"
-        assert (payload["query"]["records"], payload["query"]["length"]) == (1, 9957)
-        assert payload["hits"][0]["relation"] == "same species"
-
-    def test_explicit_local_sketch_on_a_server_with_sequences(self, cli_sequences_server) -> None:
-        local = json.loads(_assembly(cli_sequences_server, "--local-sketch").stdout)
-        raw = json.loads(_assembly(cli_sequences_server, "--no-local-sketch").stdout)
-        assert (local["query"]["input"], raw["query"]["input"]) == ("sketch", "sequence")
-        assert local["hits"] == raw["hits"]
-        assert local["assignment"] == raw["assignment"]
-        assert local["query"]["gc"] == raw["query"]["gc"]
-        assert local["query"]["length"] == raw["query"]["length"]
-
-    def test_no_local_sketch_is_refused_by_a_sketch_only_server(self, cli_sketch_only_server) -> None:
-        result = _assembly(cli_sketch_only_server, "--no-local-sketch")
-        assert result.returncode != 0
-        assert "--allow-sequences" in result.stderr  # the server's own message
-
-    def test_table_output_with_local_sketch(self, cli_sketch_only_server) -> None:
-        result = subprocess.run(
-            [sys.executable, "-m", "sylphd", "assembly", str(CLODF13_FASTA), "--socket", str(cli_sketch_only_server)],
-            capture_output=True, text=True, timeout=600,
-        )
-        assert result.returncode == 0, result.stderr
-        lines = result.stdout.splitlines()
-        assert lines[0].split("\t") == [
-            "rank",
-            "ani",
-            "relation",
-            "shared_rank",
-            "accession",
-            "genome_id",
-            "taxon",
-            "gtdb_species",
-            "taxonomy_source",
-            "ncbi_organism_name",
-            "ncbi_taxid",
-        ]
-        row = lines[1].split("\t")
-        assert row[:5] == ["1", "100.00", "same species", "species", "GCA_000000001.1"]
-        assert row[5] == "GCA_000000001.1"  # genome_id
-        # the fixture lineage has no s__ rank: gtdb_species is empty, the
-        # generic taxon is the last named rank (design note B6)
-        assert row[6:9] == ["Test", "", "GTDB_r232"]
-        assert row[9] == ""  # ncbi organism name
-
-
-class TestGzipMembers:
-    """The client reads gzip like the server's raw-upload path does."""
-
-    def test_concatenated_members_are_all_read(self, tmp_path) -> None:
-        member = CLODF13_FASTA.read_bytes()
-        single = tmp_path / "one.fa.gz"
-        single.write_bytes(member)
-        double = tmp_path / "two.fa.gz"
-        double.write_bytes(member + member)
-        _, one = sketch_assembly(single, "x", c=200, k=31)
-        _, two = sketch_assembly(double, "x", c=200, k=31)
-        assert two.records == 2 * one.records
-
-    def test_truncated_gzip_is_an_input_error(self, tmp_path) -> None:
-        path = tmp_path / "cut.fa.gz"
-        path.write_bytes(CLODF13_FASTA.read_bytes()[:-100])
-        with pytest.raises(InputError, match="cannot sketch"):
-            sketch_assembly(path, "x", c=200, k=31)

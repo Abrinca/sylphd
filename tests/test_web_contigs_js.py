@@ -3,7 +3,7 @@
 `rust/sylphd-core/src/contig.rs` (WASM API `WasmContigSketcher` in `rust/sylphd-wasm`) sketches every record
 of a FASTA/FASTQ file as its own sample and computes the record's genome-style
 k-mer count -- the two things `POST /contigs` needs per contig (see
-`docs/reference/http-api.md` and `src/sylphd/sketching.py::sketch_contigs`).
+`docs/reference/http-api.md` and `rust/sylphd-core/src/contig.rs`).
 
 The tests run the built module under node (`rust/sylphd-wasm/build.sh` first):
 
@@ -14,9 +14,9 @@ The tests run the built module under node (`rust/sylphd-wasm/build.sh` first):
   covered too.
 
 Every record is compared with `pysylph.Sketcher` (`.sketch_single` bytes with
-the k-mer entries sorted, `.sketch_genome(...).kmers` count) and with the CLI
-reference `sylphd.sketching.sketch_contigs`. The wasm is gitignored, so the
-tests skip when it has not been built.
+the k-mer entries sorted, `.sketch_genome(...).kmers` count), which is also what
+the native client's `sylphd-core` is checked against (`rust/sylphd-core/tests`).
+The wasm is gitignored, so the tests skip when it has not been built.
 """
 
 from __future__ import annotations
@@ -34,7 +34,6 @@ import pysylph
 import pytest
 
 from sylphd.sketchcheck import parse_sketch_header
-from sylphd.sketching import sketch_contigs, unique_contig_name
 
 ROOT = Path(__file__).resolve().parents[1]
 WASM = ROOT / "web" / "wasm" / "sylph_sketch.js"
@@ -243,26 +242,6 @@ def test_fastq_and_wrapped_fasta(tmp_path: Path) -> None:
     compare(result["records"], expected_records(wrapped, 100, 21, 100), 100, 21)
 
 
-def test_matches_cli_sketch_contigs(tmp_path: Path) -> None:
-    """The CLI reference (names, gc, length, both k-mer numbers, sketch bytes)."""
-    sequences = make_sequences()
-    path = write_fasta(tmp_path / "contigs.fa", sequences)
-    expected = list(sketch_contigs(path, c=200, k=31, min_length=1000))
-    result = run_wasm(path, 200, 31, 1000, 512)
-
-    assert len(result["records"]) == len(expected)
-    for got, want in zip(result["records"], expected, strict=True):
-        assert got["index"] == want.index
-        assert got["name"] == want.name
-        assert got["length"] == want.length
-        assert got["gc"] == want.gc
-        assert got["contigKmers"] == want.contig_kmers
-        if want.sketch is None:
-            assert got["sketch"] is None
-        else:
-            assert base64.b64decode(got["sketch"]) == sorted_bytes(want.sketch.to_bytes())
-
-
 def test_pipeline_sketch_contigs(tmp_path: Path) -> None:
     """`sketchContigs` through the real workers: batching, acks, gzip, names."""
     rng = random.Random(99)
@@ -274,13 +253,13 @@ def test_pipeline_sketch_contigs(tmp_path: Path) -> None:
     ]
     path = write_fasta(tmp_path / "pipeline.fa.gz", sequences, gz=True)
     result = run_pipeline(path, 200, 31, 1000)
-    expected = list(sketch_contigs(path, c=200, k=31, min_length=1000))
+    expected = expected_records(sequences, 200, 31, 1000)
 
     stats = result["stats"]
     records = result["records"]
     assert len(records) == len(expected) == len(sequences)
     assert stats["records"] == len(sequences)
-    assert stats["sketched"] == sum(1 for rec in expected if rec.sketch is not None)
+    assert stats["sketched"] == sum(1 for rec in expected if rec["sketch"] is not None)
     assert stats["skipped"] == len(sequences) - stats["sketched"]
     assert stats["bases"] == sum(len(seq) for _, seq in sequences)
     assert stats["chunks"] > 1  # the 2.2 Mbp record spans chunks
@@ -291,17 +270,17 @@ def test_pipeline_sketch_contigs(tmp_path: Path) -> None:
         # the caller makes them unique only for the records it keeps.
         assert got["headerName"] == raw
         assert got["name"] == (raw or f"contig-{got['index']}")
-        assert got["length"] == want.length
-        assert got["gc"] == want.gc
-        assert got["contigKmers"] == want.contig_kmers
-        if want.sketch is None:
+        assert got["length"] == want["length"]
+        assert got["gc"] == want["gc"]
+        assert got["contigKmers"] == want["contigKmers"]
+        if want["sketch"] is None:
             assert got["sketch"] is None
         else:
             # names can be rewritten by the caller (dupe_2, contig-<index>), so
             # compare everything but the inner file_name here
             assert without_file_name(base64.b64decode(got["sketch"])) == without_file_name(
-                sorted_bytes(want.sketch.to_bytes())
-            ), want.name
+                sorted_bytes(want["sketch"])
+            ), got["name"]
 
     # raw duplicate ids survive the stream unchanged ...
     assert [rec["name"] for rec in records if rec["headerName"] == "dupe"] == ["dupe", "dupe"]
@@ -313,7 +292,14 @@ def test_pipeline_sketch_contigs(tmp_path: Path) -> None:
          json.dumps([rec["name"] if rec["headerName"] else "" for rec in records])],
         capture_output=True, text=True, check=True,
     )
-    assert json.loads(done.stdout) == [want.name for want in expected]
+    expected_names = [
+        *(name for name, _ in make_sequences(big=True)),
+        "dupe",
+        "dupe_2",
+        "contig-3",
+        f"contig-{len(sequences)}",
+    ]
+    assert json.loads(done.stdout) == expected_names
 
 
 NODE_NAMING = r"""
@@ -326,17 +312,22 @@ console.log(JSON.stringify(raws.map((raw, i) => uniqueContigName(raw, counts, us
 """
 
 
-def test_unique_contig_name_matches_python() -> None:
+def test_unique_contig_name_rules() -> None:
+    """``uniqueContigName``'s rules (the same ones ``sylphd-core`` applies)."""
     raws = ["c", "c", "c_2", "", "c", "c_3", "d"]
     done = subprocess.run(
         ["node", "-e", NODE_NAMING, str(ROOT / "web" / "sketching.js"), json.dumps(raws)],
         capture_output=True, text=True, check=True,
     )
-    js = json.loads(done.stdout)
-    counts: dict[str, int] = {}
-    used: set[str] = set()
-    py = [unique_contig_name(raw, counts, used, i + 1) for i, raw in enumerate(raws)]
-    assert js == py
+    assert json.loads(done.stdout) == [
+        "c",
+        "c_2",  # a duplicate gets the next free _N
+        "c_2_2",  # ... even when that name was taken literally before
+        "contig-4",  # an empty id is named after its position
+        "c_3",
+        "c_3_2",
+        "d",
+    ]
 
 
 NODE_LIMITS = r"""

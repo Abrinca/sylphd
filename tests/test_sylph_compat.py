@@ -19,10 +19,12 @@ What is compared
 **sylph-made** sample sketch and the same database, so sketching
 nondeterminism (stock sylph's paired-end de-duplication is probabilistic and
 multithreaded) cannot make the test flaky.  sylph's TSV is compared with the
-TSV that sylphd renders from its server response (``rows_to_tsv``), for
-``query``, ``profile`` and ``profile -u``, single-end and paired-end sketches,
-a high-coverage sample (``Eff_lambda`` ``HIGH``, ``NA-NA`` intervals), and a
-sample without read statistics (``-u``: ``inf``, ``NaN``, ``LOW``).
+TSV that the native renderer produces from the server's JSON document
+(``sylphd-client render``; the binary must be built, see ``rust/README.md``),
+for ``query``, ``profile`` and ``profile -u``, single-end and paired-end
+sketches, a high-coverage sample (``Eff_lambda`` ``HIGH``, ``NA-NA``
+intervals), and a sample without read statistics (``-u``: ``inf``, ``NaN``,
+``LOW``).
 
 The only normalisations, each applied to *both* sides:
 
@@ -48,13 +50,13 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import dnaio
 import pysylph
 import pytest
 from conftest import (
     CLODF13_FASTA,
-    DATA,
     ECOLI_PLAIN,
     ECOLI_TWO_STAGE,
     K12_R1,
@@ -63,12 +65,33 @@ from conftest import (
 )
 from starlette.testclient import TestClient
 
+from conftest import find_client_binary
+
 from sylphd.parity import compare_texts
-from sylphd.protocol import ProfileParams, rows_to_tsv
 from sylphd.server import ServerConfig, create_app
 
 #: Relative difference of the k-mer count of a paired sketch we accept.
 PAIRED_TOLERANCE = 0.02
+
+
+def _find_client() -> Path | None:
+    """The native client whose renderer is compared (``uv sync`` installs it)."""
+    found = find_client_binary()
+    if found is None and os.environ.get("SYLPH_COMPAT_REQUIRED"):
+        raise RuntimeError(
+            "SYLPH_COMPAT_REQUIRED is set but no sylphd-client binary was found "
+            "(uv sync, or cargo build -p sylphd-client)"
+        )
+    return found
+
+
+CLIENT = _find_client()
+
+if CLIENT is None:
+    pytest.skip(
+        "sylphd-client is not built: uv sync (or cargo build -p sylphd-client)",
+        allow_module_level=True,
+    )
 
 
 def _find_sylph() -> str | None:
@@ -164,16 +187,30 @@ def _drop_columns(line: str, drop: set[int]) -> str:
     return "\t".join(cell for i, cell in enumerate(line.split("\t")) if i not in drop)
 
 
+def _render(document: dict) -> str:
+    """The binary's TSV for a result document (the one renderer there is)."""
+    with NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+        json.dump(document, handle)
+        path = handle.name
+    try:
+        done = subprocess.run(
+            [str(CLIENT), "render", path], capture_output=True, text=True, check=False
+        )
+    finally:
+        os.unlink(path)
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
 def _sylphd_tsv(db: Path, mode: str, sketch: Path, **params: object) -> str:
+    """Ask the server, then render its answer with ``sylphd-client render``."""
     app = create_app(ServerConfig(db_path=db))
     body = {"params": json.dumps({"fields": [], **params})}
     files = [("sketch", ("sample.sylsp", sketch.read_bytes()))]
     with TestClient(app) as client:
         response = client.post(f"/{mode}", data=body, files=files)
     assert response.status_code == 200, response.text
-    return rows_to_tsv(
-        response.json(), mode, params=ProfileParams.from_mapping(params), fields=[]
-    )
+    return _render(response.json())
 
 
 def _compare(db: Path, mode: str, sketch: Path, sylph_flags: list[str], **params: object) -> str:

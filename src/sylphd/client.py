@@ -1,13 +1,10 @@
-"""HTTP client for a running ``sylphd serve``.
+"""Python transport to a running ``sylphd serve``: just what ``sylphd.ncbitax`` needs.
 
-The client speaks HTTP over a Unix socket (default), TCP, or an ``http://`` /
-``https://`` base URL.  Sketches are made locally with the database's
-``c``/``k``.  ``/assembly`` takes either such a sketch (``assembly_sketch``,
-the default of ``sylphd assembly``: the sequence never leaves the machine) or
-raw sequences (``assembly``, only if the server runs with ``--allow-sequences``).
-``/contigs`` takes one sketch per contig of a fragmented assembly plus the
-record's measurements (``contigs``) and returns the server-side per-contig
-classification.
+The query commands (``profile``, ``query``, ``assembly``, ``info``) run in the native
+``sylphd-client``; this module only connects (a Unix socket, TCP or an ``http://`` /
+``https://`` base URL), sends the token, retries 429/503 and talks JSON. Its address,
+token and retry rules deliberately mirror ``rust/sylphd-client/src/{address,transport}.rs``
+(``tests/test_address_cases.py`` and the Rust tests share one table of cases).
 """
 
 from __future__ import annotations
@@ -16,17 +13,12 @@ import json
 import os
 import time
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Self
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-
-from .protocol import ProfileParams, contigs_json, params_json
-
-#: ``Content-Type`` of an ``/assembly`` body that is a sketch (see the server).
-SKETCH_CONTENT_TYPE = "application/vnd.sylph.sketch"
 
 #: Statuses that mean "try again shortly" (queue full, rate limited).
 RETRY_STATUSES = frozenset({429, 503})
@@ -37,41 +29,6 @@ MAX_RETRY_DELAY = 30.0
 
 class TokenWarning(UserWarning):
     """The server does not accept the access token this client sends."""
-
-
-def _sketching() -> Any:
-    """:mod:`sylphd.sketching`, which needs pysylph (the ``client`` extra)."""
-    try:
-        from . import sketching
-    except ImportError as error:
-        if (error.name or "").split(".")[0] not in {"pysylph", "dnaio"}:
-            raise
-        raise ImportError(
-            f"sketching needs {error.name}: install 'sylphd[client]' (or 'sylphd[server]')"
-        ) from error
-    return sketching
-
-
-def _sample_input(sketching: Any, reads: Any, name: str | None) -> Any:
-    """A :class:`SampleInput` from a path, an ``(r1, r2)`` pair or a ready ``SampleInput``."""
-    import dataclasses
-
-    if isinstance(reads, sketching.SampleInput):
-        return dataclasses.replace(reads, name=name) if name else reads
-    if isinstance(reads, (str, os.PathLike)):
-        path = os.fspath(reads)
-        return sketching.SampleInput(
-            name or sketching.sample_name_from_path(path), ((path,),)
-        )
-    if isinstance(reads, (tuple, list)) and len(reads) == 2:
-        first, second = os.fspath(reads[0]), os.fspath(reads[1])
-        return sketching.SampleInput(
-            name or sketching.sample_name_from_path(first, paired=True), ((first, second),)
-        )
-    raise TypeError(
-        "reads must be a path, an (r1, r2) pair of paths or a SampleInput, "
-        f"not {type(reads).__name__}"
-    )
 
 
 def normalize_base_url(url: str) -> str:
@@ -110,17 +67,13 @@ class ClientError(RuntimeError):
         self.status_code = status_code
 
 
-#: Seconds ``GET /messages`` may take; a client must not wait on an optional extra.
-MESSAGES_TIMEOUT = 3.0
-
-
 def default_timeout() -> httpx.Timeout:
     """No read timeout (profiling can be slow), 30 s to connect."""
     return httpx.Timeout(None, connect=30.0)
 
 
 class SylphClient:
-    """A small synchronous client.
+    """A small synchronous JSON client.
 
     Either ``socket_path`` (Unix socket) or ``base_url`` (``http://host:port``,
     optionally with a path prefix) must be given.
@@ -145,7 +98,6 @@ class SylphClient:
         #: How often a 429/503 reply is retried (after its ``Retry-After``).
         self.retries = max(0, retries)
         self.token = token or None
-        self._info: dict[str, Any] | None = None
         #: ``False`` once a response said the token is not accepted, ``True``
         #: once one said it is, ``None`` while nothing is known (or no token).
         self.token_valid: bool | None = None
@@ -170,141 +122,6 @@ class SylphClient:
             timeout=self.timeout,
             headers=headers,
         )
-
-    # -- from files: sketch here, send the sketch ---------------------------
-    #
-    # The methods below take paths: they sketch on this machine with the server's
-    # ``c`` and ``k`` (only the sketch, never the sequence, is uploaded) and call
-    # the endpoints above.  They need pysylph (``pip install 'sylphd[client]'``).
-    def database_info(self) -> dict[str, Any]:
-        """The server's ``GET /info`` document, fetched once and kept (see :meth:`info`)."""
-        if self._info is None:
-            self._info = self.info()
-        return self._info
-
-    def sketch_parameters(self) -> tuple[int, int]:
-        """``(c, k)`` to sketch with: the pooled values of the server's databases."""
-        database = self.database_info().get("database") or {}
-        try:
-            return int(database["c"]), int(database["k"])
-        except (KeyError, TypeError, ValueError):
-            raise ClientError("the server does not report its sketch parameters (c, k)") from None
-
-    def profile_reads(
-        self,
-        reads: Any,
-        *,
-        name: str | None = None,
-        params: ProfileParams | None = None,
-        fields: Sequence[str] | None = None,
-        tax_sources: Sequence[str] | None = None,
-        taxprof: Sequence[str] | None = None,
-    ) -> dict[str, Any]:
-        """Taxonomic profile of one sample of reads (``POST /profile``).
-
-        ``reads`` is a FASTQ/FASTA path (gzip fine), a ``(r1, r2)`` pair of paths for
-        paired-end reads, a ``.sylsp`` sketch, or a :class:`sylphd.sketching.SampleInput`.
-        The sample is named after the file unless ``name`` is given.  Returns the
-        sample's result: its ``hits`` and, with ``taxprof``, the clade profiles.
-        """
-        return self._reads("profile", reads, name, params, fields, tax_sources, taxprof)
-
-    def query_reads(
-        self,
-        reads: Any,
-        *,
-        name: str | None = None,
-        params: ProfileParams | None = None,
-        fields: Sequence[str] | None = None,
-        tax_sources: Sequence[str] | None = None,
-    ) -> dict[str, Any]:
-        """ANI hits of one sample of reads (``POST /query``); ``reads`` as in :meth:`profile_reads`."""
-        return self._reads("query", reads, name, params, fields, tax_sources, None)
-
-    def identify_assembly(
-        self,
-        assembly: str | os.PathLike[str],
-        *,
-        name: str | None = None,
-        top: int = 10,
-        min_ani: float = 80.0,
-    ) -> dict[str, Any]:
-        """The closest genomes of one assembly (``POST /assembly``).
-
-        ``assembly`` is a FASTA path (gzip fine), sketched here as one sample; only the
-        sketch is sent, so it works on every server and the sequence never leaves this
-        machine.  Returns ``query`` (name, records, length, GC), ``hits`` (best first, at
-        most ``top``, ANI of at least ``min_ani``) and the server's interpretation.
-        """
-        sketching = _sketching()
-        c, k = self.sketch_parameters()
-        label = name or sketching.sample_name_from_path(assembly)
-        sketch, stats = sketching.sketch_assembly(assembly, label, c=c, k=k)
-        payload = sketch.to_bytes()
-        self._check_upload(payload)
-        return self.assembly_sketch(
-            payload, top=top, min_ani=min_ani, name=label,
-            records=stats.records, length=stats.length, gc=stats.gc,
-        )
-
-    def classify_contigs(
-        self,
-        assembly: str | os.PathLike[str],
-        *,
-        options: Any = None,
-        **overrides: Any,
-    ) -> Any:
-        """Classify every contig of a fragmented assembly on its own (``POST /contigs``).
-
-        Sketches each record, sends the sketches in batches that fit the server's contig and
-        upload limits, and returns a :class:`sylphd.per_contig_client.PerContigRun`: its
-        ``records`` (one dict per classified contig, input order), ``summary()``, and
-        ``write_tsv()`` / ``document()`` for the same table and JSON the command line writes.
-        Options are those of :class:`sylphd.per_contig_client.PerContigOptions` given as
-        keywords: ``top``, ``min_ani``, ``min_length``, ``fields``, ``consensus_ratio``,
-        ``consensus_z``, or a whole ``options=`` object.
-        """
-        _sketching()
-        import dataclasses
-
-        from . import per_contig_client
-
-        options = dataclasses.replace(options or per_contig_client.PerContigOptions(), **overrides)
-        return per_contig_client.run(self, assembly, options, info=self.database_info())
-
-    def _reads(
-        self,
-        endpoint: str,
-        reads: Any,
-        name: str | None,
-        params: ProfileParams | None,
-        fields: Sequence[str] | None,
-        tax_sources: Sequence[str] | None,
-        taxprof: Sequence[str] | None,
-    ) -> dict[str, Any]:
-        sketching = _sketching()
-        sample = _sample_input(sketching, reads, name)
-        c, k = self.sketch_parameters()
-        sketch = sketching.sketch_sample(sample, c=c, k=k)
-        sketching.check_sketch(sketch, c=c, k=k, name=sample.name)
-        payload = sketch.to_bytes()
-        self._check_upload(payload)
-        samples = [(sample.name, payload)]
-        if endpoint == "profile":
-            result = self.profile(
-                samples, params=params, fields=fields, tax_sources=tax_sources, taxprof=taxprof
-            )
-        else:
-            result = self.query(samples, params=params, fields=fields, tax_sources=tax_sources)
-        return result[0]
-
-    def _check_upload(self, payload: bytes) -> None:
-        limit = int((self.database_info().get("limits") or {}).get("max_upload_mb") or 0) * 1024 * 1024
-        if limit and len(payload) > limit:
-            raise ClientError(
-                f"the sketch is {len(payload)} bytes, over the server's "
-                f"{limit // (1024 * 1024)} MB upload limit"
-            )
 
     # -- plumbing ---------------------------------------------------------
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
@@ -362,286 +179,6 @@ class SylphClient:
     def info(self) -> dict[str, Any]:
         return self._request("GET", "info").json()
 
-    def messages(self, timeout: float = MESSAGES_TIMEOUT) -> list[dict[str, str]]:
-        """The operator's messages (``GET /messages``); ``[]`` when they cannot be had.
-
-        Best effort by design: an older server (404), a timeout, a connection
-        error or an odd document all give an empty list, never an exception, and
-        the request is neither retried nor counted for the token note.
-        """
-        try:
-            response = self._client.get("messages", timeout=timeout)
-            if response.status_code != 200:
-                return []
-            items = response.json()["messages"]
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            return []
-        if not isinstance(items, list):
-            return []
-        return [
-            item
-            for item in items
-            if isinstance(item, dict)
-            and item.get("level") in ("info", "warning", "danger")
-            and isinstance(item.get("title"), str)
-            and isinstance(item.get("message"), str)
-        ]
-
-    def profile(
-        self,
-        samples: Sequence[tuple[str, bytes]],
-        *,
-        params: ProfileParams | None = None,
-        fields: Sequence[str] | None = None,
-        tax_sources: Sequence[str] | None = None,
-        taxprof: Sequence[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Profile samples; ``taxprof`` asks the server to aggregate clades.
-
-        Each returned sample then carries a ``taxprof`` object keyed by
-        taxonomy (``gtdb``/``ncbi``/``tax``) with the structured clades and the
-        rendered ``.sylphmpa`` text.
-        """
-        return self._post(
-            "profile", samples, params, fields, tax_sources, taxprof
-        )
-
-    def query(
-        self,
-        samples: Sequence[tuple[str, bytes]],
-        *,
-        params: ProfileParams | None = None,
-        fields: Sequence[str] | None = None,
-        tax_sources: Sequence[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        return self._post("query", samples, params, fields, tax_sources)
-
-    def assembly(
-        self,
-        payload: bytes,
-        *,
-        top: int = 10,
-        min_ani: float = 80.0,
-        name: str | None = None,
-        content_type: str = "application/octet-stream",
-        extra_params: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Send one raw FASTA/FASTQ assembly to ``POST /assembly``.
-
-        The server must run with ``--allow-sequences``.
-        """
-        return self._assembly(
-            payload, top=top, min_ani=min_ani, name=name, content_type=content_type,
-            extra_params=extra_params,
-        )
-
-    def assembly_sketch(
-        self,
-        sketch: bytes,
-        *,
-        top: int = 10,
-        min_ani: float = 80.0,
-        name: str | None = None,
-        records: int | None = None,
-        length: int | None = None,
-        gc: float | None = None,
-    ) -> dict[str, Any]:
-        """Send the sketch (``.sylsp`` bytes) of one assembly to ``POST /assembly``.
-
-        Works on every server.  ``records``, ``length`` and ``gc`` are
-        informational: the server echoes them in ``query`` since it never sees
-        the sequence.
-        """
-        extra = {
-            key: value
-            for key, value in (("records", records), ("length", length), ("gc", gc))
-            if value is not None
-        }
-        return self._assembly(
-            sketch, top=top, min_ani=min_ani, name=name,
-            content_type=SKETCH_CONTENT_TYPE, extra_params=extra,
-        )
-
-    def _assembly(
-        self,
-        payload: bytes,
-        *,
-        top: int,
-        min_ani: float,
-        name: str | None,
-        content_type: str,
-        extra_params: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {"top": top, "min_ani": min_ani}
-        if name:
-            params["name"] = name
-        params.update(extra_params or {})
-        response = self._request(
-            "POST",
-            "assembly",
-            params=params,
-            content=payload,
-            headers={"content-type": content_type},
-        )
-        result = response.json()
-        if not isinstance(result, dict) or not isinstance(result.get("table"), dict):
-            raise ClientError("unexpected response from /assembly")
-        return _assembly_doc_to_legacy(result)
-
-    def query_size(
-        self,
-        samples: Sequence[tuple[str, bytes]],
-        *,
-        params: ProfileParams | None = None,
-        fields: Sequence[str] | None = None,
-    ) -> int:
-        """Exact size in bytes of the multipart body :meth:`query` would send.
-
-        This is the prepared request's ``Content-Length`` (boundary, form
-        headers, JSON ``params`` and file names included), so a caller can
-        compare it with a server's upload limit instead of estimating.
-        """
-        request = self._prepare_post("query", samples, params, fields)
-        length = request.headers.get("content-length")
-        if length is None:  # pragma: no cover - bytes payloads always have one
-            raise ClientError("cannot determine the request size")
-        return int(length)
-
-    # -- per contig -------------------------------------------------------
-    def contigs(
-        self,
-        samples: Sequence[tuple[str, bytes]],
-        *,
-        contigs: Sequence[Mapping[str, Any]],
-        options: Mapping[str, Any] | None = None,
-        fields: Sequence[str] | None = None,
-        tax_sources: Sequence[str] | None = None,
-    ) -> dict[str, Any]:
-        """Classify the contigs of one fragmented assembly (``POST /contigs``).
-
-        ``samples`` holds one ``(name, sketch bytes)`` per contig, ``contigs``
-        one object per sketch in the same order with ``name``,
-        ``contig_kmers`` (the record's genome-style k-mer count), ``length``
-        and ``gc``.  ``options`` are the server-side scoring and reporting
-        options (``top``, ``min_ani``, ``consensus_ratio``, ``consensus_z``).
-        The server computes the contig-relative ANI, the ranking, the
-        classification and the consensus; the response carries one result per
-        contig plus a summary of the request.
-        """
-        if not samples:
-            raise ValueError("no contigs to send")
-        if len(samples) != len(contigs):
-            raise ValueError(
-                f"{len(contigs)} contig entries for {len(samples)} sketches"
-            )
-        response = self._send(
-            self._prepare_contigs(samples, contigs, options, fields, tax_sources)
-        )
-        result = response.json()
-        if (
-            not isinstance(result, dict)
-            or not isinstance(result.get("table"), dict)
-            or not isinstance(result.get("contigs"), dict)
-        ):
-            raise ClientError("unexpected response from /contigs")
-        return _contigs_doc_to_legacy(result)
-
-    def contigs_size(
-        self,
-        samples: Sequence[tuple[str, bytes]],
-        *,
-        contigs: Sequence[Mapping[str, Any]],
-        options: Mapping[str, Any] | None = None,
-        fields: Sequence[str] | None = None,
-        tax_sources: Sequence[str] | None = None,
-    ) -> int:
-        """Exact size in bytes of the multipart body :meth:`contigs` would send."""
-        request = self._prepare_contigs(samples, contigs, options, fields, tax_sources)
-        length = request.headers.get("content-length")
-        if length is None:  # pragma: no cover - bytes payloads always have one
-            raise ClientError("cannot determine the request size")
-        return int(length)
-
-    def _prepare_contigs(
-        self,
-        samples: Sequence[tuple[str, bytes]],
-        contigs: Sequence[Mapping[str, Any]],
-        options: Mapping[str, Any] | None,
-        fields: Sequence[str] | None,
-        tax_sources: Sequence[str] | None,
-    ) -> httpx.Request:
-        files: list[tuple[str, tuple[str, bytes, str]]] = [
-            (
-                "sketch",
-                (f"{name or 'contig'}.sylsp", data, "application/octet-stream"),
-            )
-            for name, data in samples
-        ]
-        return self._client.build_request(
-            "POST",
-            "contigs",
-            data={
-                "params": contigs_json(
-                    contigs, options=options, fields=fields, tax_sources=tax_sources
-                )
-            },
-            files=files,
-        )
-
-    def _prepare_post(
-        self,
-        mode: str,
-        samples: Sequence[tuple[str, bytes]],
-        params: ProfileParams | None,
-        fields: Sequence[str] | None,
-        tax_sources: Sequence[str] | None = None,
-        taxprof: Sequence[str] | None = None,
-    ) -> httpx.Request:
-        """Build the multipart request ``_post`` sends (shared with ``query_size``)."""
-        names = [name for name, _ in samples]
-        files: list[tuple[str, tuple[str, bytes, str]]] = [
-            (
-                "sketch",
-                (f"{name or 'sample'}.sylsp", data, "application/octet-stream"),
-            )
-            for name, data in samples
-        ]
-        return self._client.build_request(
-            "POST",
-            mode,
-            data={
-                "params": params_json(
-                    mode, params, names, fields, tax_sources, taxprof
-                )
-            },
-            files=files,
-        )
-
-    def _post(
-        self,
-        mode: str,
-        samples: Sequence[tuple[str, bytes]],
-        params: ProfileParams | None,
-        fields: Sequence[str] | None,
-        tax_sources: Sequence[str] | None = None,
-        taxprof: Sequence[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        if not samples:
-            raise ValueError("no samples to send")
-        response = self._send(
-            self._prepare_post(
-                mode, samples, params, fields, tax_sources, taxprof
-            )
-        )
-        result = response.json()
-        if (
-            not isinstance(result, dict)
-            or not isinstance(result.get("table"), dict)
-            or not isinstance(result.get("samples"), list)
-        ):
-            raise ClientError(f"unexpected response from /{mode}")
-        return _profile_doc_to_samples(result, mode)
-
     def close(self) -> None:
         self._client.close()
 
@@ -650,59 +187,6 @@ class SylphClient:
 
     def __exit__(self, *exc_info: object) -> None:
         self.close()
-
-
-# Temporary Step-1 converters (document -> legacy shapes); deleted in Step 5.
-_CONTIG_ROW_ONLY = frozenset(
-    {"contig", "contig_length", "gc", "status", "n_close", "consensus_rank", "consensus_taxon"}
-)
-
-
-def _table_to_rows(table: Mapping[str, Any]) -> list[dict[str, Any]]:
-    columns = table["columns"]
-    return [dict(zip(columns, values, strict=True)) for values in table["data"]]
-
-
-def _profile_doc_to_samples(doc: Mapping[str, Any], mode: str) -> list[dict[str, Any]]:
-    by_sample: dict[str, list[dict[str, Any]]] = {}
-    for row in _table_to_rows(doc["table"]):
-        by_sample.setdefault(str(row.get("Sample_file", "")), []).append(row)
-    taxprof = doc.get("taxprof") or {}
-    params = doc.get("params") or {}
-    return [
-        {
-            "name": entry["name"],
-            "kind": mode,
-            "params": params,
-            "rows": by_sample.get(entry["name"], []),
-            **({"taxprof": taxprof[entry["name"]]} if entry["name"] in taxprof else {}),
-        }
-        for entry in doc["samples"]
-    ]
-
-
-def _assembly_doc_to_legacy(doc: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        **{key: value for key, value in doc.items() if key != "table"},
-        "hits": _table_to_rows(doc["table"]),
-    }
-
-
-def _contigs_doc_to_legacy(doc: Mapping[str, Any]) -> dict[str, Any]:
-    by_contig: dict[str, list[dict[str, Any]]] = {}
-    for row in _table_to_rows(doc["table"]):
-        if row.get("rank") is None:
-            continue
-        hit = {key: value for key, value in row.items() if key not in _CONTIG_ROW_ONLY}
-        by_contig.setdefault(str(row["contig"]), []).append(hit)
-    contigs = [
-        {"name": name, **entry, "hits": by_contig.get(name, [])}
-        for name, entry in doc["contigs"].items()
-    ]
-    return {
-        **{key: value for key, value in doc.items() if key not in ("table", "contigs")},
-        "contigs": contigs,
-    }
 
 
 def _retry_delay(response: httpx.Response, attempt: int) -> float:

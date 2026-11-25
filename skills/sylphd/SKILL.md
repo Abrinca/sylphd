@@ -11,16 +11,18 @@ Run commands as `sylphd ...`. Use only the flags listed here. Anything else: che
 
 ## 0. Setup
 
-Check that `sylphd --version` works. If `sylphd` is missing, ask the user before installing (the first install compiles Rust and takes a few minutes):
+Check that `sylphd --version` works. If `sylphd` is missing, ask the user before installing. It is one command and needs no compiler: the `client` extra brings the prebuilt `sylphd-client` binary.
 
 ```sh
-uv tool install "sylphd[client] @ git+https://github.com/Abrinca/sylphd"
+uv tool install "sylphd[client]"
 ```
+
+(If `uv` cannot resolve the package, the user installs it from the release wheels; see the install page. Do not try to build it from a clone.)
 
 If it is installed but may be out of date (its version differs from the `version` in `sylphd info --json`, or the server rejects a command or flag), offer to update, and wait for a yes:
 
 ```sh
-uv tool install --force "sylphd[client] @ git+https://github.com/Abrinca/sylphd"
+uv tool install --force "sylphd[client]"
 ```
 
 ## 1. Pick the mode from the input
@@ -53,6 +55,8 @@ sylphd assembly --per-contig FILE -o STEM.sylphd.tsv
 sylphd profile -r FILE -o STEM.sylphd.tsv
 sylphd profile -1 A_R1.fq.gz -2 A_R2.fq.gz -o STEM.sylphd.tsv
 ```
+
+Write TSV with `-o STEM.sylphd.tsv`, or the server's JSON document with `--json` (same `-o`). The document is the stable interface: `sylphd render DOC.json` prints its table later, offline.
 
 Add the server options (`--url URL` / `--socket PATH`, `--token-file PATH`) as selected above. Optional, only when the user asks:
 

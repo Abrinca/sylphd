@@ -3,7 +3,7 @@
 Cargo workspace for sylphd's client-side Rust crates:
 
 * **`sylphd-core/`** — pure library (no `wasm-bindgen`, no I/O, no networking): FASTA/FASTQ streaming parser, sylph read and per-contig sketchers (over the `sylph` library core), sample naming and input specification parsing, assembly stats, `.sylsp` header validation, per-contig batch planning, the wire-protocol document model with its `api_version` check and per-contig run merge, result rendering (sylph-identical TSV, summaries, caveats, `info` text), and optional native `std::io::Read` + `flate2` (`io` feature) and `rayon` parallel sketching (`rayon` feature).
-* **`sylphd-client/`** — the `sylphd-client` binary: `profile`, `query`, `assembly` (including `--per-contig` and `--no-local-sketch`), `info` and the offline `render`. It adds address/token resolution (socket, TCP, URL; environment variables; retries) and a blocking `reqwest` transport (multipart, gzip, rustls with the `ring` provider so static musl builds need no cmake) around the core. Behaviour mirrors `src/sylphd/{cli,client,per_contig_client}.py`; step 5 forwards the Python `sylphd` command to this binary.
+* **`sylphd-client/`** — the `sylphd-client` binary: `profile`, `query`, `assembly` (including `--per-contig` and `--no-local-sketch`), `info` and the offline `render`. It adds address/token resolution (socket, TCP, URL; environment variables; retries) and a blocking `reqwest` transport (multipart, gzip, rustls with the `ring` provider so static musl builds need no cmake) around the core. Behaviour mirrors the Python implementation of steps 1-4 (`src/sylphd/{cli,client,per_contig_client}.py`, deleted in step 5); the Python `sylphd` command forwards to this binary.
 * **`sylphd-wasm/`** — browser WebAssembly bindings (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`, plus the document/renderer functions below) and the push/pull multi-member gzip decoder used by the web app (`web/`, "Reads" and "Assembly" modes).
 
 Originally built as a feasibility spike (`sketch-wasm/`) to sketch FASTQ/FASTA(.gz) reads **locally in the browser**
@@ -132,9 +132,13 @@ caller must not accumulate the records).
 
 Everything the clients do with a server answer lives here: parse the JSON document, check its
 `api_version`, merge `/contigs` batches into a run, and render the bytes the command line and the
-web page show. There is no I/O and no networking. The Python implementation is the specification
-(`tests/data/*_golden.json` hold documents captured from the Python server and the exact strings
-the Python renderers produced for them, see `scratch/step3b/generate_goldens.py`).
+web page show. There is no I/O and no networking. The Python implementation was the specification
+and is gone since step 5 of the plan (`src/sylphd/protocol.py` lost its rendering, `cli.py` its
+`info` text): **the committed goldens are the spec now**. `tests/data/*_golden.json` hold documents
+captured from the Python server and the exact strings the Python renderers produced for them;
+`scripts/regen-render-golden.py` was removed with that renderer, so regenerating them would need
+stock sylph (the `tests/test_sylph_compat.py` route) or a hand-written document. Change a golden
+only together with `render.rs`, and say why in the commit message.
 
 Rust API:
 
@@ -145,7 +149,7 @@ use sylphd_core::render;
 
 check_api_version(doc.api_version)?;            // "server API version N, this client supports M: update sylphd"
 let profile = ProfileDocument::from_json_str(text)?;   // checks api_version first
-let tsv = render::render_profile_tsv(&profile);        // == protocol.rows_to_tsv (sylph columns byte-identical)
+let tsv = render::render_profile_tsv(&profile);        // == the old protocol.rows_to_tsv (sylph columns byte-identical)
 let caveats = render::render_profile_caveats(&profile); // "sylphd: warning: ..." lines
 
 let assembly = AssemblyDocument::from_json_str(text)?;
@@ -193,12 +197,33 @@ compiled module of the sketching workers; the web app's downloads and the per-co
 through it, so the browser has no TSV/summary writers of its own.
 
 
+## Packaging: `sylphd-bin` and the standalone archives
+
+`sylphd-client/pyproject.toml` is a maturin build with `bindings = "bin"`: the wheel is
+`py3-none-<platform>` (no extension module, so one wheel serves every Python version) and puts the
+binary in `<wheel>.data/scripts/sylphd-client`, which pip/uv install into the environment's
+`bin`/`Scripts` directory. `src/sylphd/clientbin.py` finds it there.
+
+```bash
+cd rust/sylphd-client
+maturin build --release          # -> ../target/wheels/sylphd_bin-X.Y.Z-py3-none-manylinux_2_34_x86_64.whl
+```
+
+`uv sync` in the repository root builds this wheel from the checkout (needs a Rust toolchain) so
+that `.venv/bin/sylphd-client` exists; the release workflow builds it per platform (manylinux and
+musllinux x86_64/aarch64, macOS arm64/x86_64, Windows x86_64) and additionally attaches the bare
+binary as `sylphd-client-X.Y.Z-<target>.tar.gz` (or `.zip`), for machines without Python.
+
+The version is `[workspace.package].version` in `rust/Cargo.toml`; it must equal
+`sylphd.__version__` (`sylphd-client/src/lib.rs` asserts it, and `tests/test_packaging.py` checks
+the extras' `sylphd-bin==<version>` pins).
+
 ## Equality with pysylph
 
 `cargo test --release` (from `rust/`) sketches the inputs with `sylphd-core` natively
 and runs `sylphd-core/tests/compare_pysylph.py` with the sylphd venv (`../.venv`, or `SYLPHD_PYTHON`).
 Reference sketches come from `pysylph.Sketcher(c, k, deduplicate).sketch_single` /
-`.sketch_paired`, fed with `dnaio` exactly as `sylphd.sketching` does. pysylph's bytes are
+`.sketch_paired`, fed with `dnaio` exactly as the deleted `sylphd.sketching` did. pysylph's bytes are
 re-emitted with the k-mer entries sorted (this crate always writes them sorted, sylph writes hash-map
 order, which no reader depends on) and compared **byte for byte**; the profile against
 `tests/data/ecoli.syl2db` is compared as well.
@@ -232,7 +257,7 @@ hash, duplicate removal, greedy spacing), for the AVX2 position trimming and for
 the streaming record split. `tests/test_web_contigs_js.py` (in the repository's
 `tests/`, run with `uv run pytest tests/test_web_contigs_js.py`) then compares
 the **built wasm** record by record with pysylph and with the CLI reference
-`sylphd.sketching.sketch_contigs`:
+the (deleted) `sylphd.sketching.sketch_contigs`:
 
 | case | |
 |---|---|

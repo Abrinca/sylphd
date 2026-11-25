@@ -582,7 +582,6 @@ class TestPermissions:
         assert stat.S_IMODE(output.stat().st_mode) == 0o666 & ~_umask()
 
 
-
 class TestReaderVersions:
     @pytest.mark.parametrize("version", ["2", "4", None])
     def test_other_versions_are_refused(
@@ -613,10 +612,12 @@ class TestReaderVersions:
     def test_file_without_taxonomy_sources_serves_metadata_columns(
         self, tmp_path: Path, tiny_database: Path
     ) -> None:
+        import dnaio
+        import pysylph
+
         from conftest import CLODF13_FASTA
 
         from sylphd.server import ServerConfig, create_app
-        from sylphd.sketching import SampleInput, sketch_sample
 
         source = tmp_path / "one.tsv"
         row = _gtdb_row("GCA_000000001.1", "d__Bacteria;p__Test;c__Test")
@@ -624,7 +625,9 @@ class TestReaderVersions:
         source.write_text("\t".join(HEADER) + "\n" + "\t".join(row) + "\n")
         path = Path(build_metadata_db([source], tmp_path / "meta.sqlite")["path"])
 
-        sketch = sketch_sample(SampleInput("clodf13", ((str(CLODF13_FASTA),),)), c=200, k=31)
+        with dnaio.open(CLODF13_FASTA) as reader:
+            sequences = [record.sequence for record in reader]
+        sketch = pysylph.Sketcher(c=200, k=31).sketch_single("clodf13", sequences)
         app = create_app(ServerConfig(db_path=tiny_database, meta_path=path))
         with TestClient(app) as client:
             assert client.get("/info").json()["metadata"]["format_version"] == "3"
@@ -1012,62 +1015,43 @@ class TestOverlaps:
         ]
 
     def test_sylphd_info_prints_the_counts(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self, tmp_path: Path, gtdb_source: Path
     ) -> None:
-        """``sylphd info`` follows the JSON, so a fake client covers the layout."""
-        document = {
-            "database": {
-                "name": "db",
-                "size": 1,
-                "genomes": 1,
-                "c": 200,
-                "k": 31,
-                "screen_c": None,
-                "two_stage": False,
-            },
-            "metadata": {
-                "file": "meta.sqlite",
-                "release": "232",
-                "rows": 2,
-                "built": "2026-01-01T00:00:00+00:00",
-                "columns": ["gtdb_taxonomy"],
-                "taxonomy_sources": [
-                    {"name": "First", "kind": "sylphtax", "keys": 9},
-                    {"name": "Second", "kind": "sylphtax", "keys": 10},
-                ],
-                "taxonomy_overlaps": [
-                    {"sources": ["First", "Second"], "keys": 1234, "examples": ["K1", "K2"]},
-                ],
-            },
-            "limits": {},
-            "usage": {"enabled": False},
-            "version": "0.0.0",
-            "pysylph_version": "0.0.0",
-            "python_version": "3.14.0",
-        }
+        """The text layout of the two sources and their overlap (rendered by sylphd-client)."""
+        import subprocess
+        import sys
 
-        class FakeClient:
-            def __enter__(self):
-                return self
+        from test_messages import _serve_socket
 
-            def __exit__(self, *info: object) -> None:
-                return None
-
-            def info(self) -> dict[str, object]:
-                return document
-
-            def messages(self) -> list[dict[str, str]]:
-                return []
-
-        monkeypatch.setattr(cli, "_client_from_args", lambda args: FakeClient())
-        assert cli.main(["info"]) == 0
-        out = capsys.readouterr().out
-        assert "    First: 9 keys" in out
+        first, second = self._two_sources(tmp_path)
+        path = tmp_path / "meta.sqlite"
+        build_metadata_db(
+            [gtdb_source],
+            path,
+            release=232,
+            taxonomy=[TaxonomySource("First", first), TaxonomySource("Second", second)],
+        )
+        socket_path, process = _serve_socket(tmp_path, "--meta", str(path))
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "sylphd", "info", "--socket", str(socket_path)],
+                capture_output=True, text=True, timeout=600,
+            )
+        finally:
+            process.terminate()
+            process.wait(timeout=20)
+        assert result.returncode == 0, result.stderr
+        out = result.stdout
+        assert "    First: 7 keys" in out
         assert "    Second: 10 keys" in out
+        assert "    GTDB_r232: 2 keys, virtual, from -m" in out
         assert "path:" not in out
         assert "metadata: meta.sqlite" in out
         assert "  taxonomy overlaps: 1" in out
-        assert "    First and Second: 1,234 shared keys; examples: K1, K2; the source imported later wins" in out
+        assert (
+            "    First and Second: 7 shared keys; examples: SHARED-01, SHARED-02, "
+            "SHARED-03, SHARED-04, SHARED-05; the source imported later wins"
+        ) in out
 
 
 class TestCliSpecs:

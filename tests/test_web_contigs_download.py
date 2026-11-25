@@ -7,9 +7,9 @@ call the renderer and the per-contig merge exposed by ``sylphd-wasm``
 built wasm module under node and compares the browser's outputs with the
 Python implementation, which is the specification:
 
-* the per-contig merge (``merge_contigs_run``) against
-  ``per_contig_client.PerContigRun``, byte for byte for the TSV and value for
-  value for the counters, consensus breakdown and contig order;
+* the per-contig merge (``merge_contigs_run``) against the server's own
+  summaries and maps (``sylphd.per_contig``), for the table, the counters, the
+  consensus breakdown and the contig order;
 * the renderer exports against the golden documents in
   ``rust/sylphd-core/tests/data/``, whose expected strings were produced by
   the Python server and renderers;
@@ -22,7 +22,6 @@ it has not been built (``rust/sylphd-wasm/build.sh``).
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import shutil
@@ -31,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from sylphd import per_contig, per_contig_client
+from sylphd import per_contig
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTIGS_JS = ROOT / "web" / "contigs.js"
@@ -178,34 +177,15 @@ def run_wasm(payload: dict) -> dict:
     return json.loads(done.stdout)
 
 
-def test_wasm_merge_and_tsv_match_the_cli() -> None:
+def test_wasm_merge_and_tsv_match_the_server() -> None:
     # Only contigs that were sent have records: records skipped for min_length
     # or too few k-mers never become documents, they are counts in the options.
     classified = [record for record in RECORDS if record["status"] in {"ok", "no_hit"} and "reason" not in record]
     batch = batch_document(classified, 12.5)
-    options = per_contig_client.PerContigOptions(
-        top=2,
-        min_ani=80.0,
-        min_length=3000,
-        fields=FIELDS,
-        consensus_ratio=1.5,
-        consensus_z=2.0,
-    )
-    skipped_short = per_contig_client.Skipped(contigs=1, bp=2500)
-    skipped_few_kmers = per_contig_client.Skipped(contigs=1, bp=18000)
-    reference = per_contig_client.PerContigRun(
-        classified,
-        summaries=[batch["summary"]],
-        options=options,
-        params=per_contig.QUERY_PARAMS,
-        database=DATABASE,
-        skipped_short=skipped_short,
-        skipped_few_kmers=skipped_few_kmers,
-    )
-    expected_tsv = io.StringIO()
-    reference.write_tsv(expected_tsv)
-    expected_summary = io.StringIO()
-    reference.print_summary(expected_summary)
+    # One batch: the merge must keep the server's summary as it is, and add the
+    # client-side buckets (a single batch is the unit test of the merge itself;
+    # several batches are covered in rust/sylphd-core/tests/document.rs).
+    expected_summary = per_contig.finalize_summary(per_contig.merge_summaries([batch["summary"]]))
 
     got = run_wasm({
         "batches": [batch],
@@ -217,25 +197,47 @@ def test_wasm_merge_and_tsv_match_the_cli() -> None:
     })["merged"]
     doc = got["doc"]
 
-    # The per-contig TSV and the two stderr summary lines are byte-identical.
-    assert got["tsv"] == expected_tsv.getvalue()
-    assert got["summary"] == expected_summary.getvalue()
-
-    # Counters, bucketed skips and the (top-5) consensus breakdown match the CLI.
+    # Counters, bucketed skips and the (top-5) consensus breakdown.
     summary = doc["summary"]
-    for key, value in reference.summary().items():
-        assert summary[key] == value, key
+    # The batch's own numbers survive; the run adds the two skip buckets and
+    # counts the skipped records in `contigs`/`bp`.
+    for key in (
+        "queried_contigs",
+        "queried_bp",
+        "no_hit_contigs",
+        "consensus_bp",
+    ):
+        assert summary[key] == expected_summary[key], key
+    assert summary["skipped_short"] == {"contigs": 1, "bp": 2500}
+    assert summary["skipped_few_kmers"] == {"contigs": 1, "bp": 18000}
+    assert summary["min_contig_length"] == 3000
+    assert summary["contigs"] == 5
+    assert summary["queried_contigs"] == 3
+    assert summary["queried_bp"] == 1_954_431 + 40_000 + 30_000
+    assert summary["no_hit_contigs"] == 1
     assert "not_classified" not in summary
 
     # One flat table, the union of the batch tables, with the requested fields.
     assert doc["table"] == per_contig.contigs_table(classified, FIELDS)
     assert doc["contigs"] == per_contig.contigs_map(classified)
     assert list(doc["contigs"]) == ["contig1", "contig2", "contig9"]
-    assert doc["caveats"] == reference.caveats()
+    assert doc["caveats"] == per_contig.caveats(classified)
     assert doc["params"] == batch["params"]
     assert doc["database"] == DATABASE
     assert doc["thresholds"] == THRESHOLDS
     assert doc["api_version"] == 1
+
+    # The TSV: the header, then one row per hit, the skipped contigs nowhere.
+    lines = got["tsv"].splitlines()
+    assert lines[0].split("\t") == [*per_contig.TABLE_COLUMNS, *FIELDS]
+    # A contig without a hit is one row with empty hit columns, not no row.
+    assert [line.split("\t")[0] for line in lines[1:]] == [
+        "contig1",
+        "contig1",
+        "contig2",
+        "contig9",
+    ]
+    assert got["summary"].splitlines()[0].startswith("per-contig: 3 of 5 contig(s)")
 
 
 def test_skipped_records_have_no_rows_and_no_contig_entries() -> None:
@@ -245,8 +247,9 @@ def test_skipped_records_have_no_rows_and_no_contig_entries() -> None:
         "options": {"fields": list(FIELDS), "min_contig_length": 3000},
     })["merged"]
     lines = got["tsv"].splitlines()
-    columns = list(per_contig_client.COLUMNS) + list(FIELDS)
+    columns = list(per_contig.TABLE_COLUMNS) + list(FIELDS)
     assert lines[0].split("\t") == columns
+    # Records this run never sent have no row at all.
     assert [line.split("\t")[0] for line in lines[1:]] == ["contig1", "contig1", "contig2"]
     assert "contig7" not in got["tsv"]
     assert "contig8" not in got["tsv"]
@@ -272,7 +275,7 @@ def test_browser_limit_is_an_extra_summary_field() -> None:
     assert doc["summary"]["not_classified"] == {"contigs": 140, "bp": 3_500_000, "limit": 100}
     assert doc["summary"]["skipped_short"] == {"contigs": 3, "bp": 30_000}
     assert doc["summary"]["skipped_few_kmers"] == {"contigs": 7, "bp": 20_000}
-    assert doc["table"]["columns"] == [*per_contig_client.COLUMNS, "gtdb_taxonomy"]
+    assert doc["table"]["columns"] == [*per_contig.TABLE_COLUMNS, "gtdb_taxonomy"]
     assert doc["table"]["data"] == []
     # With no batch, the run document still has the merge options' params/database.
     assert doc["params"] == {}

@@ -9,6 +9,13 @@ sylphd assembly FILE [--top N] [--min-ani ANI] [--name NAME] [--local-sketch | -
                 [--retries N]
 ```
 
+This command is the native `sylphd-client`: the `sylphd` command runs the server and admin commands
+in Python and forwards this one, argv unchanged (same exit codes, same stdin and stdout), and
+`sylphd-client` is the same program for machines without Python. The client renders the table and
+the summary line, so they depend on the client version rather than the server's. `--json` saves the
+server's document (or, with `--per-contig`, the run document); [`render`](render.md) turns a saved
+document into the table later, without a server.
+
 Sketches one assembly (FASTA or FASTQ, plain or gzip) on this machine, sends the sketch to
 [`POST /assembly`](../reference/http-api.md#post-assembly) and prints a compact table of its closest
 database genomes. The sequence never leaves your machine and has no size limit; this works on any

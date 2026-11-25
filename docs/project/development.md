@@ -20,12 +20,13 @@ only needed for manual runs.
 |---|---|
 | `test_server.py` | the Starlette app: endpoints, errors, metadata join, socket cleanup, concurrency |
 | `test_web.py` | the public-web features: raw-sequence `/assembly`, rate limit, client identity, queue limit, CORS |
-| `test_assembly_sketch.py` | `/assembly` with a sketch: same results as the raw path, works without `--allow-sequences`, malformed sketches, `sylphd assembly` with and without `--local-sketch` |
+| `test_assembly_sketch.py` | `/assembly` with a sketch: same results as the raw path, works without `--allow-sequences`, malformed sketches |
 | `test_classify.py` | species assignment and hit relations for `/assembly` |
 | `test_sketchcheck.py` | structural validation of uploaded sketches, including drift against a decoded sketch |
-| `test_client.py` | client base URLs, address precedence, path prefixes |
-| `test_cli.py` | the command line, including the Unix-socket round trip |
-| `test_sketching.py` | inputs, sample names, `.sylsp` |
+| `test_client.py` | the Python transport (for `ncbitax`): base URLs, address precedence, path prefixes, retries |
+| `test_cli.py` | the CLI against live servers: round trips, metadata, taxprof outputs, errors |
+| `test_client_binary.py` | the native client end to end (a live server on a socket) |
+| `test_entry.py`, `test_packaging.py` | the `sylphd` wrapper, `sylphd.run`, version pins |
 | `test_metadata.py`, `test_download.py` | `setup` and `download` |
 | `test_metadata_taxonomy.py` | format 3 taxonomy tables: build, update, and the reader |
 | `test_multi_db.py` | a pooled server equals `pysylph.Profiler(*databases)`, single-database goldens, the shared `Profiler` cache |
@@ -34,7 +35,7 @@ only needed for manual runs.
 | `test_taxprof_payload.py` | the server-side `taxprof` payload: text and round-trippable clades |
 | `test_sylphtax_parity.py`, `test_taxmatrix_parity.py` | rule-for-rule parity with the real `sylph-tax` (`tax` profile, `merge`), byte for byte on rows that have the TSV's precision |
 | `test_parity.py` | `sylphd diff`: its rules, and real GlobDB output of stock sylph / sylph-tax against sylphd's (equivalent, not byte-identical) |
-| `test_assembly_per_contig.py` | `POST /contigs` and `sylphd assembly --per-contig` end to end |
+| `test_assembly_per_contig.py` | `POST /contigs`: validation, admission, contig-relative ANI, consensus, parsimony |
 | `test_about.py`, `test_deploy.py` | `--name`/`--about` in `/info`, and the `SYLPH_DB` rendering of the systemd unit |
 | `test_web_about_browser.py`, `test_web_reads_taxprof.py` | the page in headless Chromium: the operator text from `/info`, and the Reads chart from the server's `taxprof` |
 | `test_web_contigs_js.py`, `test_web_contigs_download.py` | browser per-contig sketching against pysylph, and its TSV/JSON against `sylphd assembly --per-contig` |

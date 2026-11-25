@@ -13,6 +13,11 @@ gh skill install Abrinca/sylphd sylphd --agent claude-code --scope user
 This needs the GitHub CLI (`gh`). For other agents use `--agent <name>`; see
 `gh skill install --help`. The skill is `skills/sylphd/SKILL.md` in the repository.
 
+The skill checks that `sylphd --version` works and installs the command line itself when it is
+missing (after asking): `uv tool install "sylphd[client]"`. That needs no Rust toolchain and no
+compiler — the `client` extra brings the prebuilt `sylphd-client` binary. See
+[Install](../install.md).
+
 ## Server and token
 
 The skill uses the public server, https://sylphd.abrinca.com, unless you say otherwise. To use
@@ -30,7 +35,8 @@ read from `--token-file PATH` or `$SYLPHD_TOKEN`, as the CLI does; the skill nev
   [messages](public-server.md#operator-messages). `warning` and `danger` messages need your explicit
   confirmation before any analysis; `info` messages are shown once. If the server keeps
   [usage statistics](../commands/serve.md#usage-statistics), it tells you and gives the `/usage` link.
-- **Writes the full output to a file** next to the input (`<name>.sylphd.tsv`, or `.json`) and
+- **Writes the full output to a file** next to the input (`<name>.sylphd.tsv`, or `.json` with
+  `--json`, which is the stable interface and renders later with `sylphd render`) and
   summarises it: top hits (species, ANI, relation) for an assembly, top clades for a profile,
   contig counts and the consensus for contigs.
 - **Stops on errors** (unreachable server, rejected token, HTTP 429) and reports the exact message.

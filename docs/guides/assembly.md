@@ -6,7 +6,8 @@ file. Both the [web app](https://abrinca.github.io/sylphd/#assembly) and the com
 (`sylphd assembly`) **sketch the assembly locally** with the database's `c` and `k` and send only
 the sketch to [`POST /assembly`](../reference/http-api.md#post-assembly), where the server runs
 sylph and classifies the hits. The sequence never leaves your machine (WebAssembly in the browser,
-pysylph on the command line), and a sketch of a bacterial genome is only 100–500 kB.
+the native `sylphd-client` on the command line), and a sketch of a bacterial genome is only
+100–500 kB.
 
 ## Sketching in the browser { #sketching-in-the-browser }
 

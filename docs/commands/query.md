@@ -4,6 +4,12 @@
 sylphd query [inputs] [options]
 ```
 
+This command is the native `sylphd-client`: the `sylphd` command runs the server and admin commands
+in Python and forwards this one, argv unchanged (same exit codes, same stdin and stdout), and
+`sylphd-client` is the same program for machines without Python. The client renders the output, so
+it depends on the client version rather than the server's. `--json` saves the server's document
+unchanged; [`render`](render.md) turns a saved document into the table later, without a server.
+
 ANI hits of one or more samples: the equivalent of `sylph query`. The client sketches locally and
 sends the sketches to the server, which returns every database genome the sample contains, with
 ANI and coverage, joined with the metadata.

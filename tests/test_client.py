@@ -1,13 +1,10 @@
-"""Client base URLs: parsing, CLI precedence, path prefixes and an HTTP round trip."""
+"""Python transport (``sylphd.client``, used by ``sylphd.ncbitax`` and ``sylphd taxonomy``):
+base URLs, address precedence, path prefixes, retries and the token."""
 
 from __future__ import annotations
 
 import json
-import socket
-import subprocess
-import sys
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
@@ -15,8 +12,6 @@ import pytest
 
 from sylphd import cli
 from sylphd.client import ClientError, SylphClient, connect, normalize_base_url
-
-from conftest import ECOLI_TWO_STAGE
 
 
 @pytest.fixture()
@@ -48,52 +43,6 @@ def recording_server():
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-
-
-@pytest.fixture(scope="module")
-def http_server(tmp_path_factory):
-    """A real ``sylphd serve --tcp`` process, addressed with an ``http://`` URL."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "sylphd",
-            "serve",
-            "--db",
-            str(ECOLI_TWO_STAGE),
-            "--tcp",
-            f"127.0.0.1:{port}",
-            "--log-level",
-            "warning",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    base = f"http://127.0.0.1:{port}"
-    deadline = time.monotonic() + 120
-    try:
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise AssertionError("server exited before accepting connections")
-            try:
-                if httpx.get(f"{base}/health", timeout=0.5).status_code == 200:
-                    break
-            except httpx.HTTPError:
-                time.sleep(0.1)
-        else:
-            raise AssertionError("server did not answer in time")
-        yield base
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
 
 
 class TestNormalizeBaseUrl:
@@ -137,7 +86,7 @@ class TestPathPrefix:
 class TestCliAddressPrecedence:
     @staticmethod
     def _client(*argv: str) -> SylphClient:
-        args = cli.build_parser().parse_args(["info", *argv])
+        args = cli.build_parser().parse_args(["taxonomy", "562", *argv])
         return cli._client_from_args(args)
 
     def test_env_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,39 +115,8 @@ class TestCliAddressPrecedence:
     )
     def test_address_flags_are_mutually_exclusive(self, flags: tuple[str, ...]) -> None:
         with pytest.raises(SystemExit) as caught:
-            cli.build_parser().parse_args(["info", *flags])
+            cli.build_parser().parse_args(["taxonomy", "562", *flags])
         assert caught.value.code == 2
-
-
-class TestHttpRoundTrip:
-    def test_cli_info_over_http(self, http_server: str) -> None:
-        result = subprocess.run(
-            [sys.executable, "-m", "sylphd", "info", "--url", http_server, "--json"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 0, result.stderr
-        info = json.loads(result.stdout)
-        assert info["database"]["c"] == 200
-        assert info["database"]["k"] == 31
-
-    def test_cli_url_must_be_reachable(self) -> None:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "sylphd",
-                "info",
-                "--url",
-                "http://127.0.0.1:9",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 1
-        assert "cannot talk to sylphd at http://127.0.0.1:9" in result.stderr
 
 
 class TestRetries:
@@ -219,23 +137,12 @@ class TestRetries:
 
     def test_retries_503_after_retry_after_then_succeeds(self, monkeypatch) -> None:
         busy = httpx.Response(503, json={"error": "busy"}, headers={"Retry-After": "3"})
-        ok = httpx.Response(
-            200,
-            json={
-                "api_version": 1,
-                "params": {},
-                "samples": [],
-                "table": {"columns": [], "data": []},
-                "caveats": [],
-            },
-        )
+        ok = httpx.Response(200, json={"service": "sylphd"})
         sleeps: list[float] = []
         client, calls = self._client([busy, busy, ok], 2, sleeps, monkeypatch)
-        assert client.profile([("a", b"sketch")]) == []
+        assert client.info() == {"service": "sylphd"}
         assert len(calls) == 3
         assert sleeps == [3.0, 3.0]
-        # the retried request carries the same multipart body
-        assert calls[0].content == calls[2].content
 
     def test_gives_up_after_the_retries(self, monkeypatch) -> None:
         limited = httpx.Response(429, json={"error": "slow down"})
@@ -273,10 +180,10 @@ class TestRetries:
         assert len(calls) == 1 and sleeps == []
 
     def test_cli_flag(self) -> None:
-        args = cli.build_parser().parse_args(["info", "--retries", "4"])
+        args = cli.build_parser().parse_args(["taxonomy", "562", "--retries", "4"])
         with cli._client_from_args(args) as client:
             assert client.retries == 4
-        args = cli.build_parser().parse_args(["info"])
+        args = cli.build_parser().parse_args(["taxonomy", "562"])
         with cli._client_from_args(args) as client:
             assert client.retries == 0
 

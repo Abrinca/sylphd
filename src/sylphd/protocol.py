@@ -1,4 +1,4 @@
-"""Wire protocol details: request parameters, result rows, TSV formatting.
+"""Wire protocol details: request parameters and result rows (rendering lives in sylphd-core).
 
 Requests
 --------
@@ -29,9 +29,8 @@ A JSON document with ``api_version``, effective ``params``, ``samples``,
 
 from __future__ import annotations
 
-import json
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Any
 
@@ -168,126 +167,6 @@ PROFILE_PARAM_KEYS: tuple[str, ...] = (
     # server should render (`["gtdb", "ncbi", "tax"]`).
     "taxprof",
 )
-
-
-def params_payload(
-    mode: str,
-    params: ProfileParams | None,
-    names: Sequence[str],
-    fields: Sequence[str] | None = None,
-    tax_sources: Sequence[str] | None = None,
-    taxprof: Sequence[str] | None = None,
-) -> dict[str, Any]:
-    """The JSON object sent as the ``params`` form field of ``/query``/``/profile``."""
-    payload: dict[str, Any] = {
-        **(params or ProfileParams()).to_dict(),
-        "names": list(names),
-        "mode": mode,
-    }
-    if fields is not None:
-        payload["fields"] = list(fields)
-    if tax_sources is not None:
-        payload["tax_sources"] = list(tax_sources)
-    if taxprof is not None:
-        payload["taxprof"] = list(taxprof)
-    return payload
-
-
-def params_json(
-    mode: str,
-    params: ProfileParams | None,
-    names: Sequence[str],
-    fields: Sequence[str] | None = None,
-    tax_sources: Sequence[str] | None = None,
-    taxprof: Sequence[str] | None = None,
-) -> str:
-    """The exact ``params`` value the client sends (default ``json.dumps`` separators)."""
-    return json.dumps(
-        params_payload(mode, params, names, fields, tax_sources, taxprof)
-    )
-
-
-def params_json_size(
-    mode: str,
-    params: ProfileParams | None,
-    names: Sequence[str],
-    fields: Sequence[str] | None = None,
-    tax_sources: Sequence[str] | None = None,
-    taxprof: Sequence[str] | None = None,
-) -> int:
-    """Length of :func:`params_json` in characters (one char is one UTF-8 byte here).
-
-    ``json.dumps`` escapes non-ASCII characters (``ensure_ascii``), so the
-    result is also the byte length of the ``params`` form part.
-    """
-    return len(params_json(mode, params, names, fields, tax_sources, taxprof))
-
-
-def contigs_payload(
-    contigs: Sequence[Mapping[str, Any]],
-    *,
-    options: Mapping[str, Any] | None = None,
-    fields: Sequence[str] | None = None,
-    tax_sources: Sequence[str] | None = None,
-) -> dict[str, Any]:
-    """The JSON object sent as the ``params`` field of ``POST /contigs``.
-
-    ``contigs`` holds one object per ``sketch`` part, in the same order, with
-    ``name``, ``contig_kmers`` (the record's genome-style k-mer count, the
-    denominator of the contig-relative ANI), ``length`` and ``gc``.  ``options``
-    are the server-side options of the scoring and the reporting: ``top``,
-    ``min_ani``, ``consensus_ratio`` and ``consensus_z``.  ``fields`` and
-    ``tax_sources`` keep their meaning from ``/query``.
-    """
-    payload: dict[str, Any] = {"contigs": [dict(contig) for contig in contigs]}
-    if options is not None:
-        payload.update(options)
-    if fields is not None:
-        payload["fields"] = list(fields)
-    if tax_sources is not None:
-        payload["tax_sources"] = list(tax_sources)
-    return payload
-
-
-def contigs_json(
-    contigs: Sequence[Mapping[str, Any]],
-    *,
-    options: Mapping[str, Any] | None = None,
-    fields: Sequence[str] | None = None,
-    tax_sources: Sequence[str] | None = None,
-) -> str:
-    """The exact ``params`` value the client sends to ``POST /contigs``."""
-    return json.dumps(
-        contigs_payload(
-            contigs, options=options, fields=fields, tax_sources=tax_sources
-        )
-    )
-
-
-def contigs_json_size(
-    contigs: Sequence[Mapping[str, Any]],
-    *,
-    options: Mapping[str, Any] | None = None,
-    fields: Sequence[str] | None = None,
-    tax_sources: Sequence[str] | None = None,
-) -> int:
-    """Length of :func:`contigs_json` in characters (== UTF-8 bytes)."""
-    return len(
-        contigs_json(
-            contigs, options=options, fields=fields, tax_sources=tax_sources
-        )
-    )
-
-
-def contig_json_size(contig: Mapping[str, Any]) -> int:
-    """Characters one ``params.contigs`` entry adds to the JSON text.
-
-    ``json.dumps`` of the whole object uses the same separators and escaping
-    for the nested entry, so a caller can account for a growing list without
-    re-encoding it: the first entry adds this many characters plus ``", "`` for
-    every later one.
-    """
-    return len(json.dumps(dict(contig)))
 
 
 def _is_number(value: object) -> bool:
@@ -457,74 +336,6 @@ def _pair(value: object) -> list[float] | None:
     return [float(low), float(high)]
 
 
-def _format_float(value: float, digits: int) -> str:
-    return f"{value:.{digits}f}"
-
-
-def format_value(column: str, value: Any) -> str:
-    """Format one cell of the TSV output, mirroring sylph's formatting.
-
-    ``None`` stands for what sylph prints in that column: ``NA-NA`` for a
-    missing confidence interval, ``inf`` for ``True_cov`` and ``NaN`` for the
-    abundances of a sketch without read statistics (``-u``).  ``Eff_lambda``
-    is ``HIGH``/``LOW`` in sylph when lambda cannot be estimated; that needs
-    ``Lambda_status``, so :func:`format_row` handles it.  Metadata columns
-    and anything else unknown stay empty.
-    """
-    if value is None:
-        if column in {"ANI_5-95_percentile", "Lambda_5-95_percentile"}:
-            return "NA-NA"
-        if column in {"Eff_cov", "True_cov"}:
-            return "inf"
-        if column in {"Taxonomic_abundance", "Sequence_abundance"}:
-            return "NaN"
-        return ""
-    if column in {"Sample_file", "Genome_file", "Contig_name", "accession"}:
-        return str(value)
-    if column == "Adjusted_ANI":
-        # sylph caps the adjusted ANI at 100; the naive ANI is not capped.
-        return _format_float(min(float(value), 100.0), 2)
-    if column == "Naive_ANI":
-        return _format_float(float(value), 2)
-    if column in {"Eff_cov", "True_cov", "Mean_cov_geq1"}:
-        return _format_float(float(value), 3)
-    if column == "Eff_lambda":
-        if isinstance(value, str):  # "HIGH" / "LOW"
-            return value
-        return _format_float(float(value), 3)
-    if column in {"ANI_5-95_percentile", "Lambda_5-95_percentile"}:
-        low, high = value  # type: ignore[misc]
-        return f"{low:.2f}-{high:.2f}"
-    if column == "Median_cov":
-        return _format_float(float(value), 0)
-    if column == "Containment_ind":
-        contained, total = value  # type: ignore[misc]
-        return f"{int(contained)}/{int(total)}"
-    if column in {"Taxonomic_abundance", "Sequence_abundance"}:
-        return _format_float(float(value), 4)
-    if column == "kmers_reassigned":
-        return str(int(value))
-    if isinstance(value, float):
-        return repr(value)
-    return str(value)
-
-
-def header_for(
-    mode: str,
-    params: ProfileParams | None = None,
-    fields: Sequence[str] | None = None,
-    *,
-    metadata_columns: Sequence[str] | None = None,
-) -> list[str]:
-    """TSV header: sylph columns, then ``accession`` and metadata columns."""
-    header = list(columns_for_mode(mode, params)) + list(EXTRA_COLUMNS)
-    if fields is not None:
-        header.extend(fields)
-    elif metadata_columns is not None:
-        header.extend(metadata_columns)
-    return header
-
-
 def table_columns(
     mode: str,
     params: ProfileParams | None = None,
@@ -541,75 +352,3 @@ def table_columns(
     return columns
 
 
-def format_row(row: Mapping[str, Any], header: Sequence[str]) -> str:
-    """Format a row as one TSV line (without the newline).
-
-    ``True_cov`` is the display alias used when ``estimate_unknown`` is set;
-    JSON rows keep the value under ``Eff_cov``.  Map the header to that key so
-    the column is not empty.
-    """
-    cells = []
-    for column in header:
-        value = row.get(column)
-        if column == "True_cov" and "True_cov" not in row and "Eff_cov" in row:
-            value = row["Eff_cov"]
-        if column == "Eff_lambda" and value is None:
-            # sylph: HIGH (median coverage too high) or LOW (not estimable).
-            status = row.get("Lambda_status")
-            if status in ("HIGH", "LOW"):
-                value = status
-        cells.append(format_value(column, value))
-    return "\t".join(cells)
-
-
-def rows_to_tsv_lines(
-    samples: Iterable[Mapping[str, Any]],
-    mode: str,
-    *,
-    params: ProfileParams | None = None,
-    fields: Sequence[str] | None = None,
-    metadata_columns: Sequence[str] | None = None,
-):
-    """Yield the TSV header followed by every result row.
-
-    ``fields=None`` is the wire value for "all": the server returns every
-    metadata column.  For display, use ``metadata_columns`` (the server's
-    column order) when given, otherwise infer the columns from the returned
-    rows in first-seen order.
-    """
-    if fields is None and metadata_columns is None:
-        sample_list = list(samples)
-        base = set(header_for(mode, params, [])) | {"Lambda_status"}
-        inferred: list[str] = []
-        for sample in sample_list:
-            for row in sample.get("rows", ()):
-                for key in row:
-                    if key not in base and key not in inferred:
-                        inferred.append(key)
-        metadata_columns = inferred
-        samples = sample_list
-    header = header_for(mode, params, fields, metadata_columns=metadata_columns)
-    yield "\t".join(header)
-    for sample in samples:
-        for row in sample.get("rows", ()):
-            yield format_row(row, header)
-
-
-def rows_to_tsv(
-    samples: Iterable[Mapping[str, Any]],
-    mode: str,
-    *,
-    params: ProfileParams | None = None,
-    fields: Sequence[str] | None = None,
-    metadata_columns: Sequence[str] | None = None,
-) -> str:
-    """Render the response samples as a single TSV document."""
-    return "\n".join(
-        rows_to_tsv_lines(
-            samples,
-            mode,
-            params=params,
-            fields=fields,
-            metadata_columns=metadata_columns,
-        )
-    ) + "\n"

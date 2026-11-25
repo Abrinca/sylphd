@@ -18,7 +18,6 @@ import pysylph
 import pytest
 
 from sylphd import cli
-from sylphd.client import ClientError, connect
 from sylphd.metadata import METADATA_COLUMNS
 from sylphd.metadata_build import build_metadata_db
 from sylphd.taxonomy_sources import TaxonomySource
@@ -266,15 +265,25 @@ def taxonomy_server(tmp_path_factory):
 class TestUnixSocketRoundTrip:
     def test_allocation_bomb_does_not_kill_the_server(self, server) -> None:
         """The real ``sylphd serve`` process must survive a malicious upload."""
+        import httpx
+
         socket_path, process = server
-        with connect(socket_path=socket_path) as client:
-            with pytest.raises(ClientError) as caught:
-                client.query([("bomb", struct.pack("<Q", 100_000_000))])
-            assert caught.value.status_code == 400
-            assert "declares" in str(caught.value)
+        transport = httpx.HTTPTransport(uds=str(socket_path))
+        with httpx.Client(transport=transport, base_url="http://sylphd.local") as http:
+            bomb = http.post(
+                "/query",
+                data={"params": "{}"},
+                files={"sketch": ("bomb.sylsp", struct.pack("<Q", 100_000_000))},
+            )
+            assert bomb.status_code == 400
+            assert "declares" in bomb.json()["error"]
             # Same process, same socket: still answering.
-            assert client.health()["status"] == "ok"
-            assert client.query([("o157", O157_SKETCH.read_bytes())])
+            assert http.get("/health").json()["status"] == "ok"
+            assert http.post(
+                "/query",
+                data={"params": "{}"},
+                files={"sketch": ("o157.sylsp", O157_SKETCH.read_bytes())},
+            ).status_code == 200
         assert process.poll() is None
 
     def test_profile_matches_pysylph(self, server) -> None:
@@ -350,12 +359,17 @@ class TestUnixSocketRoundTrip:
             str(O157_SKETCH),
             "--socket",
             str(socket_path),
-            "--format",
-            "json",
+            "--json",
         )
-        payload = json.loads(result.stdout)
-        assert payload[0]["kind"] == "query"
-        assert len(payload[0]["rows"]) == 3
+        document = json.loads(result.stdout)
+        assert document["api_version"] == 1
+        assert [sample["name"] for sample in document["samples"]] == ["o157"]
+        rows = [
+            dict(zip(document["table"]["columns"], values))
+            for values in document["table"]["data"]
+        ]
+        assert len(rows) == 3
+        assert {row["Sample_file"] for row in rows} == {"o157"}
 
     def test_estimate_unknown_tsv_value(self, server) -> None:
         socket_path, _ = server
@@ -899,9 +913,12 @@ class TestNonGtdbClassification:
         assert payload["assignment"]["taxonomy_source"] == "UHGV"
         assert payload["assignment"]["note"].startswith("UHGV (viruses)")
         assert payload["closest"] == payload["assignment"]
-        (hit,) = payload["hits"]
+        (hit,) = [
+            dict(zip(payload["table"]["columns"], values))
+            for values in payload["table"]["data"]
+        ]
         assert hit["taxonomy_source"] == "UHGV"
-        assert hit["taxonomy"]["level 2"] == "vOTU-1"
+        assert hit["taxon"] == "vOTU-1"
         assert hit["shared_rank"] == "species"
 
     def test_per_contig_prints_the_caveat_once(self, taxonomy_server, tmp_path) -> None:
@@ -1025,13 +1042,20 @@ class TestRequireToken:
         assert "--require-token needs --privileged-token-file" in result.stderr
 
 
-def test_assignment_summary_words_a_gtdb_taxonomy_source_as_a_species() -> None:
-    from sylphd.cli import _assignment_summary
+def test_a_gtdb_taxonomy_source_assigns_a_species() -> None:
+    """A GTDB-style lineage with an ``s__`` rank is a species, whatever the source.
+
+    The wording of the summary line ("assigned to species ... (100.00 % ANI)") is the
+    renderer's, covered by ``rust/sylphd-core/tests/render.rs``; here the server's
+    classification is what matters.
+    """
     from sylphd.assembly import classify_hits
 
     lineage = "d__Bacteria;p__Mycoplasmatota;c__C;o__O;f__F;g__Mycoplasmoides;s__Mycoplasmoides genitalium"
     hits = [{"ani": 100.0, "accession": None, "gtdb_taxonomy": None, "tax_source": "GlobDB_r232",
              "tax_key": "MOTU40_002958", "tax_lineage": lineage}]
     assignment, closest = classify_hits(hits)
-    text = _assignment_summary({"assignment": assignment, "closest": closest})
-    assert text == "assigned to species Mycoplasmoides genitalium (100.00 % ANI)"
+    assert assignment["rank"] == "species"
+    assert assignment["taxon"] == "Mycoplasmoides genitalium"
+    assert assignment["taxonomy_source"] == "GlobDB_r232"
+    assert closest == assignment

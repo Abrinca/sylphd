@@ -1,5 +1,6 @@
 """Shared fixtures: paths to the pysylph test data copied into ``tests/data``."""
 
+import os
 from pathlib import Path
 
 import dnaio
@@ -62,3 +63,48 @@ def tiny_metadata(
     output = directory / "meta.sqlite"
     build_metadata_db([source], output, release=232)
     return output
+
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def find_client_binary() -> Path | None:
+    """The ``sylphd-client`` binary the tests run: ``$SYLPHD_CLIENT_BIN``, the dev venv, a cargo build.
+
+    ``uv sync`` builds ``sylphd-bin`` from ``rust/sylphd-client`` into the venv; CI sets
+    ``SYLPHD_REQUIRE_CLIENT_BIN=1`` so a missing binary fails the run instead of skipping it.
+    """
+    from sylphd.clientbin import find_client_bin
+
+    override = os.environ.get("SYLPHD_CLIENT_BIN")
+    if override:
+        path = Path(override)
+        return path if path.is_file() else None
+    found = find_client_bin()
+    if found:
+        return Path(found)
+    for profile in ("release", "debug"):
+        path = REPO / "rust" / "target" / profile / "sylphd-client"
+        if path.is_file():
+            return path
+    return None
+
+
+def require_client_binary() -> Path:
+    """The binary, or a module-level skip (a failure when ``SYLPHD_REQUIRE_CLIENT_BIN`` is set).
+
+    Call it at import time of a module that runs the binary::
+
+        CLIENT = require_client_binary()
+
+    It also points ``$SYLPHD_CLIENT_BIN`` at the binary, so the ``sylphd`` command that the
+    tests start as a subprocess finds the same one.
+    """
+    path = find_client_binary()
+    if path is None:
+        message = "sylphd-client is not installed (uv sync, or cargo build -p sylphd-client)"
+        if os.environ.get("SYLPHD_REQUIRE_CLIENT_BIN"):
+            raise RuntimeError(message + ": SYLPHD_REQUIRE_CLIENT_BIN is set")
+        pytest.skip(message, allow_module_level=True)
+    os.environ["SYLPHD_CLIENT_BIN"] = str(path)
+    return path

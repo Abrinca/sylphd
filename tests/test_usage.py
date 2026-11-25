@@ -13,7 +13,6 @@ from starlette.testclient import TestClient
 
 from sylphd import __version__, cli
 from sylphd.limits import JobTimes
-from sylphd.protocol import contigs_json
 from sylphd.server import ServerConfig, create_app
 from sylphd.usage import BUCKET_BOUNDS, POLICY, Usage, classify, quantile
 
@@ -137,7 +136,7 @@ class TestEnabled:
             ]
             assert client.post(
                 "/contigs",
-                data={"params": contigs_json(contigs)},
+                data={"params": json.dumps({"contigs": contigs})},
                 files=[("sketch", ("c1.sylsp", sketch)), ("sketch", ("c2.sylsp", sketch))],
             ).status_code == 200
         usage.flush()
@@ -401,33 +400,3 @@ class TestMonthlyRollup:
         assert usage.report()["since"] == f"{month['month']}-01T00:00Z"
 
 
-class TestCommandLine:
-    class _Client:
-        def __init__(self, base_url: str | None) -> None:
-            self.base_url = base_url
-
-    ON = {"usage": {"enabled": True, "policy": 1, "window_minutes": 10}}
-
-    def test_note_names_the_usage_url(self, capsys) -> None:
-        cli._note_usage(self._Client("https://sylph.example/api"), self.ON)
-        assert capsys.readouterr().err == (
-            "sylphd: note: this server keeps usage statistics, "
-            "see https://sylph.example/api/usage\n"
-        )
-
-    def test_note_on_a_socket(self, capsys) -> None:
-        cli._note_usage(self._Client(None), self.ON)
-        assert "see GET /usage" in capsys.readouterr().err
-
-    def test_no_note_when_off_or_quiet(self, capsys) -> None:
-        cli._note_usage(self._Client("http://x"), {"usage": {"enabled": False}})
-        cli._note_usage(self._Client("http://x"), self.ON, quiet=True)
-        assert capsys.readouterr().err == ""
-
-    def test_info_shows_the_state(self, capsys) -> None:
-        cli._print_usage({"enabled": False})
-        cli._print_usage(self.ON["usage"])
-        assert capsys.readouterr().out.splitlines() == [
-            "usage statistics: off",
-            "usage statistics: on (policy 1, 10-minute windows, public at /usage)",
-        ]

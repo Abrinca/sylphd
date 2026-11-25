@@ -21,8 +21,6 @@ from sylphd.protocol import (
     API_VERSION,
     ProfileParams,
     columns_for_mode,
-    format_row,
-    format_value,
     table_columns,
 )
 from sylphd.server import ServerConfig, create_app
@@ -781,28 +779,6 @@ class TestFields:
         assert field in response.json()["error"]
 
 
-class TestFormatting:
-    def test_format_value(self) -> None:
-        assert format_value("Adjusted_ANI", 99.789) == "99.79"
-        assert format_value("Eff_cov", 0.3597986) == "0.360"
-        assert format_value("Median_cov", 1.0) == "1"
-        assert format_value("ANI_5-95_percentile", [99.6437, 99.9452]) == "99.64-99.95"
-        assert format_value("Containment_ind", [6208, 21899]) == "6208/21899"
-        assert format_value("Taxonomic_abundance", 100.0) == "100.0000"
-        assert format_value("Eff_lambda", None) == ""
-        assert format_value("Eff_lambda", "HIGH") == "HIGH"
-        assert format_value("ANI_5-95_percentile", None) == "NA-NA"
-        assert format_value("Adjusted_ANI", 100.4) == "100.00"
-        row = {"Eff_lambda": None, "Lambda_status": "HIGH"}
-        assert format_row(row, ["Eff_lambda"]) == "HIGH"
-        assert format_value("Sample_file", "x") == "x"
-        assert format_value("kmers_reassigned", 0) == "0"
-
-    def test_true_cov_header_uses_eff_cov_value(self) -> None:
-        row = {"Eff_cov": 0.3597986}
-        assert format_row(row, ["True_cov"]) == "0.360"
-
-
 class TestUnixSocketCleanup:
     def test_replaced_socket_is_not_unlinked(self, tmp_path: Path) -> None:
         path = tmp_path / "s.sock"
@@ -921,9 +897,9 @@ def test_unknown_estimate_of_a_contig_sketch_is_null(tiny_database) -> None:
     """``estimate_unknown`` on a sketch without read statistics answers, not 500.
 
     ``sylph profile -u`` reports ``True_cov`` inf and NaN abundances for a sketch
-    made from contigs; JSON has no such numbers, so they are ``null`` (and the
-    TSV cells ``inf``/``NaN``, as sylph prints them) instead of failing the
-    JSON encoding.
+    made from contigs; JSON has no such numbers, so they are ``null`` instead of
+    failing the JSON encoding. The TSV spellings (``inf``/``NaN``) belong to the
+    renderer, tested in ``rust/sylphd-core/tests/render.rs``.
     """
     sketch = pysylph.Sketcher(c=200, k=31).sketch_single("clodf13", _reads(CLODF13_FASTA))
     app = create_app(ServerConfig(db_path=tiny_database))
@@ -940,12 +916,14 @@ def test_unknown_estimate_of_a_contig_sketch_is_null(tiny_database) -> None:
     assert row["Eff_lambda"] is None
     assert row["Lambda_status"] == "LOW"
     assert row["Adjusted_ANI"] == pytest.approx(100.0)
-    header = columns_for_mode("profile", ProfileParams(estimate_unknown=True))
-    cells = dict(zip(header, format_row(row, header).split("\t")))
-    assert cells["True_cov"] == "inf"
-    assert cells["Sequence_abundance"] == cells["Taxonomic_abundance"] == "NaN"
-    assert cells["Eff_lambda"] == "LOW"
-    assert cells["ANI_5-95_percentile"] == cells["Lambda_5-95_percentile"] == "NA-NA"
+    assert columns_for_mode("profile", ProfileParams(estimate_unknown=True))[:6] == (
+        "Sample_file",
+        "Genome_file",
+        "Taxonomic_abundance",
+        "Sequence_abundance",
+        "Adjusted_ANI",
+        "True_cov",
+    )
 
 
 class TestPrivilegedToken:

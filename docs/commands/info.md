@@ -5,6 +5,12 @@ sylphd info [--socket PATH | --tcp HOST:PORT | --url URL] [--timeout SECONDS]
             [--retries N] [--json]
 ```
 
+This command is the native `sylphd-client`: the `sylphd` command runs the server and admin commands
+in Python and forwards this one, argv unchanged (same exit codes, same stdin and stdout), and
+`sylphd-client` is the same program for machines without Python. The client renders the output, so
+it depends on the client version rather than the server's. `--json` saves the server's document
+unchanged; [`render`](render.md) turns a saved document into the table later, without a server.
+
 Prints what the server reports about itself:
 
 - database name, size, genome count, `c`, `k`, `screen_c`, whether it is two-stage, and the

@@ -1,27 +1,29 @@
-"""The agent skill may only name options that the CLI really has."""
+"""The agent skill may only name options that the CLI really has.
+
+The query commands are the native ``sylphd-client`` now, so the options are read from
+its ``--help``.
+"""
 
 from __future__ import annotations
 
-import argparse
 import re
+import subprocess
 from pathlib import Path
 
-from sylphd import cli
+from conftest import require_client_binary
 
 SKILL = Path(__file__).resolve().parent.parent / "skills" / "sylphd" / "SKILL.md"
 COMMANDS = ("info", "assembly", "profile")
 
-
-def _options(parser: argparse.ArgumentParser) -> set[str]:
-    return {s for action in parser._actions for s in action.option_strings}
+CLIENT = require_client_binary()
 
 
-def _subparsers() -> dict[str, argparse.ArgumentParser]:
-    parser = cli.build_parser()
-    for action in parser._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            return dict(action.choices)
-    raise AssertionError("no subcommands")
+def _options(command: str) -> set[str]:
+    """The long options of one command, from the binary's own ``--help``."""
+    done = subprocess.run(
+        [str(CLIENT), command, "--help"], capture_output=True, text=True, check=True
+    )
+    return set(re.findall(r"(?<![\w-])--[a-z][a-z0-9-]*", done.stdout))
 
 
 def test_front_matter() -> None:
@@ -34,8 +36,7 @@ def test_front_matter() -> None:
 
 
 def test_every_long_option_exists() -> None:
-    subparsers = _subparsers()
-    known = set().union(*(_options(subparsers[name]) for name in COMMANDS))
+    known = set().union(*(_options(name) for name in COMMANDS))
     named = set(re.findall(r"(?<![\w-])--[a-z][a-z0-9-]*", SKILL.read_text(encoding="utf-8")))
     assert named, "the skill names no options"
     named -= {"--from", "--force"}  # options of uv, not of sylphd
@@ -44,13 +45,13 @@ def test_every_long_option_exists() -> None:
 
 
 def test_documented_options_belong_to_their_command() -> None:
-    subparsers = _subparsers()
     text = SKILL.read_text(encoding="utf-8")
     for command, flags in {
         "assembly": ("--per-contig", "--top", "--min-ani", "--min-contig-length", "--json"),
         "profile": ("--format", "--taxonomy", "--minimum-ani", "--estimate-unknown"),
         "info": ("--json",),
     }.items():
+        options = _options(command)
         for flag in flags:
             assert flag in text
-            assert flag in _options(subparsers[command]), (command, flag)
+            assert flag in options, (command, flag)

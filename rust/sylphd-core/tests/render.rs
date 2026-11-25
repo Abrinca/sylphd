@@ -492,3 +492,27 @@ fn contigs_merge_preserves_non_alphabetical_order_and_combines_server_too_few_km
     assert_eq!(no_hit_cells[3], "too_few_kmers");
     assert!(no_hit_cells[4..].iter().all(|c| c.is_empty()));
 }
+
+#[test]
+fn table_select_projects_columns_in_order() {
+    // `--taxprof` requests the taxonomy columns for the server and then drops them
+    // from the TSV: only the requested --fields are shown (as `rows_to_tsv` did).
+    let t = Table {
+        columns: vec!["a".into(), "tax".into(), "b".into(), "c".into()],
+        data: vec![
+            vec![json!(1), json!("d__X"), json!(2), json!(3)],
+            vec![json!(4), json!("d__Y"), json!(5), json!(6)],
+        ],
+    };
+    let selected = t.select(&["c".into(), "a".into(), "missing".into()]);
+    assert_eq!(selected.columns, vec!["c", "a", "missing"]);
+    assert_eq!(
+        selected.data,
+        vec![
+            vec![json!(3), json!(1), Value::Null],
+            vec![json!(6), json!(4), Value::Null],
+        ]
+    );
+    // Selecting everything is the identity.
+    assert_eq!(t.select(&t.columns), t);
+}

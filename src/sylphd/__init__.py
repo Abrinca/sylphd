@@ -1,5 +1,7 @@
-"""sylphd: a long-running sylph server with a sketching client."""
+"""sylphd: a long-running sylph server and its command line."""
+
+from .clientbin import ClientRunError, run
 
 __version__ = "0.7.0"
 
-__all__ = ["__version__"]
+__all__ = ["ClientRunError", "__version__", "run"]

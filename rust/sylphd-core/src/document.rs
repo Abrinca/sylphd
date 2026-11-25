@@ -298,6 +298,39 @@ impl Table {
     pub fn column_index(&self, name: &str) -> Option<usize> {
         self.columns.iter().position(|c| c == name)
     }
+
+    /// The same rows with only `columns`, in that order.
+    ///
+    /// `sylphd` requests extra columns for `--taxprof` (the taxonomy columns of the
+    /// requested taxonomies) so that the server renders the profiles; they must not
+    /// show up in the TSV, where only the requested `--fields` appear
+    /// (`protocol.rows_to_tsv(fields=...)`). A column the document does not have
+    /// becomes `null`.
+    pub fn select(&self, columns: &[String]) -> Self {
+        let indexes: Vec<Option<usize>> = columns
+            .iter()
+            .map(|column| self.column_index(column))
+            .collect();
+        let data = self
+            .data
+            .iter()
+            .map(|row| {
+                indexes
+                    .iter()
+                    .map(|index| {
+                        index
+                            .and_then(|index| row.get(index))
+                            .cloned()
+                            .unwrap_or(Value::Null)
+                    })
+                    .collect()
+            })
+            .collect();
+        Self {
+            columns: columns.to_vec(),
+            data,
+        }
+    }
 }
 
 /// One sample entry in a `/profile` or `/query` document.
@@ -785,6 +818,10 @@ pub fn merge_contigs_run(
 }
 
 /// Any of the three result document kinds (for offline `sylphd render`).
+///
+/// The variants differ by a few hundred bytes, and a document is parsed, rendered once
+/// and dropped: boxing the large one would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResultDocument {
     Profile(ProfileDocument),

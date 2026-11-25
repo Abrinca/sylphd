@@ -1,11 +1,17 @@
 name: Release
 
-# Publish installable artifacts for production servers, which have no Rust
-# toolchain and must not compile anything:
+# Publish installable artifacts that need no Rust toolchain and compile nothing:
 #
 #   * the `sylphd` sdist and pure-Python wheel (`uv build`);
+#   * the `sylphd-bin` wheels (`py3-none-<platform>`, the native `sylphd-client`
+#     binary) for manylinux/musllinux x86_64+aarch64, macOS arm64+x86_64 and
+#     Windows x86_64, plus the same binary as a standalone archive
+#     (`sylphd-client-X.Y.Z-<target>.tar.gz` / `.zip`) for machines without Python;
 #   * a `pysylph` wheel for every supported Linux architecture, built from the
-#     exact commit pinned in `uv.lock`, for CPython 3.14, manylinux_2_28;
+#     exact commit pinned in `uv.lock`, for CPython 3.14, manylinux_2_28. This is
+#     still needed for `sylphd[server]`: `pysylph` is the `multi-db` fork (a git
+#     URL in the wheel's metadata) and PyPI has only the upstream 0.1.3, so the
+#     server install would otherwise have to build it with Rust and cmake.
 #   * a `dnaio` wheel for linux/aarch64, because PyPI has no wheel for that
 #     platform and it is a Cython extension (see `docs/install.md`).
 #   * a container image, docker.io/abrincagenomics/sylphd, with those wheels installed
@@ -56,6 +62,101 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: dist-sdist
+          path: dist/*
+          if-no-files-found: error
+
+  client:
+    name: sylphd-bin (${{ matrix.label }})
+    needs: sdist
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: manylinux-x86_64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2_28"
+            py: python3
+          - label: manylinux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: "2_28"
+            py: python3
+          - label: musllinux-x86_64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            manylinux: musllinux_1_2
+            py: python3
+          - label: musllinux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            manylinux: musllinux_1_2
+            py: python3
+          - label: macos-arm64
+            os: macos-15
+            target: aarch64-apple-darwin
+            py: python3
+          - label: macos-x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            py: python3
+          - label: windows-x86_64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+            py: python
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # `bindings = "bin"`: the wheel is py3-none-<platform> (one wheel for every
+      # Python version) and carries the binary in `<wheel>.data/scripts/`. The musl
+      # builds need the musllinux container, hence `manylinux`; rustls+ring means no
+      # cmake and no aws-lc are involved.
+      - name: Build the sylphd-bin wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: rust/sylphd-client
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          maturin-version: v1.16.0
+          args: --release --locked --out ../../dist
+      # The same binary as a bare archive, for machines without Python. Taken out of
+      # the wheel, so the two can never differ.
+      - name: Package the standalone binary
+        shell: bash
+        env:
+          VERSION: ${{ needs.sdist.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          PYTHON: ${{ matrix.py }}
+        run: |
+          set -euo pipefail
+          "$PYTHON" - "$VERSION" "$TARGET" <<'PY'
+          import os, pathlib, sys, tarfile, zipfile
+
+          version, target = sys.argv[1], sys.argv[2]
+          (wheel,) = sorted(pathlib.Path("dist").glob("sylphd_bin-*.whl"))
+          with zipfile.ZipFile(wheel) as archive:
+              member = next(n for n in archive.namelist() if ".data/scripts/sylphd-client" in n)
+              data = archive.read(member)
+          binary = "sylphd-client.exe" if member.endswith(".exe") else "sylphd-client"
+          staging = pathlib.Path("stage")
+          staging.mkdir()
+          (staging / binary).write_bytes(data)
+          os.chmod(staging / binary, 0o755)
+          stem = pathlib.Path("dist") / f"sylphd-client-{version}-{target}"
+          if target.endswith("windows-msvc"):
+              with zipfile.ZipFile(f"{stem}.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+                  archive.write(staging / binary, binary)
+              print(f"wrote {stem}.zip")
+          else:
+              with tarfile.open(f"{stem}.tar.gz", "w:gz") as archive:
+                  archive.add(staging / binary, binary)
+              print(f"wrote {stem}.tar.gz")
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-client-${{ matrix.label }}
           path: dist/*
           if-no-files-found: error
 
@@ -169,7 +270,7 @@ jobs:
 
   smoke:
     name: install and smoke test (${{ matrix.arch }})
-    needs: [sdist, wheels]
+    needs: [sdist, wheels, client]
     strategy:
       fail-fast: false
       matrix:
@@ -184,14 +285,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.2
+      # The pure `sylphd` wheel, the pysylph/dnaio wheels and the `sylphd-bin` wheel
+      # for this platform, all in dist/.
       - uses: actions/download-artifact@v8
         with:
-          name: dist-sdist
+          pattern: dist-*
           path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: dist-wheels-${{ matrix.arch }}
-          path: dist
+          merge-multiple: true
       # `--only-binary :all:` fails the run if anything would have to be built
       # from source, which is exactly the guarantee we sell to the server.
       - name: Install from the built wheels only
@@ -204,7 +304,10 @@ jobs:
           VIRTUAL_ENV="$PWD/smoke" uv pip install --python smoke/bin/python \
             --only-binary :all: --find-links dist "sylphd[server]==$VERSION" pytest
           smoke/bin/sylphd --version
+          smoke/bin/sylphd-client --version
+          # `sylphd info --help` is the binary's help: this is the forwarding.
           smoke/bin/sylphd info --help > /dev/null
+          smoke/bin/sylphd --help | grep -q "sylphd-client"
           # The fork's wheel, not PyPI's pysylph 0.1.3.
           smoke/bin/python -c 'import pysylph; print(pysylph.__version__); assert "+g" in pysylph.__version__'
       - name: The base install needs no pysylph
@@ -217,18 +320,23 @@ jobs:
             --only-binary :all: --find-links dist "sylphd==$VERSION"
           lean/bin/python -c 'import sylphd.ncbitax, sylphd.client'
           ! lean/bin/python -c 'import pysylph' 2> /dev/null
-          lean/bin/sylphd --version 2>&1 | grep -q "sylphd\[client\]"
+          # The base install has no binary: the wrapper says how to get one.
+          lean/bin/sylphd --help | grep -q "sylphd\[client\]"
       - name: Run a test subset against the installed package
+        env:
+          # The wheel's binary is in the venv; a missing one is a failure, not a skip.
+          SYLPHD_REQUIRE_CLIENT_BIN: "1"
         run: |
           set -eux
-          smoke/bin/python -m pytest tests/test_sketching.py tests/test_server.py -q
+          smoke/bin/python -m pytest -q \
+            tests/test_server.py tests/test_client_binary.py tests/test_entry.py
 
   image:
     name: container image
     # The smoke-tested wheels in a bare uv/Python image, for amd64 and arm64.
     # Nothing is compiled, so emulating arm64 only runs `uv pip install`.
     # Pushed on tags; `workflow_dispatch` only builds.
-    needs: [sdist, smoke]
+    needs: [sdist, wheels, client, smoke]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -263,7 +371,7 @@ jobs:
     name: publish the GitHub release
     # Tags only: `workflow_dispatch` is the dry run.
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [sdist, wheels, smoke]
+    needs: [sdist, wheels, client, smoke]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

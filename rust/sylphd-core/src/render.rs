@@ -33,13 +33,8 @@ fn value_as_f64(value: &Value) -> f64 {
     match value {
         Value::Number(n) => n.as_f64().unwrap_or(0.0),
         Value::String(s) => s.parse::<f64>().unwrap_or(0.0),
-        Value::Bool(b) => {
-            if *b {
-                1.0
-            } else {
-                0.0
-            }
-        }
+        Value::Bool(true) => 1.0,
+        Value::Bool(false) => 0.0,
         _ => 0.0,
     }
 }
@@ -96,7 +91,7 @@ pub fn format_thousands(n: u64) -> String {
     }
     let mut out = String::with_capacity(len + (len - 1) / 3);
     for (i, ch) in s.chars().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(ch);
@@ -113,7 +108,7 @@ fn format_g(value: f64) -> String {
         return "0".to_string();
     }
     let abs = value.abs();
-    if abs >= 1e-4 && abs < 1e6 {
+    if (1e-4..1e6).contains(&abs) {
         let exp = abs.log10().floor() as i32;
         let frac_digits = (5 - exp).max(0) as usize;
         let formatted = format!("{value:.frac_digits$}");

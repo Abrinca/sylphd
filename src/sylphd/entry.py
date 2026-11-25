@@ -1,45 +1,118 @@
-"""The ``sylphd`` command: a friendly message when the optional packages are missing.
+"""The ``sylphd`` command.
 
-The base install holds only what :mod:`sylphd.ncbitax` needs; the command line
-imports pysylph, and ``serve`` also starlette and uvicorn, so without them
-``sylphd`` says which extra to install instead of showing a traceback.
+Python owns the command but only runs what is Python: the server and admin commands
+(``serve``, ``setup``, ``download``, ``taxdb``, ``taxonomy``, ``taxmatrix``, ``diff``).
+Every other invocation is handed, argv unchanged, to the native ``sylphd-client`` binary
+(``profile``, ``query``, ``assembly``, ``info``, ``render``; ``os.execv`` on Unix, so exit
+codes, signals, stdin and stdout pass straight through).
+
+The base install holds only what :mod:`sylphd.ncbitax` needs; the binary comes with the
+``client`` extra and the server needs ``serve``'s packages, so a missing one gets a
+friendly message and exit code 2 instead of a traceback.
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from collections.abc import Sequence
+
+from . import __version__
+from .clientbin import INSTALL_HINT, exec_client, find_client_bin
+
+#: Commands that run in Python, with their one-line help.
+PYTHON_COMMANDS: dict[str, str] = {
+    "serve": "run the server (one process, one worker)",
+    "setup": "build the SQLite metadata database from GTDB TSV and sylph-tax files",
+    "download": "download GTDB metadata, a sylph database or a taxonomy file",
+    "taxdb": "build the NCBI taxonomy file (see `sylphd serve --taxonomy-db`)",
+    "taxonomy": "look up NCBI taxa by taxid or name, on a server or in a taxonomy file",
+    "taxmatrix": "merge .sylphmpa files or /profile JSON documents into a clade x sample TSV",
+    "diff": "check that two sylph / sylph-tax outputs are equivalent",
+}
 
 #: Top-level modules that only an extra installs.
 OPTIONAL_MODULES = frozenset(
     {"pysylph", "dnaio", "starlette", "uvicorn", "multipart", "python_multipart"}
 )
 
+_HELP_FLAGS = ("-h", "--help", "help")
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
-    if args[:1] == ["diff"]:
+
+def _help(binary: str | None) -> int:
+    width = max(map(len, PYTHON_COMMANDS))
+    lines = [
+        "usage: sylphd <command> [options]",
+        "",
+        "Share one in-memory sylph database between runs: clients sketch samples",
+        "locally and ask the server for ANI hits or taxonomies.",
+        "",
+        "Python commands (server and admin; `sylphd <command> --help`):",
+        *(f"  {name:<{width}}  {text}" for name, text in PYTHON_COMMANDS.items()),
+        "",
+        "Client commands (run by the native sylphd-client; `sylphd <command> --help`):",
+    ]
+    print("\n".join(lines))
+    if binary is None:
+        print(f"  not available: sylphd-client is not installed; {INSTALL_HINT}")
+        print("\noptions:\n  -h, --help     show this help\n  -V, --version  show the version")
+        return 0
+    done = subprocess.run([binary, "--help"], capture_output=True, text=True)
+    commands: list[str] = []
+    options: list[str] = []
+    section: list[str] | None = None
+    for line in done.stdout.splitlines():
+        if line == "Commands:":
+            section = commands
+        elif line == "Options:":
+            section = options
+        elif line.strip() and section is not None and not line.startswith("  help "):
+            section.append(line)
+    print("\n".join(commands))
+    print("\noptions:\n  -h, --help     show this help\n  -V, --version  show the version")
+    return 0
+
+
+def _run_python(command: str, args: list[str]) -> int:
+    if command == "diff":
         # Pure standard library: works in the base install, without any extra.
         from .parity import main as diff
 
         return diff(args[1:])
-    if args[:1] == ["taxmatrix"]:
-        # Pure standard library: works in the base install, without any extra.
+    if command == "taxmatrix":
         from .taxmatrix import main as taxmatrix
 
         return taxmatrix(args[1:])
+    from .cli import main as run
+
     try:
-        from .cli import main as run
+        return run(args)
     except ImportError as error:
         if (error.name or "").split(".")[0] not in OPTIONAL_MODULES:
             raise
         print(
-            f"sylphd: the command line needs a package that is not installed "
-            f"({error.name}).\n"
-            "  to profile against a server:  pip install 'sylphd[client]'\n"
-            "  to run a server:              pip install 'sylphd[server]'\n"
-            "  (the Python API sylphd.ncbitax needs neither: 'sylphd[taxonomy]')",
+            f"sylphd: `sylphd {command}` needs a package that is not installed ({error.name}).\n"
+            "  to run a server:  pip install 'sylphd[server]'",
             file=sys.stderr,
         )
         return 2
-    return run(args)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args or args[0] in _HELP_FLAGS:
+        return _help(find_client_bin())
+    if args[0] in ("-V", "--version"):
+        print(f"sylphd {__version__}")
+        return 0
+    if args[0] in PYTHON_COMMANDS:
+        return _run_python(args[0], args)
+    binary = find_client_bin()
+    if binary is None:
+        print(
+            f"sylphd: `sylphd {args[0]}` is run by the native client (sylphd-client), "
+            f"which is not installed.\n  {INSTALL_HINT}",
+            file=sys.stderr,
+        )
+        return 2
+    return exec_client(binary, args)

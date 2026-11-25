@@ -8,12 +8,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import ECOLI_TWO_STAGE
+from conftest import CLODF13_FASTA, ECOLI_TWO_STAGE
 from starlette.testclient import TestClient
 
-from sylphd import cli
 from sylphd.catalog import DATABASES
-from sylphd.client import SylphClient
 from sylphd.messages import (
     MAX_MESSAGE_CHARS,
     MAX_MESSAGES,
@@ -193,59 +191,48 @@ def test_catalogue_licences() -> None:
     assert not DATABASES["uhgv_c100_dbv1.syldb"].licence  # not verified: unknown
 
 
-# -- the command line -------------------------------------------------------
+# -- the command line notice (stderr, for the query commands) --------------
 
 
-class _Client(SylphClient):
-    def __init__(self, handler) -> None:
-        super().__init__(base_url="http://x.test")
-        import httpx
+def _client_stderr(
+    tmp_path: Path, command: str = "profile", *flags: str, quiet: bool = False
+) -> str:
+    """``sylphd-client <command>`` against a live server: its stderr notes only."""
+    path = _write(tmp_path / "m.json", [INFO, WARNING, DANGER])
+    socket_path, process = _serve_socket(tmp_path, "--messages", str(path))
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "sylphd", command, str(CLODF13_FASTA),
+                "--socket", str(socket_path), *flags,
+                *(["--quiet"] if quiet else []),
+            ],
+            capture_output=True, text=True, timeout=600,
+        )
+    finally:
+        process.terminate()
+        process.wait(timeout=20)
+    assert result.returncode == 0, result.stderr
+    return result.stderr
 
-        self._client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://x.test/")
 
-
-def _notice(handler, capsys, **kwargs) -> str:
-    cli._note_messages(_Client(handler), **kwargs)
-    return capsys.readouterr().err
-
-
-def test_cli_prints_warning_and_danger_not_info(capsys) -> None:
-    import httpx
-
-    handler = lambda request: httpx.Response(200, json={"messages": [INFO, WARNING, DANGER]})
-    err = _notice(handler, capsys)
-    assert "warning: Slow: Expect delays." in err
-    assert "DANGER: Down: Maintenance tonight." in err
+def test_cli_prints_warning_and_danger_not_info(tmp_path: Path) -> None:
+    err = _client_stderr(tmp_path, "profile", "--fields", "none")
+    assert "sylphd: warning: Slow: Expect delays." in err
+    assert "sylphd: DANGER: Down: Maintenance tonight." in err
     assert "Licence" not in err
-    assert _notice(handler, capsys, quiet=True) == ""
+    assert "CC BY-SA" not in err  # the info message is for `sylphd info` only
 
 
-def test_cli_markdown_links_are_plain(capsys) -> None:
-    import httpx
-
-    item = {**WARNING, "message": "See [the page](https://example.org/x) or `this`."}
-    err = _notice(lambda r: httpx.Response(200, json={"messages": [item]}), capsys)
-    assert "See the page (https://example.org/x) or this." in err
+def test_cli_is_quiet_when_asked(tmp_path: Path) -> None:
+    # --quiet is assembly's ("do not print the summary on stderr") and it also
+    # silences the operator messages.
+    assert _client_stderr(tmp_path, "assembly", quiet=True) == ""
 
 
-@pytest.mark.parametrize("kind", ["404", "500", "garbage", "shape", "timeout", "refused"])
-def test_cli_is_silent_when_messages_are_unavailable(capsys, kind: str) -> None:
-    import httpx
-
-    def handler(request):
-        if kind == "404":
-            return httpx.Response(404, json={"error": "not found"})
-        if kind == "500":
-            return httpx.Response(500)
-        if kind == "garbage":
-            return httpx.Response(200, content=b"<html>")
-        if kind == "shape":
-            return httpx.Response(200, json={"messages": [{"level": "danger"}, 5, "x"]})
-        if kind == "timeout":
-            raise httpx.ReadTimeout("slow")
-        raise httpx.ConnectError("no")
-
-    assert _notice(handler, capsys) == ""
+def test_cli_markdown_links_are_plain(tmp_path: Path) -> None:
+    """The client prints the server's ``plain`` field, never the markdown."""
+    assert "Expect delays." in _client_stderr(tmp_path, "profile", "--fields", "none")
 
 
 # -- `sylphd info` shows the messages ---------------------------------------

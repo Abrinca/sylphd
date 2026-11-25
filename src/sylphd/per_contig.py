@@ -22,7 +22,7 @@ Per contig the meaningful estimate is *contig-relative*::
     ani_contig   = 100 * (shared / n_contig) ** (1/k)
     explained    = shared / n_contig         (= (ani_contig/100) ** k)
 
-``n_contig`` is measured by the client (:func:`sylphd.sketching.sketch_contigs`),
+``n_contig`` is measured by the client (``sylphd-core``, in the native client and the web page),
 the shared numerator comes from the server's ``Containment_ind``.  An exact
 fragment then scores 100.00 %, and a contig at 97 % ANI scores 97 %.
 ``min_ani`` is applied to this value; the query itself runs with
@@ -90,7 +90,7 @@ from .assembly import (
     rank_display,
 )
 from .protocol import ProfileParams, ProtocolError, integer_field, number_field
-from .sketching import InputError, check_sample_name
+from .samples import InputError, check_sample_name
 
 #: Default hits per contig: the best genome is what a contamination check needs.
 DEFAULT_TOP = 1
@@ -149,7 +149,7 @@ PARAM_KEYS = frozenset(
 CONTIG_KEYS = frozenset({"name", "contig_kmers", "length", "gc"})
 
 #: Fixed leading columns of ``POST /contigs``'s flat per-hit table, followed by
-#: any requested metadata ``fields``.  Re-exported by ``per_contig_client.COLUMNS``.
+#: any requested metadata ``fields``.  The native client's renderer uses the same list.
 TABLE_COLUMNS: tuple[str, ...] = (
     "contig",
     "contig_length",

@@ -32,9 +32,11 @@ jobs:
           ./bin/micromamba create -y -p "$RUNNER_TEMP/sylph-env" -c conda-forge -c bioconda "$SYLPH_SPEC"
           "$RUNNER_TEMP/sylph-env/bin/sylph" --version
           echo "SYLPH_BIN=$RUNNER_TEMP/sylph-env/bin/sylph" >> "$GITHUB_ENV"
-      # pysylph is built from source (Rust is preinstalled on the runner).
+      # `uv sync` builds sylphd-bin from rust/sylphd-client (the renderer the test
+      # compares with) and pysylph from source; Rust is preinstalled on the runner.
       - run: uv sync
       - name: Run the compatibility tests
         env:
           SYLPH_COMPAT_REQUIRED: "1"
+          SYLPHD_REQUIRE_CLIENT_BIN: "1"
         run: uv run pytest tests/test_sylph_compat.py -v -rs

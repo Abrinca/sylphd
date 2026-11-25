@@ -1,0 +1,105 @@
+name: CI
+
+# The client is a Rust binary shipped in a Python wheel, so one run has to prove three
+# things: the Rust crates pass their tests (including the pysylph equality tests against
+# the server's own pysylph), `uv sync` builds the binary from this checkout, and the
+# Python suite passes **with** that binary (SYLPHD_REQUIRE_CLIENT_BIN=1 turns a missing
+# binary into a failure instead of a skip).
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Every job that runs the pytest suite needs the binary.
+  SYLPHD_REQUIRE_CLIENT_BIN: "1"
+
+jobs:
+  rust:
+    name: cargo test and clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.2
+      # `uv sync` builds sylphd-bin from rust/sylphd-client and installs pysylph, which
+      # the equality tests (`sylphd-core/tests/pysylph_equality.rs`) drive through
+      # `SYLPHD_PYTHON`.
+      - name: Install the Python environment (pysylph for the equality tests)
+        run: uv sync
+      - name: Cache cargo registry and build output
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: cargo test (core, client, wasm crate tests)
+        run: >
+          cd rust &&
+          SYLPHD_PYTHON=$PWD/../.venv/bin/python
+          cargo test --workspace --features sylphd-core/rayon
+      # The two crates that ship (the library in the wasm module too, the binary in the
+      # wheel) must be clean; the test targets still carry pedantic lints, so the
+      # workspace-wide pass only reports them.
+      - name: clippy (shipped crates)
+        run: >
+          cd rust &&
+          cargo clippy -p sylphd-core -p sylphd-client
+          --features sylphd-core/rayon -- -D warnings
+      - name: clippy (workspace and tests, warnings only)
+        run: cd rust && cargo clippy --workspace --all-targets --features sylphd-core/rayon
+
+  python:
+    name: pytest
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.2
+      # Builds `sylphd-bin` from rust/sylphd-client into .venv (Rust is preinstalled on
+      # the runner) and installs sylphd[server] with pysylph.
+      - name: uv sync (builds the native client)
+        run: uv sync
+      - name: The client binary is installed
+        run: .venv/bin/sylphd-client --version
+      - name: The wrapper forwards to it
+        run: .venv/bin/sylphd --version && .venv/bin/sylphd --help
+      - name: Run the suite
+        run: uv run pytest -q
+
+  binary:
+    name: the binary builds and runs (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: macOS arm64, os: macos-15 }
+          - { label: Windows x86_64, os: windows-2025 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.2
+      - name: uv sync (builds the native client)
+        run: uv sync
+      - name: Both commands work
+        run: uv run sylphd --version && uv run sylphd-client --version
+      # The suite proper needs Unix sockets (port 0 trickery and `--socket` servers);
+      # these files do not, and they cover the entry point and the wheel layout.
+      - run: uv run pytest -q tests/test_entry.py tests/test_packaging.py

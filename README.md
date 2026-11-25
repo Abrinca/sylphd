@@ -4,7 +4,7 @@ A small server and client around [sylph](https://github.com/bluenote-1577/sylph)
 long-running server keeps a sylph database in memory, while clients sketch samples locally and
 send only the sketches. This avoids paying the database deserialisation cost (about 2 s and 2 GB
 of RAM for GTDB r232 c200, more for GlobDB r232) in every process. Results come back as TSV or JSON, joined with GTDB
-metadata or another taxonomy source (sylph-tax), and the client can build `sylph-tax`-style
+metadata or another taxonomy source (sylph-tax); the server also aggregates `sylph-tax`-style
 taxonomic profiles.
 
 - **Web app:** <https://abrinca.github.io/sylphd/>: identify an assembly or profile sequencing reads in the browser, backed by the free public server (`sylphd.abrinca.com`).
@@ -88,9 +88,29 @@ flowchart LR
 
 ## Install
 
-Requires Python 3.14, [uv](https://docs.astral.sh/uv/) and a Rust toolchain (the
-[pysylph](https://github.com/MrTomRod/pysylph) fork, branch `multi-db`, is built from git at
-install time). You also need a sylph database (`.syl2db` or `.syldb`).
+A client needs no Rust toolchain and no compiler: `sylphd` is a pure-Python wheel and the
+sketching lives in `sylphd-client`, a native binary that ships as the platform wheel
+`sylphd-bin` (like ruff and uv). Clients are therefore one command:
+
+```console
+uv tool install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z \
+               'sylphd[client]==X.Y.Z'
+```
+
+The machine that runs the server needs `sylphd[server]`, whose `pysylph` wheel comes from the same
+release (CPython 3.14, Linux x86_64 and aarch64):
+
+```console
+uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z \
+               "sylphd[server]==X.Y.Z"
+```
+
+Replace `vX.Y.Z` / `X.Y.Z` with the tag and version of a release from the
+[releases page](https://github.com/Abrinca/sylphd/releases) (the newest is marked *Latest*); a
+release also carries the bare `sylphd-client` archives for machines without Python. You need a
+sylph database (`.syl2db` or `.syldb`) for the server.
+
+From a clone (`uv sync` builds the client binary, so this one needs Rust):
 
 ```console
 git clone https://github.com/Abrinca/sylphd && cd sylphd
@@ -98,22 +118,7 @@ uv sync
 uv run sylphd --help
 ```
 
-or, in another project: `uv add "sylphd[client] @ git+https://github.com/Abrinca/sylphd"` (`sylphd[server]` on the
-machine that runs the server, `sylphd[taxonomy]` for NCBI taxonomy lookups alone).
-
-If you would rather not install a Rust toolchain, tagged releases carry prebuilt wheels for Linux
-x86_64 and aarch64 (CPython 3.14):
-
-```console
-uv venv --python 3.14
-uv pip install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z "sylphd[server]==X.Y.Z"
-```
-
-Replace `vX.Y.Z` / `X.Y.Z` with the tag and version of a release from the
-[releases page](https://github.com/Abrinca/sylphd/releases) (the newest is marked *Latest*).
-
-See [Install from a release](https://abrinca.github.io/sylphd/docs/install/#from-a-release-no-rust-needed)
-for the details.
+See [Install](https://abrinca.github.io/sylphd/docs/install/) for the details.
 
 ## Quick start
 
@@ -130,6 +135,8 @@ sylphd serve --db data/gtdb-r232-c200-dbv2.syl2db --meta data/gtdb-r232.sqlite
 # 3. In another shell: sketch locally and ask the server
 sylphd query -1 sample_R1.fq.gz -2 sample_R2.fq.gz
 sylphd profile -r sample.fq.gz -o sample.profile.tsv
+sylphd assembly assembly.fasta --json -o assembly.json   # the document, for pandas
+sylphd render assembly.json > assembly.tsv               # the table, offline
 ```
 
 `sylphd download --list-databases` shows the other pre-built databases (GTDB r226/r220/r214,
@@ -157,10 +164,14 @@ Coding agents can drive the CLI through a skill: see
 ## Development
 
 ```console
-uv run pytest
+uv sync                                   # builds sylphd-bin from rust/sylphd-client
+uv run pytest                             # server, core and end-to-end client tests
+cd rust && SYLPHD_PYTHON=$PWD/../.venv/bin/python cargo test --workspace
 ```
 
-The tests use pysylph's small test data, copied into `tests/data`.
+`uv run pytest` runs the native client from `.venv/bin/sylphd-client`; set
+`SYLPHD_REQUIRE_CLIENT_BIN=1` to fail instead of skip when it is missing (CI does). The tests use
+pysylph's small test data, copied into `tests/data`.
 
 ## How to cite
 

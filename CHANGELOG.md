@@ -15,10 +15,58 @@ All notable changes to `sylphd` are documented here. The format follows
   `sylphd diff`), so it works in the base install without `pysylph` and can merge samples across
   separate profiling runs.
 
+### Changed (breaking)
+
+- **The query commands are a native binary now.** `sylphd info`, `profile`, `query`, `assembly` and
+  the new `render` run in `sylphd-client`, which ships as the platform wheel `sylphd-bin`
+  (`py3-none-<platform>`, like ruff and uv). The `sylphd` command stays: it runs `serve`, `setup`,
+  `download`, `taxdb`, `taxonomy`, `taxmatrix` and `diff` in Python and hands every other invocation
+  to the binary with `os.execv` (a subprocess with the exit code on Windows), so flags, exit codes,
+  stdin, stdout and signals are the command line's, unchanged.
+- **`sylphd[client]` no longer needs a compiler.** It is `sylphd-bin` and nothing else: no
+  `pysylph`, no `dnaio`, no Rust toolchain, no `cmake`, and no Python version tied to an extension
+  (the binary wheel serves every Python 3). `sylphd[server]` adds the server's packages
+  (`pysylph`, `dnaio`, `starlette`, `uvicorn`, `python-multipart`) to the same binary. Release
+  archives carry the bare `sylphd-client` for machines without Python.
+- **No Python library for queries.** `SylphClient`'s sketching and query methods
+  (`profile_reads`, `query_reads`, `identify_assembly`, `classify_contigs`, `profile`, `query`,
+  `assembly`, `assembly_sketch`, `contigs`, `sketch_parameters`, `database_info`, `messages`) and
+  `sylphd.per_contig_client` (`PerContigRun`, `PerContigOptions`) are gone, as is
+  `sylphd.sketching` (`sketch_sample`, `sketch_assembly`, `sketch_contigs`, `load_sketch`,
+  `build_sample_inputs`). Use the command line through `sylphd.run(*args) -> dict`
+  (`sylphd.run("profile", "reads.fq.gz")`, `sylphd.run("assembly", "mag.fna", "--per-contig")`).
+  Sample names and their checks moved to `sylphd/samples.py` (the server still owns them).
+- **`sylphd.client` is transport only** (`connect`, `SylphClient.taxonomy`/`health`) for
+  `sylphd.ncbitax` and `sylphd taxonomy`; the address, token and retry rules are mirrored in
+  `rust/sylphd-client` and covered by one shared table of cases.
+- **Rendering left Python.** `protocol.rows_to_tsv`/`rows_to_tsv_lines`, `format_value`,
+  `format_row` and the `info` printers are deleted: the client renders tables, summaries and
+  caveats, from the server's JSON document, in one implementation shared with the web app
+  (`sylphd-core`). The output of a run depends on the client version, not the server's. `sylphd
+  info` still prints the same text, now rendered by the client.
+
+### Added
+
+- **`sylphd render [FILE]`**: renders a document saved with `--json` as the table the command
+  line would have printed, offline (no server, no sketching). It recognises profile/query
+  documents, assembly documents and per-contig run documents.
+- **`sylphd.run(*args) -> dict`**: runs `sylphd-client` with `--json` and returns the server's
+  document (`pandas.DataFrame(**doc["table"])` loads the table); raises `ClientRunError` with the
+  exit code and stderr on failure.
+- **`sylphd-bin` wheels and standalone `sylphd-client` archives** for manylinux and musllinux
+  x86_64/aarch64, macOS arm64/x86_64 and Windows x86_64, published with every release.
+- **`$SYLPHD_CLIENT_BIN`** overrides the binary the `sylphd` command runs;
+  `SYLPHD_REQUIRE_CLIENT_BIN=1` turns the tests' "binary missing" skips into failures (CI sets it).
+- **CI** (`.github/workflows/ci.yml`): `cargo test --workspace` including the pysylph equality
+  tests, `cargo clippy -D warnings`, and the Python suite with the binary built by `uv sync`.
+
 ### Removed
 
 - **`sylphd profile --taxmatrix` and `--taxmatrix-value`**: replaced by the standalone
   `sylphd taxmatrix` command.
+- **The Python renderer and its regeneration script.** `scripts/regen-render-golden.py` needed the
+  Python renderers; the committed `rust/sylphd-core/tests/data/*_golden.json` are the specification
+  of the TSV output now (see `rust/README.md`).
 
 ## [0.7.0] - 2026-11-21
 

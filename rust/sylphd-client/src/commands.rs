@@ -445,7 +445,7 @@ fn cmd_contain(
     let metadata = info.metadata.as_ref();
     let fields = resolve_fields(Some(output.fields.as_str()), metadata)?;
 
-    let (taxonomies, tax_sources, request_fields) = if write_taxonomy {
+    let (taxonomies, tax_sources, request_fields, extra_fields) = if write_taxonomy {
         let taxonomies = match requested_taxonomies {
             Some(taxonomies) => taxonomies,
             None => default_taxonomies(metadata),
@@ -453,14 +453,14 @@ fn cmd_contain(
         let tax_sources = select_tax_sources(&tax.tax_source, &taxonomies, metadata)?;
         let extra = resolve_taxonomy_columns(&taxonomies, metadata)?;
         let mut request_fields = fields.clone();
-        for column in extra {
-            if !request_fields.contains(&column) {
-                request_fields.push(column);
+        for column in &extra {
+            if !request_fields.contains(column) {
+                request_fields.push(column.clone());
             }
         }
-        (taxonomies, tax_sources, request_fields)
+        (taxonomies, tax_sources, request_fields, extra)
     } else {
-        (Vec::new(), Vec::new(), fields.clone())
+        (Vec::new(), Vec::new(), fields.clone(), Vec::new())
     };
 
     let (c, k) = sketch_parameters(&info)?;
@@ -518,8 +518,24 @@ fn cmd_contain(
         .map(|sketch| (sketch.name.clone(), sketch.bytes.clone()))
         .collect();
     let raw = client.post_sketches(mode.endpoint(), &params_json, &parts)?;
-    let document =
+    let mut document =
         ProfileDocument::from_json_str(&raw).map_err(|error| Failure::client(error.to_string()))?;
+    if request_fields.len() != fields.len() {
+        // The extra taxonomy columns were requested for the taxprof only: they do
+        // not show up in the TSV (`rows_to_tsv(fields=...)` printed `fields`, which
+        // for `--fields none` is "no metadata columns", not "no columns"). The
+        // `--json` document keeps them, because it is the server's answer.
+        let hidden: Vec<&String> = extra_fields.iter().filter(|c| !fields.contains(c)).collect();
+        let display: Vec<String> = document
+            .table
+            .columns
+            .iter()
+            .filter(|column| !hidden.contains(column))
+            .cloned()
+            .collect();
+        let table = document.table.select(&display);
+        document.table = table;
+    }
 
     if output.wants_json() {
         write_output(output.output.as_deref(), &with_newline(raw))?;

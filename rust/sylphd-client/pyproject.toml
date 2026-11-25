@@ -1,0 +1,50 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "sylphd-bin"
+# The version comes from Cargo.toml (`version.workspace = true`), which is kept
+# equal to `sylphd.__version__` by a test in sylphd-client and in tests/.
+dynamic = ["version"]
+description = "The sylphd-client binary (native command line client for a sylphd server), packaged as a wheel."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Thomas Roder" },
+  { name = "Abrinca Genomics" },
+]
+keywords = ["bioinformatics", "genomics", "ani", "taxonomy", "profiling", "sylph"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Rust",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.urls]
+Homepage = "https://abrinca.github.io/sylphd/"
+Repository = "https://github.com/Abrinca/sylphd"
+
+[tool.maturin]
+# A binary-only wheel (like ruff and uv): no Python extension module, so the
+# tag is py3-none-<platform> and one wheel serves every Python version.
+bindings = "bin"
+manifest-path = "Cargo.toml"
+strip = true
+
+[tool.uv]
+# `uv sync` builds this package from the checkout; rebuild when the Rust sources change
+# (the default only watches pyproject.toml).
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "Cargo.toml" },
+  { file = "src/**/*.rs" },
+  { file = "../Cargo.toml" },
+  { file = "../Cargo.lock" },
+  { file = "../sylphd-core/Cargo.toml" },
+  { file = "../sylphd-core/src/**/*.rs" },
+  { file = "../../src/sylphd/__init__.py" },
+]

@@ -17,7 +17,6 @@ import pytest
 
 from sylphd import parity
 from sylphd.parity import compare_files, compare_texts, normalise_sample
-from sylphd.protocol import format_value
 
 DATA = Path(__file__).parent / "data" / "parity"
 SRC = Path(__file__).parent.parent / "src"
@@ -225,15 +224,6 @@ class TestTsv:
 )
 def test_normalise_sample(raw: str, name: str) -> None:
     assert normalise_sample(raw) == name
-
-
-def test_precision_table_follows_format_value() -> None:
-    for column, digits in parity.TSV_PRECISION.items():
-        if column == "Eff_lambda":
-            continue
-        printed = format_value(column, 1.23456789)
-        decimals = len(printed.split(".")[1]) if "." in printed else 0
-        assert decimals == digits, column
 
 
 # ---------------------------------------------------------------------------

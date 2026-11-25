@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "sylphd"
 dynamic = ["version"]
-description = "A long-running sylph server with a sketching client, for shared database and profiling."
+description = "A long-running sylph server and its command line: a pure-Python wrapper around the native sylphd-client."
 readme = "README.md"
 requires-python = ">=3.14"
 license = "AGPL-3.0-or-later"
@@ -18,27 +18,30 @@ keywords = ["bioinformatics", "genomics", "ani", "taxonomy", "profiling", "sylph
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
-  "Operating System :: POSIX",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Typing :: Typed",
 ]
 # The base install is light on purpose: sylphd.ncbitax and sylphd.taxdb need only httpx.
-# Everything that sketches or serves is an extra: see docs/install.md.
+# The query commands run in `sylphd-client`, a native binary shipped as the platform wheel
+# `sylphd-bin` (py3-none-<platform>, any Python); it is pinned to this exact version
+# (tests/test_packaging.py keeps the pins, `__version__` and the Rust workspace in step).
 dependencies = [
   "httpx",
 ]
 
 [project.optional-dependencies]
-# Look up NCBI taxa (a server, a socket or a file): no Rust, no pysylph.
+# Look up NCBI taxa (a server, a socket or a file): no binary, no pysylph.
 taxonomy = []
-# The command line against a server: sketches locally.
+# The command line against a server: sketches locally in the native client.
 client = [
-  "dnaio",
-  "pysylph",
+  "sylphd-bin==0.7.0",
 ]
-# `sylphd serve`, and everything `client` does.
+# `sylphd serve`, and everything `client` does. The server still sketches
+# uploaded sequences (pysylph) and parses them (dnaio).
 server = [
+  "sylphd-bin==0.7.0",
   "dnaio",
   "pysylph",
   "python-multipart",
@@ -62,6 +65,8 @@ extra-build-dependencies = { pysylph = ["cmake"] }
 
 [tool.uv.sources]
 pysylph = { git = "https://github.com/MrTomRod/pysylph", branch = "multi-db" }
+# Development: `uv sync` builds the binary from this checkout (needs a Rust toolchain).
+sylphd-bin = { path = "rust/sylphd-client" }
 
 [dependency-groups]
 dev = [
@@ -74,6 +79,13 @@ path = "src/sylphd/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sylphd"]
+
+[tool.hatch.build.targets.sdist]
+# The working tree holds tens of GB of untracked data (databases in db/, results in
+# scratch/, rust/target, web/wasm). A sdist is the package: list it instead of pruning
+# afterwards, so `uv build` never walks those directories. pyproject.toml is always
+# included by hatchling.
+only-include = ["src/sylphd", "README.md", "LICENSE", "CHANGELOG.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
