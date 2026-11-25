@@ -2,7 +2,7 @@
 // sketch to POST /profile and show the taxonomic profile. Plain JS, no dependencies.
 // All server/user strings are inserted with textContent / text nodes only.
 //
-// Pipeline (see sketch-wasm/README.md): one decompress worker per input stream -> sketch worker,
+// Pipeline (see rust/README.md): one decompress worker per input stream -> sketch worker,
 // transferable chunks with credit backpressure; the sketch (.sylsp bytes) comes back to this thread.
 (() => {
   'use strict';

@@ -1,6 +1,6 @@
 // In-browser sketching shared by the Reads and Assembly modes: the WebAssembly module, the support
 // check and the two-worker pipeline (decompress worker(s) -> sketch worker, see
-// sketch-wasm/README.md). Plain JS, no dependencies. Exposes window.SylphdSketch.
+// rust/README.md). Plain JS, no dependencies. Exposes window.SylphdSketch.
 (() => {
   'use strict';
 
@@ -37,7 +37,7 @@
         let res;
         try { res = await fetch(WASM_URL); } catch { throw new Error('The WebAssembly sketcher could not be downloaded.'); }
         if (!res.ok) {
-          throw new Error(`The WebAssembly sketcher is missing from this site (${WASM_URL}: HTTP ${res.status}). When serving web/ yourself, build it first with sketch-wasm/build.sh ../web/wasm.`);
+          throw new Error(`The WebAssembly sketcher is missing from this site (${WASM_URL}: HTTP ${res.status}). When serving web/ yourself, build it first with rust/sylphd-wasm/build.sh web/wasm.`);
         }
         try {
           return await WebAssembly.compileStreaming(res.clone());
@@ -160,7 +160,7 @@
   // The caller must not hold on to the records (a large assembly does not fit
   // in memory) and should send or aggregate them as they arrive.
   // The wasm sketcher refuses more than MAX_CONTIG_RECORDS records and any
-  // single record longer than MAX_CONTIG_LENGTH bp (see sketch-wasm/src/contig.rs).
+  // single record longer than MAX_CONTIG_LENGTH bp (see rust/sylphd-core/src/contig.rs).
   function sketchContigs(file, { c, k, minLength = 20000, minSpacing, onProgress = () => {} } = {}, onContig = () => {}) {
     let kill = () => {};
     let cancelled = false;

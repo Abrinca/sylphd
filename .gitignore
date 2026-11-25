@@ -32,7 +32,7 @@ db/
 /.cache/
 /public/
 
-# WebAssembly sketcher, built by sketch-wasm/build.sh (preview script, Pages workflow)
+# WebAssembly sketcher, built by rust/sylphd-wasm/build.sh (preview script, Pages workflow)
 /web/wasm/
 
 # npm dependencies of the browser tests

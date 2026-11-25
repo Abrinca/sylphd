@@ -316,7 +316,7 @@ the docs at `/docs/`), so links from the page into the docs work. It also builds
 sketcher (needed by the Reads and Assembly modes, which sketch in the browser) into `web/wasm/`
 (needs `cargo` and `wasm-bindgen-cli`; `SKIP_WASM=1` skips it). Serving `web/` alone with
 `python -m http.server -d web` also works, but the docs links then return 404, and without
-`web/wasm/` (`sketch-wasm/build.sh`) neither mode can sketch; only a ready-made `.sylsp` upload works.
+`web/wasm/` (`rust/sylphd-wasm/build.sh`) neither mode can sketch; only a ready-made `.sylsp` upload works.
 
 For local development start the server with `--cors-origin local`. The browser must be allowed by
 the server's CORS origins, and an HTTPS page can only call an HTTPS API (or localhost).

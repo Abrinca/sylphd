@@ -9,14 +9,14 @@ on:
     paths:
       - "web/**"
       - "docs/**"
-      - "sketch-wasm/**"
+      - "rust/**"
       - "zensical.toml"
       - ".github/workflows/pages.yml"
   pull_request:
     paths:
       - "web/**"
       - "docs/**"
-      - "sketch-wasm/**"
+      - "rust/**"
       - "zensical.toml"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -28,9 +28,9 @@ permissions:
   contents: read
 
 env:
-  # The "Reads" mode sketches in the browser with sketch-wasm/ (Rust -> WebAssembly), built here
+  # The "Reads" mode sketches in the browser with rust/sylphd-wasm/ (Rust -> WebAssembly), built here
   # and copied into the site; the binaries are not committed. wasm-bindgen-cli must equal the
-  # `wasm-bindgen` crate version in sketch-wasm/Cargo.toml (pinned with `=`).
+  # `wasm-bindgen` crate version in rust/Cargo.toml (pinned with `=`).
   RUST_VERSION: "1.98.1"
   WASM_BINDGEN_VERSION: "0.2.129"
   # sha256 of wasm-bindgen-<version>-x86_64-unknown-linux-musl.tar.gz (GitHub release asset)
@@ -68,10 +68,10 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            sketch-wasm/target
-          key: wasm-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('sketch-wasm/Cargo.lock') }}
+            rust/target
+          key: wasm-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('rust/Cargo.lock') }}
       - name: Build the WebAssembly sketcher into web/wasm
-        run: sketch-wasm/build.sh ../web/wasm
+        run: rust/sylphd-wasm/build.sh web/wasm
       # web/ (with wasm/) at the root, the built docs under docs/.
       - name: Assemble the Pages artifact
         run: |
