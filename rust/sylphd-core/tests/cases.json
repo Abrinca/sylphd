@@ -52,7 +52,7 @@
   "kind": "single",
   "synth": true,
   "files": [
-   "sketch-wasm/target/synth/sim_R1.fq"
+   "rust/target/synth/sim_R1.fq"
   ]
  },
  {
@@ -61,7 +61,7 @@
   "synth": true,
   "deduplicate": false,
   "files": [
-   "sketch-wasm/target/synth/sim_R1.fq"
+   "rust/target/synth/sim_R1.fq"
   ]
  },
  {
@@ -69,8 +69,8 @@
   "kind": "paired",
   "synth": true,
   "files": [
-   "sketch-wasm/target/synth/sim_R1.fq",
-   "sketch-wasm/target/synth/sim_R2.fq"
+   "rust/target/synth/sim_R1.fq",
+   "rust/target/synth/sim_R2.fq"
   ]
  },
  {
@@ -80,8 +80,8 @@
   "c": 50,
   "k": 21,
   "files": [
-   "sketch-wasm/target/synth/sim_R1.fq",
-   "sketch-wasm/target/synth/sim_R2.fq"
+   "rust/target/synth/sim_R1.fq",
+   "rust/target/synth/sim_R2.fq"
   ]
  },
  {
@@ -107,7 +107,7 @@
   "raw_gz": true,
   "synth": true,
   "files": [
-   "sketch-wasm/target/synth/k12_twice.fq.gz"
+   "rust/target/synth/k12_twice.fq.gz"
   ]
  },
  {
@@ -116,7 +116,7 @@
   "raw_gz": true,
   "synth": true,
   "files": [
-   "sketch-wasm/target/synth/k12_bgzf_like.fq.gz"
+   "rust/target/synth/k12_bgzf_like.fq.gz"
   ]
  },
  {
@@ -125,8 +125,8 @@
   "raw_gz": true,
   "synth": true,
   "files": [
-   "sketch-wasm/target/synth/sim_R1.fq.gz",
-   "sketch-wasm/target/synth/sim_R2.fq.gz"
+   "rust/target/synth/sim_R1.fq.gz",
+   "rust/target/synth/sim_R2.fq.gz"
   ]
  },
  {

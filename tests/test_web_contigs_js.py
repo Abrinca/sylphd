@@ -1,14 +1,14 @@
 """Per-contig sketching in the browser wasm must match pysylph / sylphd exactly.
 
-`sketch-wasm/src/contig.rs` (WASM API `WasmContigSketcher`) sketches every record
+`rust/sylphd-core/src/contig.rs` (WASM API `WasmContigSketcher` in `rust/sylphd-wasm`) sketches every record
 of a FASTA/FASTQ file as its own sample and computes the record's genome-style
 k-mer count -- the two things `POST /contigs` needs per contig (see
 `docs/reference/http-api.md` and `src/sylphd/sketching.py::sketch_contigs`).
 
-The tests run the built module under node (`sketch-wasm/build.sh` first):
+The tests run the built module under node (`rust/sylphd-wasm/build.sh` first):
 
-* `sketch-wasm/tests/contigs_check.mjs` drives the wasm API directly;
-* `sketch-wasm/tests/contigs_pipeline_check.mjs` runs `sketchContigs` from
+* `rust/sylphd-wasm/tests/contigs_check.mjs` drives the wasm API directly;
+* `rust/sylphd-wasm/tests/contigs_pipeline_check.mjs` runs `sketchContigs` from
   `web/sketching.js` through the real `web/sketch-worker.js`/`decompress-worker.js`
   (on node worker threads), so batching, ack/backpressure and the gzip path are
   covered too.
@@ -38,8 +38,8 @@ from sylphd.sketching import sketch_contigs, unique_contig_name
 
 ROOT = Path(__file__).resolve().parents[1]
 WASM = ROOT / "web" / "wasm" / "sylph_sketch.js"
-CONTIGS_CHECK = ROOT / "sketch-wasm" / "tests" / "contigs_check.mjs"
-PIPELINE_CHECK = ROOT / "sketch-wasm" / "tests" / "contigs_pipeline_check.mjs"
+CONTIGS_CHECK = ROOT / "rust" / "sylphd-wasm" / "tests" / "contigs_check.mjs"
+PIPELINE_CHECK = ROOT / "rust" / "sylphd-wasm" / "tests" / "contigs_pipeline_check.mjs"
 LAMBDA = ROOT / "scratch" / "taxonomy" / "phase4a" / "lambda.fasta"
 
 
@@ -48,14 +48,14 @@ def _require_node_and_wasm() -> None:
     if shutil.which("node") is None:
         pytest.skip("node is not installed")
     if not WASM.exists():
-        pytest.skip("web/wasm is not built (run sketch-wasm/build.sh)")
+        pytest.skip("web/wasm is not built (run rust/sylphd-wasm/build.sh)")
 
 
 def sorted_bytes(data: bytes) -> bytes:
     """Re-emit a SequencesSketch with its k-mer entries sorted.
 
     The wasm writer sorts the entries (so its output is deterministic), sylph
-    writes hash-map order; same helper as ``sketch-wasm/tests/compare_pysylph.py``.
+    writes hash-map order; same helper as ``rust/sylphd-core/tests/compare_pysylph.py``.
     """
     (n,) = struct.unpack_from("<Q", data, 0)
     end = 8 + 12 * n

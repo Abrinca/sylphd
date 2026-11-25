@@ -15,13 +15,17 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use flate2::read::MultiGzDecoder;
-use sylph_sketch_wasm::stream::StreamSketcher;
+use sylphd_core::stream::StreamSketcher;
 
-fn repo_root() -> PathBuf {
+fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .to_path_buf()
+}
+
+fn repo_root() -> PathBuf {
+    workspace_root().parent().unwrap().to_path_buf()
 }
 
 fn resolve(path: &str) -> PathBuf {
@@ -78,37 +82,29 @@ fn sketch_case(case: &serde_json::Value, chunk: usize) -> Vec<u8> {
         "single" => {
             for f in &files {
                 if raw_gz {
-                    pump(&mut File::open(f).unwrap(), chunk, &mut |b| {
-                        s.push_gz(b).unwrap()
-                    });
+                    s.push_file(f).unwrap();
                 } else {
                     pump(&mut *open(f), chunk, &mut |b| s.push(b).unwrap());
+                    s.end_file().unwrap();
                 }
-                s.end_file().unwrap();
             }
         }
         "paired" => {
-            // alternate between the two streams, like the browser
-            let raw = |p: &Path| -> Box<dyn Read> { Box::new(File::open(p).unwrap()) };
-            let (mut r1, mut r2) = if raw_gz {
-                (raw(&files[0]), raw(&files[1]))
+            if raw_gz {
+                s.push_paired_files(&files[0], &files[1]).unwrap();
             } else {
-                (open(&files[0]), open(&files[1]))
-            };
-            let mut b1 = vec![0u8; chunk];
-            let mut b2 = vec![0u8; chunk];
-            loop {
-                let n1 = r1.read(&mut b1).unwrap();
-                let n2 = r2.read(&mut b2).unwrap();
-                if raw_gz {
-                    s.push_r1_gz(&b1[..n1]).unwrap();
-                    s.push_r2_gz(&b2[..n2]).unwrap();
-                } else {
+                // alternate between the two streams, like the browser
+                let (mut r1, mut r2) = (open(&files[0]), open(&files[1]));
+                let mut b1 = vec![0u8; chunk];
+                let mut b2 = vec![0u8; chunk];
+                loop {
+                    let n1 = r1.read(&mut b1).unwrap();
+                    let n2 = r2.read(&mut b2).unwrap();
                     s.push_r1(&b1[..n1]).unwrap();
                     s.push_r2(&b2[..n2]).unwrap();
-                }
-                if n1 == 0 && n2 == 0 {
-                    break;
+                    if n1 == 0 && n2 == 0 {
+                        break;
+                    }
                 }
             }
         }
@@ -123,7 +119,7 @@ fn sketch_case(case: &serde_json::Value, chunk: usize) -> Vec<u8> {
 /// 2x(100-150 bp) pairs at ~30x, 0.5% substitutions, 8% exact PCR duplicates,
 /// fragments of 200-450 bp. Writes `target/synth/sim_R{1,2}.fq`.
 fn make_synth() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/synth");
+    let dir = workspace_root().join("target/synth");
     fs::create_dir_all(&dir).unwrap();
     make_gzip_fixtures(&dir);
     let (p1, p2) = (dir.join("sim_R1.fq"), dir.join("sim_R2.fq"));
@@ -249,7 +245,7 @@ fn matches_pysylph() {
     )
     .unwrap();
     let big = std::env::var("SKETCH_WASM_BIG").is_ok();
-    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/equality");
+    let out = workspace_root().join("target/equality");
     fs::create_dir_all(&out).unwrap();
 
     make_synth();

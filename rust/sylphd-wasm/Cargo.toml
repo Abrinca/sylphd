@@ -1,0 +1,20 @@
+[package]
+name = "sylphd-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Browser (WebAssembly) bindings for sylphd-core, with streaming multi-member gzip."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+sylphd-core = { path = "../sylphd-core", default-features = false, features = ["approx-dedup"] }
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+flate2 = { workspace = true }
+zlib-rs = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }

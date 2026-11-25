@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
-use sylph_sketch_wasm::gzip::{Crc32Tracker, CrcMode, GzipDecoder};
+use sylphd_wasm::gzip::{Crc32Tracker, CrcMode, GzipDecoder};
 
 fn payload(n: usize) -> Vec<u8> {
     let mut x = 12345u64;

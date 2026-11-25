@@ -175,7 +175,7 @@ app.
 The web page vendors [marked](https://github.com/markedjs/marked) (MIT) and
 [DOMPurify](https://github.com/cure53/DOMPurify) (Apache-2.0) to render a server's description
 safely; see [`web/vendor/README.md`](web/vendor/README.md). The WebAssembly sketcher in
-`sketch-wasm/` ports code from sylph and pysylph (MIT); see its README.
+`rust/` ports code from sylph and pysylph (MIT); see its README.
 
 ## License
 

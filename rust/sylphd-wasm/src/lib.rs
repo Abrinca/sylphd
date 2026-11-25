@@ -11,17 +11,15 @@
 //! const sylsp = s.finish("sample");   // Uint8Array, a .sylsp file
 //! ```
 
-pub mod contig;
 pub mod gzip;
-pub mod parser;
-pub mod sketch;
-pub mod stream;
 
-use sylph::seeding::Seeding;
+use sylphd_core::contig::{self, ContigRecord, ContigSketcher};
+use sylphd_core::sketch;
+use sylphd_core::stream::StreamSketcher;
+use sylphd_core::Seeding;
 use wasm_bindgen::prelude::*;
 
-use contig::{ContigRecord, ContigSketcher};
-use stream::StreamSketcher;
+use gzip::GzipDecoder;
 
 /// `scalable_cuckoo_filter`'s builder (used by sylph's `approx-dedup` feature)
 /// calls `rand::thread_rng()` and discards the result; the filter is then given
@@ -40,6 +38,8 @@ getrandom::register_custom_getrandom!(unused_getrandom);
 #[wasm_bindgen]
 pub struct WasmSketcher {
     inner: StreamSketcher,
+    gz1: Option<GzipDecoder>,
+    gz2: Option<GzipDecoder>,
 }
 
 fn js_err(message: String) -> JsError {
@@ -76,6 +76,8 @@ impl WasmSketcher {
                 seeding,
             )
             .map_err(js_err)?,
+            gz1: None,
+            gz2: None,
         })
     }
 
@@ -103,26 +105,43 @@ impl WasmSketcher {
     /// Like `push`, for raw chunks of a gzip file; multi-member files (BGZF,
     /// concatenated gzips) are fine, unlike with `DecompressionStream`.
     pub fn push_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
-        self.inner.push_gz(data).map_err(js_err)
+        let mut decoder = self.gz1.take().unwrap_or_default();
+        let result = decoder.push(data, &mut |plain| self.inner.push(plain));
+        self.gz1 = Some(decoder);
+        result.map_err(js_err)
     }
 
     /// Gzip variant of `push_r1`.
     pub fn push_r1_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
-        self.inner.push_r1_gz(data).map_err(js_err)
+        let mut decoder = self.gz1.take().unwrap_or_default();
+        let result = decoder.push(data, &mut |plain| self.inner.push_r1(plain));
+        self.gz1 = Some(decoder);
+        result.map_err(js_err)
     }
 
     /// Gzip variant of `push_r2`.
     pub fn push_r2_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
-        self.inner.push_r2_gz(data).map_err(js_err)
+        let mut decoder = self.gz2.take().unwrap_or_default();
+        let result = decoder.push(data, &mut |plain| self.inner.push_r2(plain));
+        self.gz2 = Some(decoder);
+        result.map_err(js_err)
     }
 
     /// Gzip variant of `push_interleaved`.
     pub fn push_interleaved_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
-        self.inner.push_interleaved_gz(data).map_err(js_err)
+        let mut decoder = self.gz1.take().unwrap_or_default();
+        let result = decoder.push(data, &mut |plain| self.inner.push_interleaved(plain));
+        self.gz1 = Some(decoder);
+        result.map_err(js_err)
     }
 
     /// Ends the current file so another can follow (same sample).
     pub fn end_file(&mut self) -> Result<(), JsError> {
+        for decoder in [&mut self.gz1, &mut self.gz2] {
+            if let Some(mut decoder) = decoder.take() {
+                decoder.finish().map_err(js_err)?;
+            }
+        }
         self.inner.end_file().map_err(js_err)
     }
 
@@ -154,6 +173,11 @@ impl WasmSketcher {
 
     /// Ends the last file and returns the serialized `.sylsp` sketch.
     pub fn finish(&mut self, sample_name: &str) -> Result<Vec<u8>, JsError> {
+        for decoder in [&mut self.gz1, &mut self.gz2] {
+            if let Some(mut decoder) = decoder.take() {
+                decoder.finish().map_err(js_err)?;
+            }
+        }
         self.inner.finish(sample_name).map_err(js_err)
     }
 }
@@ -197,6 +221,7 @@ const MAX_CHUNK: usize = 256 << 20;
 #[wasm_bindgen]
 pub struct WasmContigSketcher {
     inner: ContigSketcher,
+    gz: Option<GzipDecoder>,
 }
 
 fn contig_record_to_js(record: ContigRecord) -> JsValue {
@@ -279,6 +304,7 @@ impl WasmContigSketcher {
                 max_record_length,
             )
             .map_err(js_err)?,
+            gz: None,
         })
     }
 
@@ -289,17 +315,23 @@ impl WasmContigSketcher {
 
     /// Like `push`, for raw chunks of a gzip file (multi-member files fine).
     pub fn push_gz(&mut self, data: &[u8]) -> Result<(), JsError> {
-        self.inner.push_gz(data).map_err(js_err)
+        let mut decoder = self.gz.take().unwrap_or_default();
+        let result = decoder.push(data, &mut |plain| self.inner.push(plain));
+        self.gz = Some(decoder);
+        result.map_err(js_err)
     }
 
     /// Ends the current file: flushes the last record (drain afterwards).
     pub fn end_file(&mut self) -> Result<(), JsError> {
+        if let Some(mut decoder) = self.gz.take() {
+            decoder.finish().map_err(js_err)?;
+        }
         self.inner.end_file().map_err(js_err)
     }
 
     /// Announces the end of the input: the same as `end_file`.
     pub fn finish(&mut self) -> Result<(), JsError> {
-        self.inner.end_file().map_err(js_err)
+        self.end_file()
     }
 
     /// All finished records (JS objects, see the type docs), oldest first.

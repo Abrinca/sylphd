@@ -8,8 +8,8 @@
 #   scripts/preview-pages.sh 8080       # another port
 #
 # The "Reads" and "Assembly" modes sketch in the browser with the WebAssembly
-# sketcher, built from sketch-wasm/ into web/wasm/ (gitignored; needs cargo, the
-# wasm32-unknown-unknown target and wasm-bindgen-cli, see sketch-wasm/README.md).
+# sketcher, built from rust/sylphd-wasm/ into web/wasm/ (gitignored; needs cargo, the
+# wasm32-unknown-unknown target and wasm-bindgen-cli, see rust/README.md).
 # SKIP_WASM=1 skips that build; without the module the page still loads but
 # neither mode can sketch (only uploading a ready-made .sylsp works).
 #
@@ -22,7 +22,7 @@ port=${1:-8000}
 uvx zensical build --clean --strict
 if [ -z "${SKIP_WASM:-}" ]; then
   if command -v cargo >/dev/null; then
-    sketch-wasm/build.sh ../web/wasm
+    rust/sylphd-wasm/build.sh web/wasm
   else
     echo "warning: cargo not found, building without the wasm sketcher" >&2
   fi

@@ -103,15 +103,15 @@ with two equal modes selected by the address: the landing page (no hash), `#asse
   contig** checked, `contigs.js` sketches every record and sends it to `POST /contigs` in batches
   of `limits.max_contigs`, then shows the per-contig table, composition card and consensus summary.
 - **Reads** sketches reads in the browser (`reads.js`, the two workers `decompress-worker.js` and
-  `sketch-worker.js`, and the WebAssembly module from `sketch-wasm/`) and sends only the sketch to
+  `sketch-worker.js`, and the WebAssembly module from `rust/sylphd-wasm/`) and sends only the sketch to
   `POST /profile`. The taxonomic clades are aggregated **on the server** (`sylphd/taxonomy.py`) and
   returned in the `taxprof` response; the page charts them and never ports the aggregation
   (`tests/test_web_reads_taxprof.py` renders them in a real browser). See
   [Profiling reads in the browser](../guides/profiling-in-browser.md).
 
-The WebAssembly module is not committed: `sketch-wasm/build.sh ../web/wasm` builds it (Rust with the
+The WebAssembly module is not committed: `rust/sylphd-wasm/build.sh web/wasm` builds it (Rust with the
 `wasm32-unknown-unknown` target and `wasm-bindgen-cli` at the version pinned in
-`sketch-wasm/Cargo.toml`), and the Pages workflow and `scripts/preview-pages.sh` do that.
+`rust/Cargo.toml`), and the Pages workflow and `scripts/preview-pages.sh` do that.
 See [Using the web app against your server](../guides/public-server.md#using-the-web-app-against-your-server)
 for running it locally.
 
