@@ -57,17 +57,16 @@ def _help(binary: str | None) -> int:
         print(f"  not available: sylphd-client is not installed; {INSTALL_HINT}")
         print("\noptions:\n  -h, --help     show this help\n  -V, --version  show the version")
         return 0
-    done = subprocess.run([binary, "--help"], capture_output=True, text=True)
+    done = subprocess.run([binary, "--help"], check=False, capture_output=True, text=True)
     commands: list[str] = []
-    options: list[str] = []
-    section: list[str] | None = None
+    in_commands = False
     for line in done.stdout.splitlines():
         if line == "Commands:":
-            section = commands
+            in_commands = True
         elif line == "Options:":
-            section = options
-        elif line.strip() and section is not None and not line.startswith("  help "):
-            section.append(line)
+            in_commands = False
+        elif line.strip() and in_commands and not line.startswith("  help "):
+            commands.append(line)
     print("\n".join(commands))
     print("\noptions:\n  -h, --help     show this help\n  -V, --version  show the version")
     return 0
@@ -83,9 +82,9 @@ def _run_python(command: str, args: list[str]) -> int:
         from .taxmatrix import main as taxmatrix
 
         return taxmatrix(args[1:])
-    from .cli import main as run
-
     try:
+        from .cli import main as run
+
         return run(args)
     except ImportError as error:
         if (error.name or "").split(".")[0] not in OPTIONAL_MODULES:
@@ -101,13 +100,21 @@ def _run_python(command: str, args: list[str]) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in _HELP_FLAGS:
-        return _help(find_client_bin())
+        try:
+            return _help(find_client_bin())
+        except FileNotFoundError as error:  # a bad $SYLPHD_CLIENT_BIN
+            print(f"sylphd: {error}", file=sys.stderr)
+            return 2
     if args[0] in ("-V", "--version"):
         print(f"sylphd {__version__}")
         return 0
     if args[0] in PYTHON_COMMANDS:
         return _run_python(args[0], args)
-    binary = find_client_bin()
+    try:
+        binary = find_client_bin()
+    except FileNotFoundError as error:
+        print(f"sylphd: {error}", file=sys.stderr)
+        return 2
     if binary is None:
         print(
             f"sylphd: `sylphd {args[0]}` is run by the native client (sylphd-client), "

@@ -93,8 +93,7 @@ sketching lives in `sylphd-client`, a native binary that ships as the platform w
 `sylphd-bin` (like ruff and uv). Clients are therefore one command:
 
 ```console
-uv tool install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z \
-               'sylphd[client]==X.Y.Z'
+uv tool install 'sylphd[client]'
 ```
 
 The machine that runs the server needs `sylphd[server]`, whose `pysylph` wheel comes from the same

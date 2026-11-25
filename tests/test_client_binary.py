@@ -29,7 +29,6 @@ from pathlib import Path
 import dnaio
 import pysylph
 import pytest
-
 from conftest import CLODF13_FASTA, K12_R1, K12_R2, require_client_binary
 
 REPO = Path(__file__).resolve().parent.parent
@@ -40,6 +39,7 @@ BIN = require_client_binary()
 def _run(*args: str | Path, timeout: float = 600, **env: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(BIN), *map(str, args)],
+        check=False,
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -51,6 +51,7 @@ def _run_sylphd(*args: str | Path, timeout: float = 600) -> subprocess.Completed
     """The Python command, which forwards the query commands to the binary."""
     return subprocess.run(
         [sys.executable, "-m", "sylphd", *map(str, args)],
+        check=False,
         capture_output=True,
         text=True,
         timeout=timeout,

@@ -175,8 +175,8 @@ row at all: it is only counted in the summary (`summary.skipped_short` /
 - `status` is `ok` or `no_hit`. Use `--fields none` for this compact table, `--fields all` (the
   default) for every metadata column, or name the columns you want. A record that was never sent
   (too short, or too few sketched/genome-style k-mers) is not a row at all; it is counted in the
-  summary. (`POST /contigs` still answers `too_short`/`too_few_kmers` for a client that sends such
-  a sketch, but the command no longer sends them.)
+  summary. (`POST /contigs` answers `too_short`/`too_few_kmers` for a client that sends such a
+  sketch, but the command never sends them.)
 
 ### Taxonomic consensus { #per-contig-consensus }
 

@@ -17,11 +17,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from conftest import require_client_binary
 
 from sylphd import __version__, clientbin, entry
 from sylphd.clientbin import find_client_bin
-
-from conftest import require_client_binary
 
 CLIENT = require_client_binary()
 
@@ -37,8 +36,7 @@ def test_python_commands_are_the_server_and_admin_ones() -> None:
         "diff",
     ]
     # The query commands are the binary's, and the two sets do not overlap.
-    assert clientbin.CLIENT_COMMANDS == {"info", "profile", "query", "assembly", "render"}
-    assert not set(entry.PYTHON_COMMANDS) & set(clientbin.CLIENT_COMMANDS)
+    assert not set(entry.PYTHON_COMMANDS) & (clientbin.JSON_COMMANDS | {"render"})
 
 
 def test_help_lists_python_commands_then_the_binarys(capsys) -> None:
@@ -56,7 +54,7 @@ def test_help_lists_python_commands_then_the_binarys(capsys) -> None:
 
 
 def test_help_without_the_binary(monkeypatch, capsys) -> None:
-    monkeypatch.setenv(clientbin.ENV_BIN, "/nonexistent/sylphd-client")
+    monkeypatch.setattr(entry, "find_client_bin", lambda: None)
     assert entry.main(["--help"]) == 0
     out = capsys.readouterr().out
     assert "sylphd-client is not installed" in out
@@ -76,7 +74,7 @@ def test_no_arguments_shows_the_help(capsys) -> None:
 
 
 def test_a_missing_binary_is_a_friendly_error(monkeypatch, capsys) -> None:
-    monkeypatch.setenv(clientbin.ENV_BIN, "/nonexistent/sylphd-client")
+    monkeypatch.setattr(entry, "find_client_bin", lambda: None)
     assert entry.main(["profile", "reads.fq"]) == 2
     err = capsys.readouterr().err
     assert "sylphd-client" in err
@@ -94,7 +92,8 @@ def test_python_commands_do_not_need_the_binary(monkeypatch, capsys) -> None:
 def test_find_client_bin_honours_the_override(tmp_path, monkeypatch) -> None:
     assert find_client_bin()  # the dev venv / cargo build has it
     monkeypatch.setenv(clientbin.ENV_BIN, str(tmp_path / "missing"))
-    assert find_client_bin() is None
+    with pytest.raises(FileNotFoundError, match=str(tmp_path / "missing")):
+        find_client_bin()
     monkeypatch.setenv(clientbin.ENV_BIN, str(CLIENT))
     assert find_client_bin() == str(CLIENT)
 
@@ -112,7 +111,7 @@ def test_the_console_script_is_installed() -> None:
     script = Path(sys.executable).with_name("sylphd")
     if not script.is_file():
         pytest.skip("not running from an installed environment")
-    done = subprocess.run([str(script), "--version"], capture_output=True, text=True)
+    done = subprocess.run([str(script), "--version"], check=False, capture_output=True, text=True)
     assert done.returncode == 0
     assert done.stdout.strip() == f"sylphd {__version__}"
 
@@ -224,12 +223,131 @@ def test_run_passes_the_flags_through(tmp_path: Path) -> None:
     reads.write_text("@r\nACGT\n+\nIIII\n")
     with _fake_server([json.dumps(DOCUMENT)]) as url:
         run("profile", reads, "--url", url, "--fields", "none")
-    # (the fake server accepts anything; the point is that run() does not eat flags)
 
 
 def test_run_raises_when_the_binary_is_missing(monkeypatch) -> None:
     from sylphd import run
 
-    monkeypatch.setenv(clientbin.ENV_BIN, "/nonexistent/sylphd-client")
+    monkeypatch.setattr(clientbin, "find_client_bin", lambda: None)
     with pytest.raises(FileNotFoundError, match="sylphd-client is not installed"):
         run("info")
+
+
+def test_a_bad_override_names_the_path(monkeypatch, capsys) -> None:
+    monkeypatch.setenv(clientbin.ENV_BIN, "/nonexistent/sylphd-client")
+    assert entry.main(["info"]) == 2
+    assert "/nonexistent/sylphd-client" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# sylphd.run and the entry point against a fake binary
+# ---------------------------------------------------------------------------
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="the fake binary is a #! script")
+
+
+def _fake_binary(tmp_path: Path, monkeypatch, *, stdout: str, stderr: str = "", code: int = 0) -> Path:
+    """A ``sylphd-client`` that records its argv in ``argv.json`` and prints what it is told."""
+    record = tmp_path / "argv.json"
+    script = tmp_path / "fake-client"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        f"json.dump(sys.argv, open({str(record)!r}, 'w'))\n"
+        f"sys.stdout.write({stdout!r})\n"
+        f"sys.stderr.write({stderr!r})\n"
+        f"sys.exit({code})\n"
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv(clientbin.ENV_BIN, str(script))
+    return record
+
+
+@posix_only
+def test_run_adds_json_and_passes_the_arguments(tmp_path: Path, monkeypatch) -> None:
+    from sylphd import run
+
+    record = _fake_binary(tmp_path, monkeypatch, stdout=json.dumps(DOCUMENT))
+    assert run("profile", "a.fq", "--fields", "none") == DOCUMENT
+    argv = json.loads(record.read_text())
+    assert argv[1:] == ["profile", "--json", "a.fq", "--fields", "none"]
+    # `--json` given by the caller is not repeated
+    run("query", "--json", "a.fq")
+    assert json.loads(record.read_text())[1:] == ["query", "--json", "a.fq"]
+
+
+@posix_only
+def test_run_raises_on_a_failing_exit(tmp_path: Path, monkeypatch) -> None:
+    from sylphd import ClientRunError, run
+
+    _fake_binary(tmp_path, monkeypatch, stdout="", stderr="sylphd: error: no such file\n", code=2)
+    with pytest.raises(ClientRunError) as caught:
+        run("profile", "missing.fq")
+    assert caught.value.returncode == 2
+    assert caught.value.stderr == "sylphd: error: no such file\n"
+    assert "no such file" in str(caught.value)
+
+
+@posix_only
+def test_run_raises_on_output_that_is_not_json(tmp_path: Path, monkeypatch) -> None:
+    from sylphd import ClientRunError, run
+
+    _fake_binary(tmp_path, monkeypatch, stdout="not json")
+    with pytest.raises(ClientRunError, match="no JSON document"):
+        run("info")
+
+
+@pytest.mark.parametrize(
+    "args",
+    [("render", "doc.json"), ("profile", "a.fq", "-o", "out.tsv"), ("info", "--output=x"), ()],
+)
+def test_run_refuses_what_cannot_work(args) -> None:
+    from sylphd import run
+
+    with pytest.raises(ValueError):
+        run(*args)
+
+
+def test_exec_client_on_windows_runs_a_child(monkeypatch) -> None:
+    calls: list[tuple[list[str], str | None]] = []
+
+    def fake_call(argv, executable=None):
+        calls.append((argv, executable))
+        return 7
+
+    monkeypatch.setattr(clientbin.os, "name", "nt")
+    monkeypatch.setattr(clientbin.subprocess, "call", fake_call)
+    assert clientbin.exec_client("C:/bin/sylphd-client.exe", ["profile", "a.fq"]) == 7
+    assert calls == [(["sylphd", "profile", "a.fq"], "C:/bin/sylphd-client.exe")]
+
+
+def test_exec_client_on_unix_replaces_the_process(monkeypatch) -> None:
+    seen: list[tuple[str, list[str]]] = []
+
+    def fake_execv(path, argv):
+        seen.append((path, argv))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(clientbin.os, "name", "posix")
+    monkeypatch.setattr(clientbin.os, "execv", fake_execv)
+    with pytest.raises(SystemExit):
+        clientbin.exec_client("/usr/bin/sylphd-client", ["info"])
+    assert seen == [("/usr/bin/sylphd-client", ["sylphd", "info"])]
+
+
+def test_serve_without_the_server_packages_is_a_friendly_error(monkeypatch, capsys) -> None:
+    import builtins
+
+    real_import = builtins.__import__
+
+    def refusing(name, *args, **kwargs):
+        if name == "cli" and args[2:] == (("main",), 1):  # `from .cli import main`
+            raise ImportError("No module named 'starlette'", name="starlette")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", refusing)
+    assert entry.main(["serve", "--db", "x.syldb"]) == 2
+    err = capsys.readouterr().err
+    assert "needs a package that is not installed (starlette)" in err
+    assert "sylphd[server]" in err
+    assert "Traceback" not in err

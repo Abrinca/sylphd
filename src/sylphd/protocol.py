@@ -80,9 +80,6 @@ PROFILE_COLUMNS: tuple[str, ...] = (
 #: Columns appended to the sylph ones.
 EXTRA_COLUMNS: tuple[str, ...] = ("accession",)
 
-MODES = ("query", "profile")
-
-
 class ProtocolError(ValueError):
     """Raised for malformed request parameters."""
 
@@ -142,15 +139,6 @@ class ProfileParams:
             "screen_ani": self.screen_ani,
             "no_adjust": self.no_adjust,
         }
-
-    def profiler_kwargs(self) -> dict[str, Any]:
-        """Keyword arguments for ``pysylph.Profiler``.
-
-        Every field is one of the constructor's keywords, including
-        ``estimate_read_counts``, which pysylph uses to put read counts in
-        ``Sequence_abundance`` (and to enable ``estimate_unknown``).
-        """
-        return self.to_dict()
 
 
 #: ``params`` keys ``/query`` and ``/profile`` accept.  The profiling fields
@@ -343,12 +331,57 @@ def table_columns(
     *,
     metadata_columns: Sequence[str] | None = None,
 ) -> list[str]:
-    """JSON table columns: :func:`header_for` plus ``Lambda_status`` before ``accession``."""
+    """JSON table columns: :func:`columns_for_mode` plus ``Lambda_status`` before ``accession``."""
     columns = [*columns_for_mode(mode, params), "Lambda_status", *EXTRA_COLUMNS]
     if fields is not None:
         columns.extend(fields)
     elif metadata_columns is not None:
         columns.extend(metadata_columns)
     return columns
+
+
+def result_document(
+    mode: str,
+    params: ProfileParams,
+    fields: Sequence[str] | None,
+    names: Sequence[str],
+    samples: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """The ``/query`` / ``/profile`` response for the finished ``samples``.
+
+    ``samples`` are the per-sample results in request order (``rows``, optional
+    ``caveats`` and ``taxprof``); ``names`` are all requested sample names. Rows are
+    laid out in :func:`table_columns` order, the caveats are the distinct notes in
+    first-seen order, and ``taxprof`` (by sample name) is present when any sample has one.
+    """
+    columns = table_columns(mode, params, fields)
+    data: list[list[Any]] = []
+    caveats: list[str] = []
+    taxprof: dict[str, Any] = {}
+    for sample in samples:
+        for row in sample.get("rows") or ():
+            data.append(
+                [
+                    row.get("Eff_cov")
+                    if column == "True_cov" and "True_cov" not in row
+                    else row.get(column)
+                    for column in columns
+                ]
+            )
+        for note in sample.get("caveats") or ():
+            if note not in caveats:
+                caveats.append(note)
+        if "taxprof" in sample:
+            taxprof[sample["name"]] = sample["taxprof"]
+    document: dict[str, Any] = {
+        "api_version": API_VERSION,
+        "params": params.to_dict(),
+        "samples": [{"name": name} for name in names],
+        "table": {"columns": columns, "data": data},
+        "caveats": caveats,
+    }
+    if taxprof:
+        document["taxprof"] = taxprof
+    return document
 
 

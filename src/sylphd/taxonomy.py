@@ -191,12 +191,6 @@ def is_sylphtax(taxonomy: str) -> bool:
     return taxonomy == SYLPHTAX or source_of(taxonomy) is not None
 
 
-def taxonomy_file_label(taxonomy: str) -> str:
-    """The taxonomy as it appears in file names (``tax.UHGV_default``)."""
-    source = source_of(taxonomy)
-    return taxonomy if source is None else f"{SYLPHTAX}.{_safe_name(source)}"
-
-
 def available_taxonomies(metadata: Mapping[str, Any] | None) -> list[str]:
     """Every taxonomy this metadata can aggregate, for ``/info``.
 
@@ -229,7 +223,7 @@ def parse_taxonomies(text: str | Sequence[str] | None) -> tuple[str, ...]:
 
     ``None`` is the rank-based default (``gtdb,ncbi``); the command line
     decides separately whether ``tax`` belongs to the default, because that
-    depends on the server (see :func:`default_taxonomies`).  Unknown names
+    depends on the server.  Unknown names
     raise :class:`TaxonomyError`; duplicates are collapsed, first mention wins.
     """
     if text is None:
@@ -263,18 +257,6 @@ def parse_taxonomies(text: str | Sequence[str] | None) -> tuple[str, ...]:
 def has_taxonomy_sources(metadata: Mapping[str, Any] | None) -> bool:
     """True when the server's metadata has sylph-tax taxonomy sources."""
     return bool((metadata or {}).get("taxonomy_sources"))
-
-
-def default_taxonomies(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
-    """The taxonomies to write when ``--taxonomy`` is not given.
-
-    ``gtdb,ncbi`` as always, plus ``tax`` when the server has sylph-tax
-    sources (``docs/project/multi-db-design.md`` B4).
-    """
-    names = list(TAXONOMY_COLUMNS)
-    if has_taxonomy_sources(metadata):
-        names.append(SYLPHTAX)
-    return tuple(names)
 
 
 def resolve_taxonomy_columns(
@@ -651,28 +633,6 @@ def lineage_ranks(clades: Iterable[CladeAbundance]) -> list[str]:
     return ordered
 
 
-def aggregate_samples(
-    samples: Iterable[Mapping[str, Any]], taxonomy: str = "gtdb"
-) -> list[tuple[str, list[CladeAbundance]]]:
-    """Aggregate every returned sample, keeping the response order."""
-    return [
-        (sample_name(sample), aggregate_rows(sample.get("rows") or (), taxonomy))
-        for sample in samples
-    ]
-
-
-def sample_name(sample: Mapping[str, Any]) -> str:
-    """The sample name used in file names and matrix headers."""
-    name = sample.get("name")
-    if not name:
-        rows = sample.get("rows") or ()
-        for row in rows:
-            name = row.get("Sample_file")
-            if name:
-                break
-    return str(name or "sample")
-
-
 # ---------------------------------------------------------------------------
 # rendering
 # ---------------------------------------------------------------------------
@@ -683,11 +643,6 @@ def _cell(value: float | None) -> str:
     if value is None:
         return "NA"
     return str(float(value))
-
-
-def _safe_name(name: str) -> str:
-    """Keep a sample name from escaping the output prefix directory."""
-    return name.replace("/", "_").replace("\\", "_") or "sample"
 
 
 def taxprof_lines(
@@ -965,63 +920,3 @@ def build_taxprof(
             taxonomies_used=used,
         )
     return payload
-
-
-def taxprof_path(prefix: str, name: str, taxonomy: str) -> Path:
-    return Path(f"{prefix}{_safe_name(name)}.{taxonomy_file_label(taxonomy)}.sylphmpa")
-
-
-def write_outputs(
-    samples: Sequence[Mapping[str, Any]],
-    *,
-    taxonomies: Sequence[str],
-    taxprof_prefix: str | None = None,
-    tax_sources: Sequence[str] = (),
-) -> list[Path]:
-    """Write the requested ``.sylphmpa`` files for a profile response.
-
-    Files are named ``{taxprof_prefix}{sample}.{taxonomy}.sylphmpa``; a
-    ``None`` prefix skips writing.  A prefix that is an existing directory is
-    treated as ``directory/``.  Returns the paths written, taxonomy by
-    taxonomy.
-
-    ``tax_sources`` names the taxonomy sources the ``tax`` profile was resolved
-    against, in ``ord`` order; it becomes the ``Taxonomies_used:`` list of a
-    ``tax`` ``.sylphmpa``, so it must be given when ``tax`` is written.
-    """
-    if taxprof_prefix is None:
-        return []
-    if SYLPHTAX in taxonomies and not tax_sources:
-        raise TaxonomyError(
-            "the 'tax' profile needs the names of the taxonomy sources it was "
-            "resolved against"
-        )
-
-    # A prefix naming an existing directory writes into it, like one ending in "/".
-    if os.path.isdir(taxprof_prefix):
-        taxprof_prefix += "/"
-
-    # Sanitising can map different names to one file; check before writing.
-    owners: dict[Path, str] = {}
-    for sample in samples:
-        name = sample_name(sample)
-        path = taxprof_path(taxprof_prefix, name, taxonomies[0])
-        if path in owners:
-            raise TaxonomyError(
-                f"sample names {owners[path]!r} and {name!r} would write the "
-                f"same file {path.name}"
-            )
-        owners[path] = name
-
-    written: list[Path] = []
-    for taxonomy in taxonomies:
-        # The server aggregates (`/profile` `taxprof`): the CLI must not fold rows itself.
-        for sample in samples:
-            name = sample_name(sample)
-            payload = sample["taxprof"][taxonomy]
-            path = taxprof_path(taxprof_prefix, name, taxonomy)
-            with open(path, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(payload["sylphmpa"])
-            written.append(path)
-    return written
-

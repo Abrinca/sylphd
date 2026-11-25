@@ -352,10 +352,10 @@ def test_the_web_checks_the_api_version_from_info_with_the_core() -> None:
     assert "newer than this client's (1): update sylphd" in got["api_version_2"]["error"]
     missing = subprocess.run(
         ["node", "--input-type=module", "-e",
-         "import {readFileSync} from 'node:fs';"
+         ("import {readFileSync} from 'node:fs';"
          "import {initSync, check_api_version} from './web/wasm/sylph_sketch.js';"
          "initSync({module: readFileSync('./web/wasm/sylph_sketch_bg.wasm')});"
-         "try { check_api_version(undefined); } catch (e) { console.log(String(e)); }"],
+         "try { check_api_version(undefined); } catch (e) { console.log(String(e)); }")],
         capture_output=True, text=True, check=True, cwd=ROOT,
     )
     assert "missing or invalid api_version" in missing.stdout

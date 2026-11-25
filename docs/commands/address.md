@@ -32,13 +32,15 @@ An explicit option wins over the environment, and URLs win over sockets:
 
 ## Timeout
 
-`--timeout SECONDS` sets the read timeout. There is none by default, because profiling can take a
-while; connecting times out after 30 s.
+`--timeout SECONDS` is a **total deadline for one request**: uploading the sketches, the server's
+computation and reading the response all count. There is none by default, because profiling can
+take a while. Connecting always times out after 30 s. A negative value is a usage error (exit code
+`2`).
 
 ## Retries
 
 `--retries N` sends a request again when the server answers `429` (rate limit) or `503` (job queue
 full), up to `N` times. The wait is the answer's `Retry-After` or 1, 2, 4... seconds of backoff,
-whichever is longer, capped at 30 s. The default is `0`: the error is reported at once, as before.
+whichever is longer, capped at 30 s. The default is `0`: the error is reported at once.
 Every other status is final, and the request is not rebuilt, so the sketches already in memory are
 sent again unchanged. A connection that cannot be made at all is not retried.

@@ -76,7 +76,7 @@ sources has no consensus.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -803,9 +803,8 @@ def summarize(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     ``records`` are the objects of a ``POST /contigs`` response (or the CLI's
     merged records, which have the same fields).  Only queried contigs
     (``ok``/``no_hit`` without a ``reason``) contribute bases; ``consensus_bp``
-    lists **every** consensus taxon with its share of the queried bases, so a
-    caller can merge several summaries and cut afterwards
-    (:func:`merge_summaries`, :func:`finalize_summary`).  ``too_short`` records
+    lists **every** consensus taxon with its share of the queried bases (the
+    client cuts the list when it renders).  ``too_short`` records
     (a client-side status: they were never sketched) are not counted in any of
     the queried/skipped buckets here.
     """
@@ -834,49 +833,6 @@ def summarize(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "no_hit_contigs": sum(1 for record in queried if not record.get("hits")),
         "consensus_bp": _breakdown(bases, queried_bp, None),
     }
-
-
-#: The counters :func:`merge_summaries` adds up.
-_COUNTERS = (
-    "contigs",
-    "bp",
-    "queried_contigs",
-    "queried_bp",
-    "too_few_kmers_contigs",
-    "too_few_kmers_bp",
-    "no_hit_contigs",
-)
-
-
-def merge_summaries(parts: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Add up per-request summaries, keeping every consensus taxon.
-
-    Fractions are recomputed later by :func:`finalize_summary`, because they
-    are over the *whole* queried base count and not over one request's.
-    """
-    totals: dict[str, Any] = {key: 0 for key in _COUNTERS}
-    bases: dict[tuple[str | None, str], int] = {}
-    for part in parts:
-        for key in _COUNTERS:
-            totals[key] += int(part.get(key) or 0)
-        for item in part.get("consensus_bp") or ():
-            key = (item.get("rank"), item.get("taxon") or "unassigned")
-            bases[key] = bases.get(key, 0) + int(item["bp"])
-    totals["consensus_bp"] = _breakdown(bases, int(totals["queried_bp"]), None)
-    return totals
-
-
-def finalize_summary(summary: Mapping[str, Any], *, top: int | None = 5) -> dict[str, Any]:
-    """Recut a merged summary: fractions over its queried bases, ``top`` taxa."""
-    bases = {
-        (item.get("rank"), item.get("taxon") or "unassigned"): int(item["bp"])
-        for item in summary.get("consensus_bp") or ()
-    }
-    result = {key: summary.get(key) for key in (*_COUNTERS, "consensus_bp")}
-    result["consensus_bp"] = _breakdown(
-        bases, int(summary.get("queried_bp") or 0), top
-    )
-    return result
 
 
 def caveats(records: Sequence[Mapping[str, Any]]) -> list[str]:

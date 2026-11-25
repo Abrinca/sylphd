@@ -96,10 +96,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.2
-      - name: uv sync (builds the native client)
-        run: uv sync
+      # No server packages (pysylph, dnaio, starlette): this job only proves that the
+      # binary builds and that the wrapper forwards to it.
+      - name: uv sync (builds the native client, no server)
+        run: uv sync --no-dev --extra client
       - name: Both commands work
         run: uv run sylphd --version && uv run sylphd-client --version
       # The suite proper needs Unix sockets (port 0 trickery and `--socket` servers);
       # these files do not, and they cover the entry point and the wheel layout.
-      - run: uv run pytest -q tests/test_entry.py tests/test_packaging.py
+      - run: uv run --no-sync --with pytest pytest -q tests/test_entry.py tests/test_packaging.py

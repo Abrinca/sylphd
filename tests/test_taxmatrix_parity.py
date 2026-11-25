@@ -24,11 +24,11 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import aggregate_samples
 
 from sylphd import taxmatrix
 from sylphd.taxonomy import (
     MATRIX_VALUES,
-    aggregate_samples,
     build_taxprof,
     clade_matrix_lines,
     taxprof_lines,

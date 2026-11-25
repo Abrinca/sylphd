@@ -1,8 +1,7 @@
 # Python: `sylphd.run`
 
 Python owns the `sylphd` command, not the queries: `info`, `profile`, `query`, `assembly` and
-`render` run in the native `sylphd-client`. So there is no Python sketching API any more
-(`SylphClient`'s query methods and `PerContigRun` are gone); what remains is one helper that runs
+`render` run in the native `sylphd-client`. Python's query API is therefore one helper that runs
 the command line and returns the JSON document the binary got from the server:
 
 ```python

@@ -8,8 +8,6 @@ split without re-aggregating anything.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from sylphd.taxonomy import (
@@ -20,7 +18,6 @@ from sylphd.taxonomy import (
     clades_from_dict,
     taxprof_lines,
     taxprof_payload,
-    write_outputs,
 )
 
 GTDB = (
@@ -106,18 +103,3 @@ def test_clades_round_trip_for_the_matrix() -> None:
         assert list(clade_matrix_lines(rebuilt, value)) == list(
             clade_matrix_lines(expected, value)
         )
-
-
-def test_write_outputs_uses_the_server_payload(tmp_path: Path) -> None:
-    """The CLI writes the server's text even when the rows carry no taxonomy."""
-    sample = {"name": "one", "rows": []}
-    sample["taxprof"] = build_taxprof("one", ("gtdb",), rows())
-    written = write_outputs(
-        [sample],
-        taxonomies=("gtdb",),
-        taxprof_prefix=str(tmp_path / "p-"),
-    )
-    assert [path.name for path in written] == ["p-one.gtdb.sylphmpa"]
-    assert (tmp_path / "p-one.gtdb.sylphmpa").read_text() == sample["taxprof"][
-        "gtdb"
-    ]["sylphmpa"]

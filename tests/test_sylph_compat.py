@@ -62,10 +62,9 @@ from conftest import (
     K12_R1,
     K12_R2,
     O157_SKETCH,
+    find_client_binary,
 )
 from starlette.testclient import TestClient
-
-from conftest import find_client_binary
 
 from sylphd.parity import compare_texts
 from sylphd.server import ServerConfig, create_app

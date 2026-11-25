@@ -21,7 +21,6 @@ from urllib.parse import urlparse
 
 import httpx
 
-from . import parity, taxmatrix
 from .about import About, check_name
 from .cli_parser import PROG, build_parser
 from .client import ClientError, TokenWarning, connect
@@ -46,8 +45,7 @@ from .messages import Messages
 from .metadata_build import build_metadata_db, update_metadata_db
 from .ncbitax import Taxonomy
 from .paths import check_socket_path, default_socket_path, parse_tcp
-from .protocol import ProfileParams, ProtocolError
-from .samples import InputError
+from .protocol import ProfileParams
 from .taxdb import build_taxdb
 from .taxonomy_sources import TaxonomySource
 from .usage import Usage
@@ -641,8 +639,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "setup": cmd_setup,
         "taxdb": cmd_taxdb,
         "taxonomy": cmd_taxonomy,
-        "taxmatrix": taxmatrix.run,
-        "diff": parity.run,
     }
     try:
         return int(commands[args.command](args))
@@ -650,8 +646,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 130
     except (
         ClientError,
-        InputError,
-        ProtocolError,
         OSError,
         ValueError,
         RuntimeError,

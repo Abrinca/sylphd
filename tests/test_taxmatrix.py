@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from sylphd import cli, taxmatrix
+from sylphd import entry, taxmatrix
 from sylphd.taxonomy import (
     CladeAbundance,
     TaxonomyError,
@@ -183,31 +183,31 @@ class TestParseSylphmpa:
             ("#SampleID\ts1\n", "missing column header"),
             ("#SampleID\ts1\nwrong\theader\n", "unexpected .sylphmpa header"),
             (
-                "#SampleID\ts1\n"
+                ("#SampleID\ts1\n"
                 "clade_name\trelative_abundance\tsequence_abundance\t"
                 "ANI (if strain-level)\tCoverage (if strain-level)\n"
-                "d__Bacteria\t100.0\t100.0\n",
+                "d__Bacteria\t100.0\t100.0\n"),
                 "expected at least 5 columns",
             ),
             (
-                "#SampleID\ts1\n"
+                ("#SampleID\ts1\n"
                 "clade_name\trelative_abundance\tsequence_abundance\t"
                 "ANI (if strain-level)\tCoverage (if strain-level)\n"
-                "\t100.0\t100.0\tNA\tNA\n",
+                "\t100.0\t100.0\tNA\tNA\n"),
                 "empty clade_name",
             ),
             (
-                "#SampleID\ts1\n"
+                ("#SampleID\ts1\n"
                 "clade_name\trelative_abundance\tsequence_abundance\t"
                 "ANI (if strain-level)\tCoverage (if strain-level)\n"
-                "d__Bacteria\tnotanumber\t100.0\tNA\tNA\n",
+                "d__Bacteria\tnotanumber\t100.0\tNA\tNA\n"),
                 "invalid relative_abundance",
             ),
             (
-                "#SampleID\ts1\n"
+                ("#SampleID\ts1\n"
                 "clade_name\trelative_abundance\tsequence_abundance\t"
                 "ANI (if strain-level)\tCoverage (if strain-level)\n"
-                "d__Bacteria|t__A\t100.0\t100.0\tbad\tNA\n",
+                "d__Bacteria|t__A\t100.0\t100.0\tbad\tNA\n"),
                 "invalid ANI",
             ),
         ],
@@ -424,7 +424,7 @@ class TestCommand:
             )
             + "\n"
         )
-        assert cli.main(["taxmatrix", str(mpa)]) == 0
+        assert entry.main(["taxmatrix", str(mpa)]) == 0
         assert capsys.readouterr().out.splitlines()[0] == "clade_name\tone"
 
     def test_errors_exit_2(
@@ -446,6 +446,9 @@ class TestCommand:
         wrong_ver = tmp_path / "v99.json"
         wrong_ver.write_text(json.dumps({"api_version": 99, "taxprof": {"a": {"gtdb": {}}}}))
 
+        unversioned = tmp_path / "unversioned.json"
+        unversioned.write_text(json.dumps({"taxprof": {"a": {"gtdb": {}}}, "samples": [{"name": "a"}]}))
+
         # No files / bad flag
         assert taxmatrix.main([]) == 2
         assert taxmatrix.main(["--value", "bogus", str(mpa)]) == 2
@@ -457,6 +460,8 @@ class TestCommand:
         assert taxmatrix.main([str(bad_json)]) == 2
         assert taxmatrix.main([str(no_taxprof)]) == 2
         assert taxmatrix.main([str(wrong_ver)]) == 2
+        assert taxmatrix.main([str(unversioned)]) == 2
+        assert "no api_version" in capsys.readouterr().err.splitlines()[-1]
         # Duplicate sample name
         assert taxmatrix.main([str(mpa), str(mpa)]) == 2
         # --taxonomy with only .sylphmpa files
@@ -494,7 +499,7 @@ class TestCommand:
             f"sys.exit(main(['taxmatrix', {str(mpa1)!r}, {str(mpa2)!r}]))\n"
         )
         done = subprocess.run(
-            [sys.executable, "-I", "-c", code], capture_output=True, text=True
+            [sys.executable, "-I", "-c", code], check=False, capture_output=True, text=True
         )
         assert done.returncode == 0, done.stderr
         assert done.stdout.splitlines()[0] == "clade_name\tone\ttwo"

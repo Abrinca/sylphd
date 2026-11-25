@@ -614,7 +614,6 @@ class TestReaderVersions:
     ) -> None:
         import dnaio
         import pysylph
-
         from conftest import CLODF13_FASTA
 
         from sylphd.server import ServerConfig, create_app
@@ -1035,7 +1034,7 @@ class TestOverlaps:
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "sylphd", "info", "--socket", str(socket_path)],
-                capture_output=True, text=True, timeout=600,
+                check=False, capture_output=True, text=True, timeout=600,
             )
         finally:
             process.terminate()

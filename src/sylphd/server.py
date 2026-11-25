@@ -60,7 +60,7 @@ from .profiling import (
     run_contig_query,
     run_sample,
 )
-from .protocol import API_VERSION, PROFILE_PARAM_KEYS, ProfileParams, table_columns
+from .protocol import API_VERSION, PROFILE_PARAM_KEYS, ProfileParams, result_document
 from .server_errors import RequestError, answers_errors, check_queue, job_errors
 from .server_middleware import AccessLogMiddleware, BodyLimitMiddleware
 from .server_taxonomy import TAXONOMY_PATHS, taxonomy_routes
@@ -650,7 +650,6 @@ def _metadata_columns(metadata: MetadataDB | None) -> tuple[str, ...]:
     return tuple(metadata.field_columns) if metadata is not None else ()
 
 
-
 @answers_errors
 async def _handle(request: Request, mode: str) -> JSONResponse:
     state = request.app.state
@@ -686,36 +685,8 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
         sketch_bytes=sum(len(payload) for payload in payloads),
     )
     completed = [sample for sample in samples if sample is not None]
-    columns = table_columns(mode, params, fields)
-    data: list[list[Any]] = []
-    caveats: list[str] = []
-    taxprof_by_sample: dict[str, Any] = {}
-    for sample in completed:
-        for row in sample.get("rows") or ():
-            data.append(
-                [
-                    row.get("Eff_cov")
-                    if column == "True_cov" and "True_cov" not in row
-                    else row.get(column)
-                    for column in columns
-                ]
-            )
-        for note in sample.get("caveats") or ():
-            if note not in caveats:
-                caveats.append(note)
-        if "taxprof" in sample:
-            taxprof_by_sample[sample["name"]] = sample["taxprof"]
-    document: dict[str, Any] = {
-        "api_version": API_VERSION,
-        "params": params.to_dict(),
-        "samples": [{"name": name} for name in names],
-        "table": {"columns": columns, "data": data},
-        "caveats": caveats,
-    }
-    if taxprof:
-        document["taxprof"] = taxprof_by_sample
+    document = result_document(mode, params, fields, names, completed)
     return JSONResponse(document)
-
 
 
 async def _run_slot(

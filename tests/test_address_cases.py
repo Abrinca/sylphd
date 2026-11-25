@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from sylphd import cli, client as client_module
+from sylphd import cli
+from sylphd import client as client_module
 
 CASES_FILE = Path(__file__).parent / "data" / "address_cases.json"
 _TABLE = json.loads(CASES_FILE.read_text())

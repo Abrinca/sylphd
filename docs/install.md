@@ -39,26 +39,20 @@ toolchain and `cmake`. With the release wheels the server installs with `--only-
 ## The client, in one line
 
 ```bash
-uv tool install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z \
-               'sylphd[client]==X.Y.Z'
+uv tool install 'sylphd[client]'
 sylphd --version
 sylphd info --url https://sylphd.abrinca.com
 ```
 
-`vX.Y.Z`/`X.Y.Z` are the tag and version of the release you want; the
-[releases page](https://github.com/Abrinca/sylphd/releases) lists them. That is the whole client:
-`uv` brings Python 3.14, `--find-links` brings the `sylphd-bin` wheel, and no compiler runs.
-
-Once the packages are on PyPI the `--find-links` part disappears:
-
-```bash
-uv tool install 'sylphd[client]'
-```
+That is the whole client: `uv` brings Python 3.14, the `sylphd-bin` platform wheel brings the
+native binary, and no compiler runs. With pip: `pip install 'sylphd[client]'`.
 
 ## From a release (no compiler needed)
 
-Every tagged release carries the wheels, so neither a client nor a server needs a compiler.
-Install straight from the asset list, or download the wheels first for an offline machine:
+Every tagged release on [GitHub](https://github.com/Abrinca/sylphd/releases) carries the same
+wheels, the server's `pysylph` and `dnaio` wheels (the server install needs them, see above) and
+the standalone binary. Install straight from the asset list, or download the wheels first for an
+offline machine:
 
 ```bash
 # online: uv fetches the wheels from GitHub's release URLs
@@ -148,14 +142,14 @@ A clone is the only case that needs Rust: `uv sync` compiles `sylphd-client` fro
 
 ```bash
 uv add "sylphd[taxonomy]"                      # NCBI lookups only
-uv add --find-links <release assets> "sylphd[client]"   # + the native client
+uv add "sylphd[client]"                        # + the native client
 ```
 
 ## As a tool
 
 ```bash
-uv tool install --find-links <release assets> "sylphd[client]"   # a client machine
-uv tool install --find-links <release assets> "sylphd[server]"   # the server machine
+uv tool install "sylphd[client]"   # a client machine
+uv tool install --find-links <release assets> "sylphd[server]"   # the server machine (pysylph wheel from the release)
 sylphd --version
 ```
 

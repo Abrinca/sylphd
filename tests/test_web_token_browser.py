@@ -13,7 +13,6 @@ import functools
 import http.server
 import json
 import os
-import shutil
 import socket
 import subprocess
 import sys

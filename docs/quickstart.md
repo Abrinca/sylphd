@@ -3,14 +3,13 @@
 ## Install
 
 ```bash
-uv tool install --find-links https://github.com/Abrinca/sylphd/releases/expanded_assets/vX.Y.Z \
-               'sylphd[client]==X.Y.Z'
+uv tool install 'sylphd[client]'
 sylphd --version
 ```
 
 The `client` extra installs `sylphd` (pure Python) and `sylphd-bin`, the native client: no Rust
 toolchain, no pysylph, no compiler. The machine that runs `sylphd serve` installs
-`sylphd[server]` instead. See [Install](install.md) for the placeholders and the other platforms.
+`sylphd[server]` instead. See [Install](install.md) for the other platforms and the standalone binary.
 
 ## Get a database
 

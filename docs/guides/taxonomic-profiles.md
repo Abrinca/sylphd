@@ -47,9 +47,12 @@ that species informally, the metadata's `ncbi_nearest_formal_*` columns name the
 with a formal name, and the web view shows both, e.g. *Clostridia bacterium (nearest NCBI taxon;
 nearest formally named: class Clostridia)*; for a formally named taxon the label is simply
 *Thiobacillus (nearest NCBI genus)*. The `gtdb` and `tax` profiles are untouched, and
-a metadata file without nearest taxa produces exactly the same profile as before.
+a metadata file without nearest taxa produces a profile without any `nearest` marks.
 
 ## `--taxprof`: one file per sample and taxonomy
+
+The client sends `--fields` to the server unchanged and writes the `.sylphmpa` text that comes
+back: per sample, one file per taxonomy, in the server's taxonomy order.
 
 Files are named `PREFIX<sample>.<gtdb|ncbi>.sylphmpa` and follow the format of `sylph-tax taxprof`:
 a `#SampleID ... Taxonomies_used:['gtdb']` comment line, then the columns `clade_name`,

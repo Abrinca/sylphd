@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import json
-import os
 import socket
 import sqlite3
 import struct
@@ -16,12 +15,6 @@ from pathlib import Path
 import dnaio
 import pysylph
 import pytest
-
-from sylphd import cli
-from sylphd.metadata import METADATA_COLUMNS
-from sylphd.metadata_build import build_metadata_db
-from sylphd.taxonomy_sources import TaxonomySource
-
 from conftest import (
     CLODF13_FASTA,
     ECOLI_TWO_STAGE,
@@ -30,6 +23,11 @@ from conftest import (
     K12_R2,
     O157_SKETCH,
 )
+
+from sylphd import cli
+from sylphd.metadata import METADATA_COLUMNS
+from sylphd.metadata_build import build_metadata_db
+from sylphd.taxonomy_sources import TaxonomySource
 
 
 def _run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -594,7 +592,7 @@ class TestTaxonomyOutputs:
             assert matrix_out.is_file()
 
     def test_profile_rejects_removed_taxmatrix_flags(self, taxonomy_server) -> None:
-        _, directory = taxonomy_server
+        _, _directory = taxonomy_server
         for flag in ("--taxmatrix", "--taxmatrix-value"):
             result = self._profile(taxonomy_server, flag, "x")
             assert result.returncode == 2

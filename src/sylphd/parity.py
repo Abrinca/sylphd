@@ -49,6 +49,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .entry import PYTHON_COMMANDS
+
 #: Absolute slack for float noise, added to every tolerance.
 EPSILON = 1e-9
 
@@ -740,10 +742,7 @@ def run(args: argparse.Namespace) -> int:
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="sylphd diff",
-        description=(
-            "Check that two sylph (or sylph-tax) outputs are equivalent: the same genomes "
-            "or clades, values equal within the printed rounding, ties in any order."
-        ),
+        description=PYTHON_COMMANDS["diff"],
     )
     add_arguments(parser)
     try:

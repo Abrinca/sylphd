@@ -19,6 +19,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .entry import PYTHON_COMMANDS
 from .taxonomy import (
     MATRIX_VALUES,
     CladeAbundance,
@@ -80,9 +81,12 @@ def _parse_profile_json(
         raise TaxonomyError(f"{label}: expected a /profile JSON object")
 
     version = doc.get("api_version")
-    if version is not None and (
-        isinstance(version, bool) or version != SUPPORTED_API_VERSION
-    ):
+    if version is None:
+        raise TaxonomyError(
+            f"{label}: not a /profile document (no api_version; this sylphd supports "
+            f"API version {SUPPORTED_API_VERSION})"
+        )
+    if isinstance(version, bool) or version != SUPPORTED_API_VERSION:
         raise TaxonomyError(
             f"{label}: document API version {version!r}, this sylphd supports "
             f"{SUPPORTED_API_VERSION}: update sylphd"
@@ -286,10 +290,7 @@ def run(args: argparse.Namespace) -> int:
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="sylphd taxmatrix",
-        description=(
-            "Merge .sylphmpa files or saved /profile JSON documents into one "
-            "clade x sample TSV table (the offline equivalent of 'sylph-tax merge')."
-        ),
+        description=PYTHON_COMMANDS["taxmatrix"],
     )
     add_arguments(parser)
     try:

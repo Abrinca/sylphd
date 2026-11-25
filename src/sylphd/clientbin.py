@@ -22,9 +22,6 @@ ENV_BIN = "SYLPHD_CLIENT_BIN"
 #: Commands of the binary whose result is a JSON document (``--json``).
 JSON_COMMANDS = frozenset({"info", "profile", "query", "assembly"})
 
-#: Every command of the binary (``render`` reads a saved document, offline).
-CLIENT_COMMANDS = JSON_COMMANDS | {"render"}
-
 #: Shown when the binary is missing.
 INSTALL_HINT = "install it with: pip install 'sylphd[client]'  (or: uv tool install 'sylphd[client]')"
 
@@ -32,13 +29,18 @@ INSTALL_HINT = "install it with: pip install 'sylphd[client]'  (or: uv tool inst
 def find_client_bin() -> str | None:
     """Path of ``sylphd-client``, or ``None`` when it is not installed.
 
+    Raises :class:`FileNotFoundError` naming the path when ``$SYLPHD_CLIENT_BIN`` is set
+    but is not a file (an override that cannot work must not fall back silently).
+
     Search order (like ruff's ``find_ruff_bin``): ``$SYLPHD_CLIENT_BIN``, the
     ``scripts`` directory of this environment (where the wheel puts the binary),
     the user scheme's ``scripts`` directory, then ``PATH``.
     """
     override = os.environ.get(ENV_BIN)
     if override:
-        return override if os.path.isfile(override) else None
+        if not os.path.isfile(override):
+            raise FileNotFoundError(f"${ENV_BIN} is set to {override}, which is not a file")
+        return override
     exe = BIN_NAME + (sysconfig.get_config_var("EXE") or "")
     directories = [sysconfig.get_path("scripts")]
     try:
@@ -59,9 +61,10 @@ def exec_client(binary: str, args: list[str]) -> int:
     ``execv`` keeps stdin, stdout, signals and the exit code exactly as they are. It
     only returns (as an exit code) on Windows, where there is no ``execv`` worth using.
     """
-    argv = [BIN_NAME, *args]
+    # argv[0] is the name the user typed, so the binary's usage line reads `sylphd profile`.
+    argv = ["sylphd", *args]
     if os.name == "nt":
-        return subprocess.call([binary, *args])
+        return subprocess.call(argv, executable=binary)
     sys.stdout.flush()
     sys.stderr.flush()
     os.execv(binary, argv)
@@ -110,7 +113,7 @@ def run(*args: str | os.PathLike[str], timeout: float | None = None) -> dict[str
     if "--json" not in words:
         command.append("--json")
     command.extend(words[1:])
-    done = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    done = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout)
     if done.returncode != 0:
         raise ClientRunError(done.returncode, done.stderr)
     if done.stderr:

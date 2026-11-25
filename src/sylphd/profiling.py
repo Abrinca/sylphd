@@ -470,7 +470,7 @@ class DatabaseSet:
                 warnings.simplefilter("always", UserWarning)
                 profiler = pysylph.Profiler(
                     *(database.db for database in self.databases),
-                    **params.profiler_kwargs(),
+                    **params.to_dict(),
                 )
         except ValueError as error:
             raise BadRequest(f"cannot profile against this database: {error}") from error

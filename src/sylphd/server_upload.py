@@ -17,8 +17,8 @@ from starlette.requests import Request
 from . import per_contig
 from .metadata import MetadataDB
 from .protocol import ProfileParams, ProtocolError, table_columns
-from .server_errors import RequestError, check_queue
 from .samples import InputError, check_sample_name, sample_name_from_path
+from .server_errors import RequestError, check_queue
 from .taxonomy import TaxonomyError, parse_taxonomies, resolve_taxonomy_columns
 
 log = logging.getLogger("uvicorn.error")

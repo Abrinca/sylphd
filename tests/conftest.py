@@ -3,8 +3,6 @@
 import os
 from pathlib import Path
 
-import dnaio
-import pysylph
 import pytest
 
 DATA = Path(__file__).parent / "data"
@@ -29,6 +27,9 @@ def data_dir() -> Path:
 @pytest.fixture(scope="session")
 def tiny_database(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A one-genome database built from ``clodf13.fna.gz`` (for assembly tests)."""
+    import dnaio
+    import pysylph
+
     directory = tmp_path_factory.mktemp("tiny")
     with dnaio.open(CLODF13_FASTA) as reader:
         contigs = [record.sequence for record in reader]
@@ -108,3 +109,13 @@ def require_client_binary() -> Path:
         pytest.skip(message, allow_module_level=True)
     os.environ["SYLPHD_CLIENT_BIN"] = str(path)
     return path
+
+
+def aggregate_samples(samples, taxonomy: str = "gtdb"):
+    """The oracle the parity tests compare against: the server's aggregation of each sample."""
+    from sylphd.taxonomy import aggregate_rows
+
+    return [
+        (str(sample.get("name") or "sample"), aggregate_rows(sample.get("rows") or (), taxonomy))
+        for sample in samples
+    ]

@@ -1186,23 +1186,17 @@ def _summary_record(
     }
 
 
-def test_chunk_summaries_add_up_to_the_whole_run() -> None:
+def test_summary_keeps_every_consensus_taxon() -> None:
     records = [
         _summary_record("a", 10_000, consensus={"rank": "genus", "taxon": "Bacillus"}),
         _summary_record("b", 20_000, consensus={"rank": "species", "taxon": "X"}),
         _summary_record("c", 30_000, consensus=None),
         _summary_record("d", 40_000, consensus={"rank": "species", "taxon": "X"}),
     ]
-    parts = [
-        per_contig.summarize(records[:2]),
-        per_contig.summarize(records[2:]),
-    ]
-    merged = per_contig.finalize_summary(per_contig.merge_summaries(parts))
-    assert merged == per_contig.finalize_summary(per_contig.summarize(records))
+    merged = per_contig.summarize(records)
     assert merged["contigs"] == 4
     assert merged["queried_bp"] == 100_000
     assert merged["no_hit_contigs"] == 1
-    # every taxon of every chunk survives, not just the top five per chunk
     assert [(item["rank"], item["taxon"]) for item in merged["consensus_bp"]] == [
         ("species", "X"),  # 20 000 + 40 000 bp
         (None, "unassigned"),  # 30 000 bp
@@ -1210,11 +1204,11 @@ def test_chunk_summaries_add_up_to_the_whole_run() -> None:
     ]
 
 
-def test_summary_counts_unsent_chunks_and_truncates_the_breakdown() -> None:
+def test_summary_breakdown_is_not_truncated() -> None:
     records = [
         _summary_record(f"c{index}", 1_000, consensus={"rank": "genus", "taxon": f"G{index}"})
         for index in range(7)
     ]
-    summary = per_contig.finalize_summary(per_contig.summarize(records))
-    assert len(summary["consensus_bp"]) == 5
+    summary = per_contig.summarize(records)
+    assert len(summary["consensus_bp"]) == 7
     assert summary["consensus_bp"][0]["fraction"] == pytest.approx(1 / 7, abs=1e-4)

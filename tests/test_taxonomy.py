@@ -2,25 +2,21 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
+from conftest import aggregate_samples
 
 from sylphd.taxonomy import (
     TAXONOMIES,
     TAXPROF_COLUMNS,
     TaxonomyError,
     aggregate_rows,
-    aggregate_samples,
     build_taxprof,
     clade_matrix_lines,
-    default_taxonomies,
     parse_lineage,
     parse_taxonomies,
     resolve_taxonomy_columns,
     strain_label,
     taxprof_lines,
-    write_outputs,
 )
 
 GTDB_SPECIES = (
@@ -161,8 +157,8 @@ class TestAggregateRows:
             "d__Bacteria|p__Bacillota|c__Clostridia",
             "d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales",
             "d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae",
-            "d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae"
-            "|g__Clostridium",
+            ("d__Bacteria|p__Bacillota|c__Clostridia|o__Clostridiales|f__Clostridiaceae"
+            "|g__Clostridium"),
         ):
             assert by_name[clade].relative == pytest.approx(100.0)
             assert by_name[clade].sequence == pytest.approx(50.0)
@@ -468,62 +464,6 @@ def _served(
     ]
 
 
-class TestWriteOutputs:
-    def test_file_names(self, tmp_path: Path) -> None:
-        samples = [
-            {"name": "one", "rows": [_row(gtdb=GTDB_SPECIES, accession="A")]},
-            {"name": "two", "rows": [_row(ncbi=GTDB_SPECIES, accession="A")]},
-        ]
-        written = write_outputs(
-            _served(samples, ("gtdb", "ncbi")),
-            taxonomies=("gtdb", "ncbi"),
-            taxprof_prefix=str(tmp_path / "p-"),
-        )
-        names = {path.name for path in written}
-        assert names == {
-            "p-one.gtdb.sylphmpa",
-            "p-two.gtdb.sylphmpa",
-            "p-one.ncbi.sylphmpa",
-            "p-two.ncbi.sylphmpa",
-        }
-        assert all(path.is_file() for path in written)
-
-    def test_sample_names_cannot_add_directories(self, tmp_path: Path) -> None:
-        samples = [{"name": "a/b", "rows": []}]
-        written = write_outputs(
-            _served(samples, ("gtdb",)),
-            taxonomies=("gtdb",),
-            taxprof_prefix=str(tmp_path / "p-"),
-        )
-        assert written[0].name == "p-a_b.gtdb.sylphmpa"
-
-    def test_existing_directory_prefix_needs_no_slash(self, tmp_path: Path) -> None:
-        samples = [{"name": "one", "rows": []}]
-        written = write_outputs(
-            _served(samples, ("gtdb",)),
-            taxonomies=("gtdb",),
-            taxprof_prefix=str(tmp_path),
-        )
-        assert {path.parent for path in written} == {tmp_path}
-        assert {path.name for path in written} == {"one.gtdb.sylphmpa"}
-
-    def test_colliding_sample_names_write_nothing(self, tmp_path: Path) -> None:
-        samples = [
-            {"name": "a/b", "rows": [_row(gtdb=GTDB_SPECIES, accession="A")]},
-            {"name": "a_b", "rows": [_row(gtdb=GTDB_SPECIES, accession="B")]},
-        ]
-        with pytest.raises(TaxonomyError, match="'a/b' and 'a_b'"):
-            write_outputs(
-                _served(samples, ("gtdb", "ncbi")),
-                taxonomies=("gtdb", "ncbi"),
-                taxprof_prefix=str(tmp_path / "p-"),
-            )
-        assert not list(tmp_path.iterdir())
-
-    def test_no_prefixes(self) -> None:
-        assert write_outputs([], taxonomies=("gtdb",)) == []
-
-
 def _tax_row(
     *,
     lineage: str | None = None,
@@ -663,18 +603,6 @@ class TestSylphTaxFlags:
         assert parse_taxonomies("gtdb,tax") == ("gtdb", "tax")
         assert "tax" in TAXONOMIES
 
-    def test_default_depends_on_the_server(self) -> None:
-        assert default_taxonomies(None) == ("gtdb", "ncbi")
-        assert default_taxonomies({"columns": [], "taxonomy_sources": []}) == (
-            "gtdb",
-            "ncbi",
-        )
-        assert default_taxonomies({"taxonomy_sources": [{"name": "UHGV"}]}) == (
-            "gtdb",
-            "ncbi",
-            "tax",
-        )
-
     def test_resolve_columns_for_tax(self) -> None:
         metadata = {
             "columns": ["gtdb_taxonomy", "tax_source", "tax_key", "tax_lineage"],
@@ -692,35 +620,12 @@ class TestSylphTaxFlags:
                 ("tax",), {"columns": ["gtdb_taxonomy"], "taxonomy_sources": []}
             )
 
-    def test_write_outputs_needs_source_names(self, tmp_path: Path) -> None:
-        with pytest.raises(TaxonomyError, match="taxonomy sources"):
-            write_outputs(
-                [{"name": "one", "rows": []}],
-                taxonomies=("tax",),
-                taxprof_prefix=str(tmp_path / "p-"),
-            )
-
-    def test_tax_file_names(self, tmp_path: Path) -> None:
-        samples = [
-            {"name": "one", "rows": [_tax_row(lineage="a;b", key="K")]},
-        ]
-        written = write_outputs(
-            _served(samples, ("tax",), ("UHGV_default",)),
-            taxonomies=("tax",),
-            taxprof_prefix=str(tmp_path / "p-"),
-            tax_sources=["UHGV_default"],
-        )
-        assert {path.name for path in written} == {"p-one.tax.sylphmpa"}
-
 
 class TestOneSource:
     """``tax:<source>``: one sylph-tax source, charted by its own ranks."""
 
     def test_parse_keeps_the_source_case(self) -> None:
-        from sylphd.taxonomy import taxonomy_file_label
-
         assert parse_taxonomies("gtdb, TAX:UHGV_default") == ("gtdb", "tax:UHGV_default")
-        assert taxonomy_file_label("tax:UHGV_default") == "tax.UHGV_default"
         with pytest.raises(TaxonomyError, match="names no taxonomy source"):
             parse_taxonomies("tax:")
 

@@ -17,7 +17,7 @@ Check that `sylphd --version` works. If `sylphd` is missing, ask the user before
 uv tool install "sylphd[client]"
 ```
 
-(If `uv` cannot resolve the package, the user installs it from the release wheels; see the install page. Do not try to build it from a clone.)
+(If `uv` cannot resolve the package, the user installs the `sylphd-client` binary or the wheels from a GitHub release; see the install page. Do not try to build it from a clone.)
 
 If it is installed but may be out of date (its version differs from the `version` in `sylphd info --json`, or the server rejects a command or flag), offer to update, and wait for a yes:
 

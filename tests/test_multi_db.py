@@ -13,7 +13,6 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
-from typing import Self
 
 import dnaio
 import pysylph

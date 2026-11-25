@@ -8,7 +8,6 @@ The native client (``sylphd-core``) generates names under the same rules.
 from __future__ import annotations
 
 import os
-import re
 import unicodedata
 
 _COMPRESSION_SUFFIXES = (".gz", ".bz2", ".xz", ".zst", ".bgz", ".bgzf")
@@ -23,8 +22,6 @@ _READ_SUFFIXES = (
     ".sam",
     ".sylsp",
 )
-# same rule as web/reads.js: sample_R1, sample.R2, sample_1 and Illumina's sample_S1_L001_R1_001
-_PAIR_SUFFIX_RE = re.compile(r"[_.]R?[12](_001)?$", re.IGNORECASE)
 
 #: Longest sample name, in characters.
 MAX_SAMPLE_NAME_CHARS = 1024
@@ -47,10 +44,10 @@ def check_sample_name(name: str) -> str:
     return name
 
 
-def sample_name_from_path(path: str | os.PathLike[str], *, paired: bool = False) -> str:
+def sample_name_from_path(path: str | os.PathLike[str]) -> str:
     """Derive a sample name from a file name.
 
-    >>> sample_name_from_path("/data/sample-a_R1.fastq.gz", paired=True)
+    >>> sample_name_from_path("/data/sample-a.fastq.gz")
     'sample-a'
     >>> sample_name_from_path("reads.fq.gz")
     'reads'
@@ -66,6 +63,4 @@ def sample_name_from_path(path: str | os.PathLike[str], *, paired: bool = False)
         if lowered.endswith(suffix):
             base = base[: -len(suffix)]
             break
-    if paired:
-        base = _PAIR_SUFFIX_RE.sub("", base)
     return base or "sample"

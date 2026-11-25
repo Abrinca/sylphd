@@ -400,7 +400,7 @@ def hit_lineage(hit: Mapping[str, Any]) -> Lineage:
     """The lineage of one hit mapping: GTDB's for a GTDB hit, else ``tax_lineage``.
 
     A hit that no taxonomy source resolved (or one a GTDB source resolved) is
-    parsed from its ``gtdb_taxonomy``, as before, and compared as a GTDB
+    parsed from its ``gtdb_taxonomy`` and compared as a GTDB
     lineage.  A hit that a **non-GTDB** source resolved takes that source's
     ``tax_lineage`` — even when the genome also has GTDB metadata, because the
     resolution says which taxonomy the hit belongs to — and is compared only

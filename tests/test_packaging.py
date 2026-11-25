@@ -42,41 +42,6 @@ class TestVersions:
         version = pytest.importorskip("importlib.metadata").version
         try:
             installed = version("sylphd-bin")
-        except Exception:  # not installed (a bare source checkout)
+        except ImportError:  # PackageNotFoundError: a bare source checkout
             pytest.skip("sylphd-bin is not installed")
         assert installed == __version__
-
-
-class TestPackages:
-    def test_the_base_install_is_httpx_only(self) -> None:
-        assert PYPROJECT["project"]["dependencies"] == ["httpx"]
-        # The taxonomy extra needs nothing else (NCBI lookups are HTTPS and SQLite).
-        assert PYPROJECT["project"]["optional-dependencies"]["taxonomy"] == []
-
-    def test_the_server_extra_is_the_binary_plus_the_server(self) -> None:
-        server = PYPROJECT["project"]["optional-dependencies"]["server"]
-        assert server == [
-            f"sylphd-bin=={__version__}",
-            "dnaio",
-            "pysylph",
-            "python-multipart",
-            "starlette",
-            "uvicorn",
-        ]
-
-    def test_a_binary_only_wheel(self) -> None:
-        """maturin ``bindings = "bin"``: py3-none-<platform>, no extension module."""
-        assert BIN_PYPROJECT["project"]["name"] == "sylphd-bin"
-        assert BIN_PYPROJECT["tool"]["maturin"]["bindings"] == "bin"
-        assert BIN_PYPROJECT["build-system"]["build-backend"] == "maturin"
-        # A binary wheel serves every Python 3.
-        assert BIN_PYPROJECT["project"]["requires-python"] == ">=3.8"
-        # The binary comes from the crate, not from a second Cargo.toml.
-        assert "version" not in BIN_PYPROJECT["project"]
-        assert BIN_PYPROJECT["project"]["dynamic"] == ["version"]
-
-    def test_the_wrapper_is_a_pure_python_wheel(self) -> None:
-        assert PYPROJECT["build-system"]["build-backend"] == "hatchling.build"
-        wheel = PYPROJECT["tool"]["hatch"]["build"]["targets"]["wheel"]
-        assert wheel["packages"] == ["src/sylphd"]
-        assert PYPROJECT["project"]["scripts"] == {"sylphd": "sylphd.entry:main"}

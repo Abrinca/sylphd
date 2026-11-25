@@ -36,7 +36,7 @@ def normalize_base_url(url: str) -> str:
 
     Accepts ``http://`` and ``https://`` URLs, with or without a path prefix
     (e.g. ``https://api.example.org/sylphd``).  A bare ``host:port`` gets
-    ``http://`` prepended, as before.
+    ``http://`` prepended.
     """
     text = url.strip()
     if not text:
@@ -172,9 +172,6 @@ class SylphClient:
         if operation == "info":
             return self._request("GET", "taxonomy/info").json()
         return self._request("POST", f"taxonomy/{operation}", json=dict(payload or {})).json()
-
-    def health(self) -> dict[str, Any]:
-        return self._request("GET", "health").json()
 
     def info(self) -> dict[str, Any]:
         return self._request("GET", "info").json()

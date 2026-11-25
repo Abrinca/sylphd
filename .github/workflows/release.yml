@@ -87,8 +87,11 @@ jobs:
             target: x86_64-unknown-linux-musl
             manylinux: musllinux_1_2
             py: python3
+          # Cross-compiled from x86_64: for musl targets maturin-action runs the
+          # rust-cross/rust-musl-cross image (an x86_64 container carrying every musl
+          # cross toolchain), which cannot start on an arm64 runner.
           - label: musllinux-aarch64
-            os: ubuntu-24.04-arm
+            os: ubuntu-24.04
             target: aarch64-unknown-linux-musl
             manylinux: musllinux_1_2
             py: python3
@@ -122,7 +125,9 @@ jobs:
           maturin-version: v1.16.0
           args: --release --locked --out ../../dist
       # The same binary as a bare archive, for machines without Python. Taken out of
-      # the wheel, so the two can never differ.
+      # the wheel, so the two can never differ. Written to `archives/`: on Linux
+      # maturin-action builds in a container that leaves `dist/` owned by root, so the
+      # runner user can read it but not add files to it.
       - name: Package the standalone binary
         shell: bash
         env:
@@ -136,6 +141,8 @@ jobs:
 
           version, target = sys.argv[1], sys.argv[2]
           (wheel,) = sorted(pathlib.Path("dist").glob("sylphd_bin-*.whl"))
+          archives = pathlib.Path("archives")
+          archives.mkdir()
           with zipfile.ZipFile(wheel) as archive:
               member = next(n for n in archive.namelist() if ".data/scripts/sylphd-client" in n)
               data = archive.read(member)
@@ -144,7 +151,7 @@ jobs:
           staging.mkdir()
           (staging / binary).write_bytes(data)
           os.chmod(staging / binary, 0o755)
-          stem = pathlib.Path("dist") / f"sylphd-client-{version}-{target}"
+          stem = archives / f"sylphd-client-{version}-{target}"
           if target.endswith("windows-msvc"):
               with zipfile.ZipFile(f"{stem}.zip", "w", zipfile.ZIP_DEFLATED) as archive:
                   archive.write(staging / binary, binary)
@@ -158,6 +165,13 @@ jobs:
         with:
           name: dist-client-${{ matrix.label }}
           path: dist/*
+          if-no-files-found: error
+      # A separate artifact: one with two roots would keep `dist/` and `archives/`
+      # prefixes, and the later jobs merge every `dist-*` artifact flat into dist/.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-archive-${{ matrix.label }}
+          path: archives/*
           if-no-files-found: error
 
   wheels:

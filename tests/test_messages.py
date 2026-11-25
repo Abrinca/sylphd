@@ -207,7 +207,7 @@ def _client_stderr(
                 "--socket", str(socket_path), *flags,
                 *(["--quiet"] if quiet else []),
             ],
-            capture_output=True, text=True, timeout=600,
+            check=False, capture_output=True, text=True, timeout=600,
         )
     finally:
         process.terminate()

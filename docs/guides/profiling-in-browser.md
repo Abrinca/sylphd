@@ -114,6 +114,11 @@ for that server only and sent only to it; the page says *token accepted* or *tok
 a server that requires a token opens the form by itself. *Forget* removes it. See
 [Privileged access](public-server.md#privileged-access) for what to keep in mind on a shared computer.
 
+## Incompatible server
+
+The page checks the server's `api_version` before it sketches anything. A server that speaks
+another version gets an *Incompatible server* banner that says whether the server is newer or older than the page, and nothing is uploaded.
+
 ## Limits and what to expect
 
 - **Speed:** a 1.55 GB gzipped ONT file (254k reads, 2.1 Gbp) is sketched in about 10 s in
