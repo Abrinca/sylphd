@@ -102,7 +102,13 @@ for asset in assets:
         lower == "sha256sums"
         or (lower.startswith("sylphd-") and lower.endswith(".whl"))
         or (
-            (lower.startswith("pysylph-") or lower.startswith("dnaio-"))
+            # sylphd_bin (the sylphd-client binary), pysylph and dnaio are
+            # platform wheels: only this machine's architecture.
+            (
+                lower.startswith("sylphd_bin-")
+                or lower.startswith("pysylph-")
+                or lower.startswith("dnaio-")
+            )
             and lower.endswith(".whl")
             and arch in lower
         )
@@ -114,6 +120,7 @@ PY
 grep -q '^SHA256SUMS' "$tmp/assets" || die "release $tag has no SHA256SUMS"
 grep -q '^sylphd-' "$tmp/assets" || die "release $tag has no sylphd wheel"
 grep -q '^pysylph-.*\.whl' "$tmp/assets" || die "release $tag has no pysylph wheel for $arch"
+grep -q '^sylphd_bin-.*\.whl' "$tmp/assets" || die "release $tag has no sylphd-bin wheel for $arch"
 
 # --- download and verify -----------------------------------------------------
 log "downloading release assets for $tag ($arch)"
@@ -150,7 +157,7 @@ log "installing sylphd[server]==$version"
 as_sylphd "$UV" pip install \
     --python "$release/bin/python" \
     --find-links "$tmp" \
-    --only-binary pysylph,dnaio \
+    --only-binary pysylph,dnaio,sylphd-bin \
     --compile-bytecode \
     "sylphd[server]==$version" || die "installation failed"
 
@@ -166,6 +173,9 @@ restorecon -R "$release" >/dev/null 2>&1 || true
 smoke=$(as_sylphd "$release/bin/sylphd" --version) || die "smoke test failed"
 log "smoke test: $smoke"
 grep -qF "$version" <<<"$smoke" || die "version mismatch: expected $version, got $smoke"
+client=$(as_sylphd "$release/bin/sylphd-client" --version) || die "smoke test failed: sylphd-client"
+log "smoke test: $client"
+grep -qF "$version" <<<"$client" || die "version mismatch: expected $version, got $client"
 
 # --- switch and restart ------------------------------------------------------
 previous=""
