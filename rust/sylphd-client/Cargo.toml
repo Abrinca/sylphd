@@ -1,0 +1,29 @@
+[package]
+name = "sylphd-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Native command line client for sylphd: sketches locally, asks a sylphd server, renders with sylphd-core."
+
+[[bin]]
+name = "sylphd-client"
+path = "src/main.rs"
+
+[dependencies]
+sylphd-core = { path = "../sylphd-core", features = ["approx-dedup", "io", "rayon"] }
+clap = { version = "4", features = ["derive"] }
+# 0.13 renamed the TLS features: `rustls` pulls aws-lc-rs (cmake + bindgen),
+# which breaks static musl builds. `rustls-no-provider` plus the `ring`
+# provider keeps the whole stack pure Rust/C and statically linkable.
+reqwest = { version = "0.13", default-features = false, features = [
+    "blocking",
+    "multipart",
+    "json",
+    "gzip",
+    "query",
+    "rustls-no-provider",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { workspace = true }
+serde_json = { workspace = true }

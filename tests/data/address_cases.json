@@ -1,0 +1,132 @@
+{
+  "_comment": "Shared address-precedence cases for docs/commands/address.md. Run by the Rust tests in rust/sylphd-client/src/address.rs and by tests/test_address_cases.py.",
+  "cases": [
+    {
+      "name": "explicit_url_wins_over_environment",
+      "args": {"url": "https://cli.example.org/sylphd/", "tcp": null, "socket": null},
+      "env": {
+        "SYLPHD_URL": "http://env.example.org",
+        "SYLPHD_SOCKET": "/run/env.sock",
+        "XDG_RUNTIME_DIR": "/run/user/42"
+      },
+      "uid": 42,
+      "expect": {"kind": "url", "value": "https://cli.example.org/sylphd"}
+    },
+    {
+      "name": "explicit_tcp_wins_over_environment",
+      "args": {"url": null, "tcp": "127.0.0.1:9000", "socket": null},
+      "env": {"SYLPHD_URL": "http://env.example.org", "SYLPHD_SOCKET": "/run/env.sock"},
+      "uid": 42,
+      "expect": {"kind": "url", "value": "http://127.0.0.1:9000"}
+    },
+    {
+      "name": "explicit_socket_wins_over_environment_url",
+      "args": {"url": null, "tcp": null, "socket": "/run/explicit.sock"},
+      "env": {"SYLPHD_URL": "http://env.example.org", "SYLPHD_SOCKET": "/run/env.sock"},
+      "uid": 42,
+      "expect": {"kind": "socket", "value": "/run/explicit.sock"}
+    },
+    {
+      "name": "bare_url_gets_http_and_keeps_the_prefix",
+      "args": {"url": "api.example.org:8080/sylphd", "tcp": null, "socket": null},
+      "env": {},
+      "uid": 42,
+      "expect": {"kind": "url", "value": "http://api.example.org:8080/sylphd"}
+    },
+    {
+      "name": "env_url_wins_over_env_socket",
+      "args": {"url": null, "tcp": null, "socket": null},
+      "env": {
+        "SYLPHD_URL": "https://env.example.org/prefix/",
+        "SYLPHD_SOCKET": "/run/env.sock",
+        "XDG_RUNTIME_DIR": "/run/user/42"
+      },
+      "uid": 42,
+      "expect": {"kind": "url", "value": "https://env.example.org/prefix"}
+    },
+    {
+      "name": "env_bare_url_gets_http",
+      "args": {"url": null, "tcp": null, "socket": null},
+      "env": {"SYLPHD_URL": "env.example.org:7000"},
+      "uid": 42,
+      "expect": {"kind": "url", "value": "http://env.example.org:7000"}
+    },
+    {
+      "name": "env_socket_wins_over_default",
+      "args": {"url": null, "tcp": null, "socket": null},
+      "env": {"SYLPHD_SOCKET": "/run/env.sock", "XDG_RUNTIME_DIR": "/run/user/42"},
+      "uid": 42,
+      "expect": {"kind": "socket", "value": "/run/env.sock"}
+    },
+    {
+      "name": "default_xdg_socket",
+      "args": {"url": null, "tcp": null, "socket": null},
+      "env": {"XDG_RUNTIME_DIR": "/run/user/42"},
+      "uid": 42,
+      "expect": {"kind": "socket", "value": "/run/user/42/sylphd.sock"}
+    },
+    {
+      "name": "default_tmp_socket_without_xdg",
+      "args": {"url": null, "tcp": null, "socket": null},
+      "env": {},
+      "uid": 42,
+      "expect": {"kind": "socket", "value": "/tmp/sylphd-42.sock"}
+    },
+    {
+      "name": "empty_env_url_falls_back_to_env_socket",
+      "args": {"url": null, "tcp": null, "socket": null},
+      "env": {"SYLPHD_URL": "", "SYLPHD_SOCKET": "/run/env.sock"},
+      "uid": 42,
+      "expect": {"kind": "socket", "value": "/run/env.sock"}
+    },
+    {
+      "name": "empty_env_socket_falls_back_to_default",
+      "args": {"url": null, "tcp": null, "socket": null},
+      "env": {"SYLPHD_SOCKET": "", "XDG_RUNTIME_DIR": "/run/user/42"},
+      "uid": 42,
+      "expect": {"kind": "socket", "value": "/run/user/42/sylphd.sock"}
+    },
+    {
+      "name": "url_with_query_is_rejected",
+      "args": {"url": "http://example.org/x?y=1", "tcp": null, "socket": null},
+      "env": {},
+      "uid": 42,
+      "expect": {"kind": "error", "contains": "must not contain a query or fragment"}
+    },
+    {
+      "name": "url_with_fragment_is_rejected",
+      "args": {"url": "http://example.org/x#top", "tcp": null, "socket": null},
+      "env": {},
+      "uid": 42,
+      "expect": {"kind": "error", "contains": "must not contain a query or fragment"}
+    },
+    {
+      "name": "unsupported_scheme_is_rejected",
+      "args": {"url": "ftp://example.org/sylphd", "tcp": null, "socket": null},
+      "env": {},
+      "uid": 42,
+      "expect": {"kind": "error", "contains": "unsupported URL scheme"}
+    },
+    {
+      "name": "empty_explicit_url_is_rejected",
+      "args": {"url": "", "tcp": null, "socket": null},
+      "env": {"SYLPHD_URL": "http://env.example.org"},
+      "uid": 42,
+      "expect": {"kind": "error", "contains": "empty server URL"}
+    },
+    {
+      "name": "url_without_port_or_path",
+      "args": {"url": "http://example.org/", "tcp": null, "socket": null},
+      "env": {},
+      "uid": 42,
+      "expect": {"kind": "url", "value": "http://example.org"}
+    },
+    {
+      "name": "tcp_ipv6_literal",
+      "args": {"url": null, "tcp": "[::1]:9000", "socket": null},
+      "env": {},
+      "uid": 42,
+      "expect": {"kind": "url", "value": "http://[::1]:9000"}
+    }
+  ]
+}

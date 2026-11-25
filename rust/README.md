@@ -1,8 +1,9 @@
-# rust: `sylphd-core` and `sylphd-wasm`
+# rust: `sylphd-core`, `sylphd-client` and `sylphd-wasm`
 
 Cargo workspace for sylphd's client-side Rust crates:
 
 * **`sylphd-core/`** — pure library (no `wasm-bindgen`, no I/O, no networking): FASTA/FASTQ streaming parser, sylph read and per-contig sketchers (over the `sylph` library core), sample naming and input specification parsing, assembly stats, `.sylsp` header validation, per-contig batch planning, the wire-protocol document model with its `api_version` check and per-contig run merge, result rendering (sylph-identical TSV, summaries, caveats, `info` text), and optional native `std::io::Read` + `flate2` (`io` feature) and `rayon` parallel sketching (`rayon` feature).
+* **`sylphd-client/`** — the `sylphd-client` binary: `profile`, `query`, `assembly` (including `--per-contig` and `--no-local-sketch`), `info` and the offline `render`. It adds address/token resolution (socket, TCP, URL; environment variables; retries) and a blocking `reqwest` transport (multipart, gzip, rustls with the `ring` provider so static musl builds need no cmake) around the core. Behaviour mirrors `src/sylphd/{cli,client,per_contig_client}.py`; step 5 forwards the Python `sylphd` command to this binary.
 * **`sylphd-wasm/`** — browser WebAssembly bindings (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`, plus the document/renderer functions below) and the push/pull multi-member gzip decoder used by the web app (`web/`, "Reads" and "Assembly" modes).
 
 Originally built as a feasibility spike (`sketch-wasm/`) to sketch FASTQ/FASTA(.gz) reads **locally in the browser**

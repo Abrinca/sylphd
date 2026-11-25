@@ -1,9 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["sylphd-core", "sylphd-wasm"]
+members = ["sylphd-core", "sylphd-wasm", "sylphd-client"]
 
 [workspace.package]
-version = "0.1.0"
+# Kept in sync with `src/sylphd/__init__.py` (`__version__`); a test in
+# `sylphd-client` asserts the two match.
+version = "0.7.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 publish = false
