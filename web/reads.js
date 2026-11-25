@@ -570,10 +570,15 @@
       if (res.status < 200 || res.status >= 300) {
         return uploadProblem(run, httpProblem(run, res.status, data && data.error, Number.isFinite(res.retryAfter) ? res.retryAfter : null, res.text));
       }
-      data = S.fromProfileDoc(data);
-      if (!Array.isArray(data) || !data[0] || !Array.isArray(data[0].rows)) throw new Error('Unexpected response from the server.');
+      if (!data || !data.table || !Array.isArray(data.table.columns) || !Array.isArray(data.table.data) || !Array.isArray(data.samples) || !data.samples.length) {
+        throw new Error('Unexpected response from the server.');
+      }
+      if (data.api_version != null && window.SylphdSketch) {
+        const wasm = await window.SylphdSketch.loadWasm();
+        wasm.check_api_version(data.api_version);
+      }
       run.profileMs = performance.now() - t;
-      finishRun(run, data, params);
+      finishRun(run, data, res.text, params);
     } catch (e) {
       if (e.name === 'AbortError') throw e;
       if (e.network) {
@@ -791,14 +796,16 @@
     } });
   }
 
-  function finishRun(run, data, params) {
+  function finishRun(run, doc, rawJson, params) {
     clearInterval(run.timer);
     clearInterval(countdownTimer);
     setBusy(false);
     ui.progress.hidden = true;
-    const sample = data[0];
-    const rows = sample.rows.slice().sort((x, y) => (y.Taxonomic_abundance || 0) - (x.Taxonomic_abundance || 0));
-    run.result = { data, sample, rows, params, taxprof: sample.taxprof || {} };
+    const sampleName = doc.samples[0].name;
+    const taxprof = (doc.taxprof && doc.taxprof[sampleName]) || {};
+    const rows = S.tableToRows(doc.table).sort((x, y) => (y.Taxonomic_abundance || 0) - (x.Taxonomic_abundance || 0));
+    const sample = { name: sampleName, rows, taxprof };
+    run.result = { doc, rawJson: rawJson || null, sample, rows, params: Object.assign({}, doc.params || {}, params), taxprof };
     // Pick a taxonomy with real clades: a GTDB profile of a UHGV-only sample
     // is one "unclassified" tree, so fall through to NCBI and then "tax".
     const withData = taxonomiesWithData(sample);
@@ -1376,44 +1383,15 @@
     return el('section', { class: 'card', 'aria-label': 'Detected genomes' },
       el('div', { class: 'card-head' },
         el('h2', { text: `Detected genomes (${hits.length})` }),
-        S.exportButtons(() => downloadTsv(run), () => S.downloadJson(exportAs(run, 'json'), run.result.data))),
+        S.exportButtons(() => downloadTsv(run), () => S.downloadJson(exportAs(run, 'json'), run.result.doc))),
       ...table.nodes, more);
   }
 
-  /* TSV like `sylphd profile`: sylph columns, then accession and the metadata columns. */
-  const PROFILE_COLUMNS = ['Sample_file', 'Genome_file', 'Taxonomic_abundance', 'Sequence_abundance', 'Adjusted_ANI', 'Eff_cov', 'ANI_5-95_percentile',
-    'Eff_lambda', 'Lambda_5-95_percentile', 'Median_cov', 'Mean_cov_geq1', 'Containment_ind', 'Naive_ANI', 'kmers_reassigned', 'Contig_name'];
-  function tsvValue(column, v) {
-    if (v == null) return '';
-    const fixed = (d) => Number(v).toFixed(d);
-    if (['Adjusted_ANI', 'Naive_ANI'].includes(column)) return fixed(2);
-    if (['Eff_cov', 'True_cov', 'Mean_cov_geq1', 'Eff_lambda'].includes(column)) return fixed(3);
-    if (['ANI_5-95_percentile', 'Lambda_5-95_percentile'].includes(column)) return Array.isArray(v) ? `${Number(v[0]).toFixed(2)}-${Number(v[1]).toFixed(2)}` : String(v);
-    if (column === 'Median_cov') return fixed(0);
-    if (column === 'Containment_ind') return Array.isArray(v) ? `${v[0]}/${v[1]}` : String(v);
-    if (['Taxonomic_abundance', 'Sequence_abundance'].includes(column)) return fixed(4);
-    if (column === 'kmers_reassigned') return String(Math.trunc(Number(v)));
-    return String(v).replace(/[\t\r\n]+/g, ' ');
-  }
-  function downloadTsv(run) {
-    const { rows, params } = run.result;
-    const base = PROFILE_COLUMNS.slice();
-    // as in `sylph profile`: True_cov is the header when estimate_unknown (or the
-    // estimate_read_counts that implies it) is set
-    if (params.estimate_unknown || params.estimate_read_counts) base[base.indexOf('Eff_cov')] = 'True_cov';
-    const info = S.info();
-    let metaCols = info && info.metadata && Array.isArray(info.metadata.columns) ? info.metadata.columns : null;
-    const known = new Set([...PROFILE_COLUMNS, 'True_cov', 'accession', 'Lambda_status']);
-    if (!metaCols) {
-      metaCols = [];
-      for (const r of rows) for (const k of Object.keys(r)) if (!known.has(k) && !metaCols.includes(k)) metaCols.push(k);
-    }
-    const header = [...base, 'accession', ...metaCols];
-    const lines = [header.join('\t')];
-    for (const r of rows) {
-      lines.push(header.map((c) => tsvValue(c, c === 'True_cov' && r.True_cov == null ? r.Eff_cov : r[c])).join('\t'));
-    }
-    download(exportAs(run, 'tsv'), `${lines.join('\n')}\n`, 'text/tab-separated-values');
+  /* TSV rendered by sylphd-core (wasm) so it is byte-identical to `sylphd profile`. */
+  async function downloadTsv(run) {
+    const wasm = await window.SylphdSketch.loadWasm();
+    const tsv = wasm.render_tsv(run.result.rawJson || JSON.stringify(run.result.doc));
+    download(exportAs(run, 'tsv'), tsv, 'text/tab-separated-values');
   }
 
   /* ---------------------------------------------------------------- init */

@@ -1010,12 +1010,17 @@
         showHttpError(res.status, data && data.error, Number.isFinite(retry) ? retry : null, raw);
         return;
       }
-      data = fromAssemblyDoc(data);
-      if (!data || !Array.isArray(data.hits)) throw new Error('Unexpected response from the server.');
+      if (!data || !data.table || !Array.isArray(data.table.columns) || !Array.isArray(data.table.data)) {
+        throw new Error('Unexpected response from the server.');
+      }
+      if (data.api_version != null && window.SylphdSketch) {
+        const wasm = await window.SylphdSketch.loadWasm();
+        wasm.check_api_version(data.api_version);
+      }
       // the server never saw the sequence: fill in what this browser counted (unknown for an uploaded sketch)
       const q = data.query = data.query || {};
       if (localRun) for (const k of ['records', 'length', 'gc']) if (q[k] == null) q[k] = localRun.stats[k];
-      renderResults(data, performance.now() - runStart, localRun ? { label, sketchBytes: body.size, sketchMs: localRun.ms } : { label, sketchBytes: body.size, uploaded: true });
+      renderResults(data, performance.now() - runStart, localRun ? { label, sketchBytes: body.size, sketchMs: localRun.ms } : { label, sketchBytes: body.size, uploaded: true }, raw);
     } catch (e) {
       if (e.name === 'AbortError') {
         ui.results.replaceChildren(notice('warn', 'Cancelled', 'Sketching or the request was cancelled. Nothing was kept.'));
@@ -1313,10 +1318,10 @@
   // The hit table's taxon column says "GTDB species" only while every hit is GTDB's.
   const speciesColumnLabel = () => (current && current.hits.some(nonGtdb) ? 'Taxon' : 'GTDB species');
 
-  function renderResults(data, clientMs, local) {
+  function renderResults(data, clientMs, local, rawJson) {
     const thr = Object.assign({ species: 95, imprecise_below: 85 }, data.thresholds || {});
-    const hits = data.hits.map((h) => decorate(h));
-    current = { data, hits, thr, sortKey: 'rank', sortDir: 'asc', clientMs, open: new Set(), local };
+    const hits = tableToRows(data.table).map((h) => decorate(h));
+    current = { data, rawJson: rawJson || null, hits, thr, sortKey: 'rank', sortDir: 'asc', clientMs, open: new Set(), local };
     const out = [];
     out.push(summaryCard(data, clientMs, local));
     if (!hits.length) {
@@ -1740,24 +1745,13 @@
   }
   const downloadJson = (name, data) => download(name, `${JSON.stringify(data, null, 2)}\n`, 'application/json');
   const exportAssembly = (ext) => exportName(current.local.label, 'assembly', ext);
-  function downloadAssemblyTsv() {
-    const hits = current.table.sorted();
-    const lead = ['rank', 'ani', 'containment_hits', 'containment_total', 'containment_fraction', 'relation', 'shared_rank', 'ani_species_level'];
-    const skip = new Set(['rank', 'ani', 'containment', 'containment_fraction', 'relation', 'shared_rank', 'ani_species_level']);
-    const keys = [];
-    for (const h of hits) for (const k of Object.keys(h)) if (!k.startsWith('_') && !skip.has(k) && !keys.includes(k)) keys.push(k);
-    const cell = (v) => (v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' '));
-    const rows = [lead.concat(keys).join('\t')];
-    for (const h of hits) {
-      const c = Array.isArray(h.containment) ? h.containment : [null, null];
-      rows.push([h.rank, h.ani, c[0], c[1], h.containment_fraction, h.relation, h.shared_rank, h.ani_species_level]
-        .concat(keys.map((k) => h[k])).map(cell).join('\t'));
-    }
-    download(exportAssembly('tsv'), `${rows.join('\n')}\n`, 'text/tab-separated-values');
+  async function downloadAssemblyTsv() {
+    const wasm = await window.SylphdSketch.loadWasm();
+    const tsv = wasm.render_assembly_tsv(current.rawJson || JSON.stringify(current.data));
+    download(exportAssembly('tsv'), tsv, 'text/tab-separated-values');
   }
 
-  // Temporary Step-1 converters (document -> legacy shapes); deleted in Step 3.
-  const CONTIG_ROW_ONLY = new Set(['contig', 'contig_length', 'gc', 'status', 'n_close', 'consensus_rank', 'consensus_taxon']);
+  // Standard orient="split" table ({columns, data}) -> array of row objects keyed by column name.
   function tableToRows(table) {
     const cols = table.columns;
     return table.data.map((vals) => {
@@ -1766,50 +1760,12 @@
       return row;
     });
   }
-  function fromProfileDoc(doc) {
-    if (!doc || !doc.table || !Array.isArray(doc.table.columns) || !Array.isArray(doc.table.data) || !Array.isArray(doc.samples)) return null;
-    const bySample = new Map();
-    for (const row of tableToRows(doc.table)) {
-      const name = String(row.Sample_file ?? '');
-      if (!bySample.has(name)) bySample.set(name, []);
-      bySample.get(name).push(row);
-    }
-    const tp = doc.taxprof || {};
-    return doc.samples.map(({ name }) => {
-      const s = { name, kind: 'profile', params: doc.params || {}, rows: bySample.get(name) || [] };
-      if (tp[name]) s.taxprof = tp[name];
-      return s;
-    });
-  }
-  function fromAssemblyDoc(doc) {
-    if (!doc || !doc.table || !Array.isArray(doc.table.columns) || !Array.isArray(doc.table.data)) return null;
-    const out = Object.assign({}, doc, { hits: tableToRows(doc.table) });
-    delete out.table;
-    return out;
-  }
-  function fromContigsDoc(doc) {
-    if (!doc || !doc.table || !Array.isArray(doc.table.columns) || !Array.isArray(doc.table.data)
-      || !doc.contigs || typeof doc.contigs !== 'object' || Array.isArray(doc.contigs)) return null;
-    const byContig = new Map();
-    for (const row of tableToRows(doc.table)) {
-      if (row.rank == null) continue;
-      const name = String(row.contig);
-      const hit = {};
-      for (const [k, v] of Object.entries(row)) if (!CONTIG_ROW_ONLY.has(k)) hit[k] = v;
-      if (!byContig.has(name)) byContig.set(name, []);
-      byContig.get(name).push(hit);
-    }
-    const contigs = Object.entries(doc.contigs).map(([name, entry]) => Object.assign({ name }, entry, { hits: byContig.get(name) || [] }));
-    const out = Object.assign({}, doc, { contigs });
-    delete out.table;
-    return out;
-  }
 
   /* ----------------------------------------------- shared with the other scripts */
   window.Sylphd = {
     el, svg, fmtInt, fmtNum, fmtBytes, fmtBp, fmtPct, fmtSecs, fmtDur, isNum, has, notice,
     readChoice, writeChoice, choiceModal, stem, fileStem, exportName, download, downloadJson,
-    fromProfileDoc, fromContigsDoc,
+    tableToRows,
     RANK_NAMES, DEPTH, rankTitle, parseLineage, lineageName, genericRanks, genericTaxon, hitSource, isGtdbTaxonomySource, nonGtdb, genomeFileId, relClass,
     exportButtons, seg, barRow, sortableTable,
     accessionLinks, taxidLink, resetLink, loadInfo, timeoutSignal, updateSubmit,

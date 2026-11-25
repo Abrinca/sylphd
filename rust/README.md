@@ -2,8 +2,8 @@
 
 Cargo workspace for sylphd's client-side Rust crates:
 
-* **`sylphd-core/`** — pure library (no `wasm-bindgen`, no networking): FASTA/FASTQ streaming parser, sylph read and per-contig sketchers (over the `sylph` library core), sample naming and input specification parsing, assembly stats, `.sylsp` header validation, per-contig batch planning, and optional native `std::io::Read` + `flate2` (`io` feature) and `rayon` parallel sketching (`rayon` feature).
-* **`sylphd-wasm/`** — browser WebAssembly bindings (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`) plus the push/pull multi-member gzip decoder used by the web app (`web/`, "Reads" and "Assembly" modes).
+* **`sylphd-core/`** — pure library (no `wasm-bindgen`, no I/O, no networking): FASTA/FASTQ streaming parser, sylph read and per-contig sketchers (over the `sylph` library core), sample naming and input specification parsing, assembly stats, `.sylsp` header validation, per-contig batch planning, the wire-protocol document model with its `api_version` check and per-contig run merge, result rendering (sylph-identical TSV, summaries, caveats, `info` text), and optional native `std::io::Read` + `flate2` (`io` feature) and `rayon` parallel sketching (`rayon` feature).
+* **`sylphd-wasm/`** — browser WebAssembly bindings (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`, plus the document/renderer functions below) and the push/pull multi-member gzip decoder used by the web app (`web/`, "Reads" and "Assembly" modes).
 
 Originally built as a feasibility spike (`sketch-wasm/`) to sketch FASTQ/FASTA(.gz) reads **locally in the browser**
 (WebAssembly, in Web Workers) and send only the sketch to the existing sylphd
@@ -28,10 +28,12 @@ pure-Rust `zlib-rs` backend, compiled to wasm. Details below.
 | `sylphd-core/src/input.rs` | sample naming, `--sample` spec parsing, paired-path resolution, assembly stats, contig filtering/skip counters, native/rayon sample sketching |
 | `sylphd-core/src/sketchcheck.rs` | `.sylsp` header validation and `c`/`k` compatibility checks |
 | `sylphd-core/src/batch.rs` | per-contig greedy batch planner (`max_contigs`, `params` JSON budget, `max_upload_mb`) |
-| `sylphd-core/tests/` | native equality tests against pysylph (`pysylph_equality.rs`), stream tests, input/sketchcheck/batch unit tests |
+| `sylphd-core/src/document.rs` | JSON document model of `/info`, `/messages`, `/profile`, `/query`, `/assembly` and `/contigs`; `SUPPORTED_API_VERSION` check; per-contig run merge (`merge_summaries`, `finalize_summary`, `merge_contigs_run`) |
+| `sylphd-core/src/render.rs` | renderer ported from Python: profile/query and per-contig TSV, assembly hits TSV + summary + note, the two per-contig summary lines, caveats, `/info` text and `/messages` lines |
+| `sylphd-core/tests/` | native equality tests against pysylph (`pysylph_equality.rs`), renderer golden tests (`render.rs` against `tests/data/*_golden.json`), stream tests, input/sketchcheck/batch unit tests |
 | `sylphd-wasm/src/gzip.rs` | push/pull multi-member gzip decoder: own header/trailer/member loop around `flate2`'s raw inflate (`zlib-rs` backend), CRC32 inline, deferred or off |
-| `sylphd-wasm/src/lib.rs` | `wasm-bindgen` API (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`) |
-| `sylphd-wasm/tests/` | gzip tests (`gzip.rs`), node check of the wasm build (`node_check.mjs`), per-contig parity (`contigs_check.mjs`, `contigs_pipeline_check.mjs`), `browser_check.mjs` (`web/sketching.js` and its workers in Firefox/Chromium via playwright-core), `bench_gunzip.mjs`, `make_fixtures.py` |
+| `sylphd-wasm/src/lib.rs` | `wasm-bindgen` API (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`, and `check_api_version`, `render_*`, `merge_contigs_run`) |
+| `sylphd-wasm/tests/` | gzip tests (`gzip.rs`), node check of the wasm build (`node_check.mjs`), renderer/merge exports (`render_check.mjs`), per-contig parity (`contigs_check.mjs`, `contigs_pipeline_check.mjs`), `browser_check.mjs` (`web/sketching.js` and its workers in Firefox/Chromium via playwright-core), `bench_gunzip.mjs`, `make_fixtures.py` |
 | `.cargo/config.toml` | builds wasm32 with `+simd128` |
 
 The k-mer seeding, read/duplicate handling and genome-style sketching are not
@@ -123,6 +125,71 @@ Records are delivered as they finish and the chunk credits are only returned
 after the main thread has consumed the batch, so memory stays bounded by the
 largest record plus a few chunks (assemblies with millions of contigs work; the
 caller must not accumulate the records).
+
+
+## Documents and rendering (`document.rs`, `render.rs`)
+
+Everything the clients do with a server answer lives here: parse the JSON document, check its
+`api_version`, merge `/contigs` batches into a run, and render the bytes the command line and the
+web page show. There is no I/O and no networking. The Python implementation is the specification
+(`tests/data/*_golden.json` hold documents captured from the Python server and the exact strings
+the Python renderers produced for them, see `scratch/step3b/generate_goldens.py`).
+
+Rust API:
+
+```rust
+use sylphd_core::document::{check_api_version, ProfileDocument, AssemblyDocument, ContigsDocument,
+    merge_contigs_run, ContigsRunMergeOptions, InfoDocument, SUPPORTED_API_VERSION};
+use sylphd_core::render;
+
+check_api_version(doc.api_version)?;            // "server API version N, this client supports M: update sylphd"
+let profile = ProfileDocument::from_json_str(text)?;   // checks api_version first
+let tsv = render::render_profile_tsv(&profile);        // == protocol.rows_to_tsv (sylph columns byte-identical)
+let caveats = render::render_profile_caveats(&profile); // "sylphd: warning: ..." lines
+
+let assembly = AssemblyDocument::from_json_str(text)?;
+let hits = render::render_assembly_tsv(&assembly);      // cli._write_hits_tsv's 11 columns
+let line = render::render_assembly_summary(&assembly);  // cli._assignment_summary
+let err = render::render_assembly_stderr(&assembly);    // summary line + cli._species_note warning
+
+let batches: Vec<ContigsDocument> = /* one per POST /contigs */;
+let run = merge_contigs_run(&batches, &ContigsRunMergeOptions {
+    skipped_short: SkippedBucket { contigs: 3, bp: 30_000 },   // client-side skip counters
+    skipped_few_kmers: SkippedBucket { contigs: 7, bp: 20_000 },
+    min_contig_length: 20_000,
+    not_classified: None,                                       // browser-only 100-contig cap
+    ..Default::default()
+})?;                                                           // same shape as one /contigs response
+let tsv = render::render_contigs_tsv(&run);             // PerContigRun.write_tsv
+let summary = render::render_contigs_summary(&run);     // PerContigRun.print_summary (2 lines + caveats)
+
+let info = InfoDocument::from_json_str(info_text)?;
+let text = render::render_info(&info, &messages);        // sylphd info
+```
+
+`render_tsv(table)` renders a bare `{"columns", "data"}` table; the `Eff_lambda` cell takes its
+`HIGH`/`LOW` value from the `Lambda_status` column, which is dropped from the TSV. Null cells get
+sylph's spellings (`inf`, `NaN`, `NA-NA`, `""`); intervals print as `a-b`, `Containment_ind` as
+`a/b`. `Adjusted_ANI` is capped at 100 in the TSV; `Naive_ANI` is not. Metadata and unknown
+columns print Python's `str()` (`True`/`False`, `""` for `None`) and the three float-valued
+metadata columns keep the `.0`.
+
+The wasm exports mirror these functions and take/return JSON strings:
+
+| export | |
+|---|---|
+| `supported_api_version()` | `1` |
+| `check_api_version(version)` | throws with the "update sylphd" message |
+| `render_tsv(docOrTableJson)` | profile/query document (or bare table) → TSV |
+| `render_profile_caveats(docJson)` | warning lines |
+| `render_assembly_tsv/summary/stderr(docJson)` | assembly hits TSV, one-line summary, summary+note |
+| `merge_contigs_run(batchesJson, optionsJson?)` | run document JSON |
+| `render_contigs_tsv/summary(docJson)` | per-contig TSV, two summary lines + caveats |
+| `render_info(infoJson, messagesJson?)` | `sylphd info` text |
+
+`web/sketching.js` exposes a main-thread instance (`SylphdSketch.loadWasm()`) that reuses the
+compiled module of the sketching workers; the web app's downloads and the per-contig run merge go
+through it, so the browser has no TSV/summary writers of its own.
 
 
 ## Equality with pysylph

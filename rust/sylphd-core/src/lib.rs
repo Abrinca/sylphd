@@ -6,10 +6,12 @@
 
 pub mod batch;
 pub mod contig;
+pub mod document;
 pub mod input;
 #[cfg(feature = "io")]
 pub mod io;
 pub mod parser;
+pub mod render;
 pub mod sketch;
 pub mod sketchcheck;
 pub mod stream;

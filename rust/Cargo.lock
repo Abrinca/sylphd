@@ -350,6 +350,8 @@ dependencies = [
  "flate2",
  "getrandom",
  "js-sys",
+ "serde",
+ "serde_json",
  "sylphd-core",
  "wasm-bindgen",
  "zlib-rs",

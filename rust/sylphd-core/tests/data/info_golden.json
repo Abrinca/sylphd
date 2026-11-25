@@ -1,0 +1,300 @@
+{
+  "cases": [
+    {
+      "name": "info_single_db_minimal",
+      "info": {
+        "service": "sylphd",
+        "version": "0.7.0",
+        "api_version": 1,
+        "pysylph_version": "0.1.3",
+        "python_version": "3.14.10",
+        "database": {
+          "name": "ecoli.syl2db",
+          "size": 419015,
+          "sha256": null,
+          "genomes": 3,
+          "c": 200,
+          "k": 31,
+          "screen_c": 3000,
+          "two_stage": true
+        },
+        "databases": [
+          {
+            "name": "ecoli.syl2db",
+            "file": "ecoli.syl2db",
+            "kind": "two-stage",
+            "size": 419015,
+            "sha256": null,
+            "genomes": 3,
+            "c": 200,
+            "k": 31,
+            "screen_c": 3000,
+            "two_stage": true,
+            "gtdb": false,
+            "licence": null
+          }
+        ],
+        "metadata": null,
+        "limits": {
+          "max_jobs": 2,
+          "max_upload_mb": 512,
+          "max_sketches": 4096,
+          "max_contigs": 4096,
+          "max_params_bytes": 1048576,
+          "allow_sequences": false,
+          "max_sequence_mb": null,
+          "rate_limit": null,
+          "max_queue": null
+        },
+        "usage": {
+          "enabled": false
+        },
+        "taxonomy": {
+          "enabled": false
+        },
+        "access": {
+          "token_required": false
+        },
+        "endpoints": [
+          "/health",
+          "/info",
+          "/messages",
+          "/profile",
+          "/query",
+          "/assembly",
+          "/contigs"
+        ],
+        "params": {
+          "/profile": [
+            "minimum_ani",
+            "seq_id",
+            "estimate_unknown",
+            "estimate_read_counts",
+            "min_number_kmers",
+            "min_contain",
+            "screen_ani",
+            "no_adjust",
+            "names",
+            "fields",
+            "mode",
+            "tax_sources",
+            "taxprof"
+          ],
+          "/query": [
+            "minimum_ani",
+            "seq_id",
+            "estimate_unknown",
+            "estimate_read_counts",
+            "min_number_kmers",
+            "min_contain",
+            "screen_ani",
+            "no_adjust",
+            "names",
+            "fields",
+            "mode",
+            "tax_sources"
+          ],
+          "/contigs": [
+            "consensus_ratio",
+            "consensus_z",
+            "contigs",
+            "fields",
+            "min_ani",
+            "tax_sources",
+            "top"
+          ],
+          "/assembly": [
+            "top",
+            "min_ani",
+            "name",
+            "records",
+            "length",
+            "gc"
+          ]
+        }
+      },
+      "messages": [],
+      "expected_text": "database: ecoli.syl2db\n  size: 409.2 KiB\n  genomes: 3\n  c: 200  k: 31  screen_c: 3000  two-stage: yes\n  sha256: -\nmetadata: none\nversions: sylphd 0.7.0, pysylph 0.1.3, python 3.14.10\nlimits: max-jobs 2, max-contigs 4096, max-upload 512 MB, max-sketches 4096\nweb: raw-sequence assembly off, rate-limit off, max-queue unlimited\nusage statistics: off\n"
+    },
+    {
+      "name": "info_multi_db_full",
+      "info": {
+        "api_version": 1,
+        "service": "sylphd",
+        "version": "0.7.0",
+        "pysylph_version": "0.3.0",
+        "python_version": "3.14.0",
+        "database": {
+          "name": "gtdb, uhgv",
+          "size": 1234567890,
+          "sha256": null,
+          "genomes": 250000,
+          "c": 200,
+          "k": 31,
+          "screen_c": null,
+          "two_stage": false
+        },
+        "databases": [
+          {
+            "name": "gtdb",
+            "file": "gtdb-r232-c200-dbv2.syl2db",
+            "kind": "two-stage",
+            "size": 1000000000,
+            "sha256": "abc123",
+            "genomes": 199937,
+            "c": 200,
+            "k": 31,
+            "screen_c": 1000,
+            "two_stage": true,
+            "gtdb": true
+          },
+          {
+            "name": "uhgv",
+            "file": "uhgv.syldb",
+            "kind": "plain",
+            "size": 234567890,
+            "sha256": null,
+            "genomes": 50063,
+            "c": 200,
+            "k": 31,
+            "screen_c": null,
+            "two_stage": false,
+            "gtdb": false
+          }
+        ],
+        "metadata": {
+          "file": "gtdb-r232.sqlite",
+          "size": 52428800,
+          "columns": [
+            "gtdb_taxonomy",
+            "ncbi_taxid",
+            "tax_source",
+            "tax_lineage"
+          ],
+          "rows": 596859,
+          "release": 232,
+          "built": "2026-01-15T12:00:00Z",
+          "format_version": "3",
+          "reps_only": false,
+          "taxonomy_sources": [
+            {
+              "name": "GTDB_r232",
+              "kind": "metadata",
+              "keys": 596859,
+              "has_host": false,
+              "md5": null,
+              "ncbi_nearest": {
+                "keys": 1200,
+                "assigned": 1150,
+                "informal": 0,
+                "ranks": {
+                  "species": 800,
+                  "genus": 300,
+                  "family": 50
+                }
+              }
+            },
+            {
+              "name": "UHGV_default",
+              "kind": "sylphtax",
+              "keys": 168536,
+              "has_host": true,
+              "md5": "deadbeef1234",
+              "ncbi": {
+                "mapped": 1000,
+                "no_accession": 200,
+                "not_in_summary": 50,
+                "no_lineage": 10,
+                "gtdb": 5
+              },
+              "ncbi_nearest": {
+                "keys": 3,
+                "assigned": 3,
+                "informal": 1,
+                "ranks": {
+                  "domain": 1,
+                  "species": 2
+                }
+              }
+            },
+            {
+              "name": "Custom",
+              "kind": "sylphtax",
+              "keys": null,
+              "has_host": false,
+              "ncbi_nearest": {
+                "keys": 10,
+                "assigned": 2,
+                "informal": 2,
+                "ranks": {}
+              }
+            }
+          ],
+          "taxonomy_overlaps": [
+            {
+              "sources": [
+                "GTDB_r232",
+                "UHGV_default"
+              ],
+              "keys": 1234,
+              "examples": [
+                "GCF_000005845.2",
+                "GCA_000001405.1"
+              ]
+            }
+          ]
+        },
+        "limits": {
+          "max_jobs": 4,
+          "max_upload_mb": 200,
+          "max_sketches": 4096,
+          "max_contigs": 100,
+          "max_params_bytes": 1048576,
+          "allow_sequences": true,
+          "max_sequence_mb": 20,
+          "rate_limit": {
+            "count": 10,
+            "window_seconds": 60.0
+          },
+          "max_queue": 16
+        },
+        "usage": {
+          "enabled": true,
+          "policy": 1,
+          "window_minutes": 10
+        },
+        "endpoints": [
+          "/health",
+          "/info",
+          "/messages",
+          "/profile",
+          "/query",
+          "/assembly",
+          "/contigs",
+          "/usage"
+        ]
+      },
+      "messages": [
+        {
+          "level": "info",
+          "title": "Maintenance",
+          "message": "Planned **Sunday**.",
+          "plain": "Planned Sunday."
+        },
+        {
+          "level": "warning",
+          "title": "Slow disk",
+          "message": "Expect [delays](https://example.org).",
+          "plain": "Expect delays (https://example.org)."
+        },
+        {
+          "level": "danger",
+          "title": "Outage",
+          "message": "Down soon",
+          "plain": "Down soon"
+        }
+      ],
+      "expected_text": "database: gtdb, uhgv\n  size: 1.1 GiB\n  genomes: 250000\n  c: 200  k: 31  screen_c: -  two-stage: no\n  sha256: -\ndatabases: 2\n  gtdb: gtdb-r232-c200-dbv2.syl2db (two-stage, c=200, k=31, 199937 genomes)\n  uhgv: uhgv.syldb (plain, c=200, k=31, 50063 genomes)\nmetadata: gtdb-r232.sqlite (release 232, 596859 rows, built 2026-01-15T12:00:00Z)\n  columns: 4\n  taxonomy sources: 3\n    GTDB_r232: 596,859 keys, virtual, from -m, nearest NCBI taxon: 1,150 of 1,200 keys without an NCBI record (species 800, genus 300, family 50)\n    UHGV_default: 168,536 keys, with hosts, md5 deadbeef1234, NCBI: 1,000 mapped, 200 without an assembly accession, 50 not in the summaries, 10 without a lineage, 5 with GTDB's NCBI data, nearest NCBI taxon: 3 of 3 keys without an NCBI record (domain 1, species 2; 1 informal, formally named above)\n    Custom: key count unknown, nearest NCBI taxon: 2 of 10 keys without an NCBI record, 2 informal, formally named above\n  taxonomy overlaps: 1\n    GTDB_r232 and UHGV_default: 1,234 shared keys; examples: GCF_000005845.2, GCA_000001405.1; the source imported later wins\nversions: sylphd 0.7.0, pysylph 0.3.0, python 3.14.0\nlimits: max-jobs 4, max-contigs 100, max-upload 200 MB, max-sketches 4096\nweb: raw-sequence assembly on (max 20 MB), rate-limit 10/60s, max-queue 16\nusage statistics: on (policy 1, 10-minute windows, public at /usage)\nmessages:\n  [info] Maintenance: Planned Sunday.\n  [warning] Slow disk: Expect delays (https://example.org).\n  [danger] Outage: Down soon\n"
+    }
+  ]
+}

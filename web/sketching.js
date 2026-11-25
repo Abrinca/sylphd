@@ -50,6 +50,22 @@
     return modulePromise;
   }
 
+  // Main-thread WebAssembly module (renderer, per-contig merge, api_version checks),
+  // reusing the compiled module shared with the sketching workers.
+  let wasmPromise = null;
+  function loadWasm() {
+    if (!wasmPromise) {
+      wasmPromise = (async () => {
+        const glueUrl = new URL('wasm/sylph_sketch.js', document.baseURI).href;
+        const [mod, module] = await Promise.all([import(glueUrl), loadModule()]);
+        await mod.default({ module_or_path: module });
+        return mod;
+      })();
+      wasmPromise.catch(() => { wasmPromise = null; });
+    }
+    return wasmPromise;
+  }
+
   // Friendly text for what the workers throw.
   function workerMessage(msg) {
     const m = String(msg || '');
@@ -194,7 +210,7 @@
                   headerName: record.name,
                   length: record.length,
                   gcCount: record.gcCount,
-                  gc: record.length ? Number(((100 * record.gcCount) / record.length).toFixed(2)) : 0,
+                  gc: record.gc,
                   contigKmers: record.contigKmers,
                   sketch: record.sketch,
                 });
@@ -291,7 +307,7 @@
   }
 
   window.SylphdSketch = {
-    unsupported, loadModule, start, sketchContigs, uniqueContigName, isSylsp,
+    unsupported, loadModule, loadWasm, start, sketchContigs, uniqueContigName, isSylsp,
     readSylspHeader, sketchProblem, MAX_CONTIG_RECORDS, MAX_CONTIG_LENGTH,
   };
 })();

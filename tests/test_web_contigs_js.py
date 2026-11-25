@@ -150,6 +150,7 @@ def expected_records(sequences: list[tuple[str, str]], c: int, k: int, min_lengt
             "name": name,
             "length": len(seq),
             "gcCount": sequence.count("G") + sequence.count("C"),
+            "gc": round(100.0 * (sequence.count("G") + sequence.count("C")) / len(seq), 2) if seq else 0.0,
             "contigKmers": None,
             "sketch": None,
         }
@@ -170,6 +171,7 @@ def compare(records: list[dict], expected: list[dict], c: int, k: int) -> None:
         assert got["name"] == want["name"]
         assert got["length"] == want["length"], want["name"]
         assert got["gcCount"] == want["gcCount"], want["name"]
+        assert got["gc"] == want["gc"], want["name"]
         assert got["contigKmers"] == want["contigKmers"], want["name"]
         if want["sketch"] is None:
             assert got["sketch"] is None, want["name"]
@@ -253,8 +255,7 @@ def test_matches_cli_sketch_contigs(tmp_path: Path) -> None:
         assert got["index"] == want.index
         assert got["name"] == want.name
         assert got["length"] == want.length
-        gc = round(100.0 * got["gcCount"] / want.length, 2) if want.length else 0.0
-        assert gc == want.gc
+        assert got["gc"] == want.gc
         assert got["contigKmers"] == want.contig_kmers
         if want.sketch is None:
             assert got["sketch"] is None

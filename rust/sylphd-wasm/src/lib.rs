@@ -14,6 +14,11 @@
 pub mod gzip;
 
 use sylphd_core::contig::{self, ContigRecord, ContigSketcher};
+use sylphd_core::document::{
+    self, AssemblyDocument, ContigsDocument, ContigsRunMergeOptions, InfoDocument, MessageItem,
+    MessagesResponse, ProfileDocument, Table, SUPPORTED_API_VERSION,
+};
+use sylphd_core::render;
 use sylphd_core::sketch;
 use sylphd_core::stream::StreamSketcher;
 use sylphd_core::Seeding;
@@ -234,6 +239,9 @@ fn contig_record_to_js(record: ContigRecord) -> JsValue {
     set("name", JsValue::from_str(&record.name));
     set("length", JsValue::from_f64(record.length as f64));
     set("gcCount", JsValue::from_f64(record.gc_count as f64));
+    // Python's round(100 * gc / length, 2), computed by the core so the TSV's
+    // GC column matches the CLI on exact ties (JS toFixed() rounds ties up).
+    set("gc", JsValue::from_f64(record.gc_percent()));
     set(
         "contigKmers",
         match record.contig_kmers {
@@ -521,4 +529,144 @@ impl Default for WasmCrc {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Document validation, per-contig run merge, and rendering
+// ---------------------------------------------------------------------------
+
+/// Wire-protocol `api_version` supported by this build.
+#[wasm_bindgen]
+pub fn supported_api_version() -> u32 {
+    SUPPORTED_API_VERSION as u32
+}
+
+/// Validate a server/document `api_version`; throws on mismatch.
+#[wasm_bindgen]
+pub fn check_api_version(version: f64) -> Result<(), JsError> {
+    if !(version >= 0.0 && version.is_finite() && version.fract() == 0.0) {
+        return Err(js_err(
+            document::DocumentError::MissingApiVersion.to_string(),
+        ));
+    }
+    document::check_api_version(version as u64).map_err(|e| js_err(e.to_string()))
+}
+
+/// Render a `/profile` or `/query` JSON document (or a standalone `{"columns", "data"}` table)
+/// to sylph-identical TSV.
+#[wasm_bindgen]
+pub fn render_tsv(doc_or_table_json: &str) -> Result<String, JsError> {
+    #[derive(serde::Deserialize)]
+    struct ShapeProbe {
+        #[serde(default)]
+        table: Option<serde_json::Value>,
+    }
+    let probe: ShapeProbe = serde_json::from_str(doc_or_table_json)
+        .map_err(|e| js_err(format!("invalid JSON: {e}")))?;
+    if probe.table.is_some() {
+        let doc =
+            ProfileDocument::from_json_str(doc_or_table_json).map_err(|e| js_err(e.to_string()))?;
+        Ok(render::render_profile_tsv(&doc))
+    } else {
+        let table: Table = serde_json::from_str(doc_or_table_json)
+            .map_err(|e| js_err(format!("invalid table JSON: {e}")))?;
+        Ok(render::render_tsv(&table))
+    }
+}
+
+/// Render the species-threshold caveat warning lines of a `/profile` JSON document.
+#[wasm_bindgen]
+pub fn render_profile_caveats(doc_json: &str) -> Result<String, JsError> {
+    let doc = ProfileDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
+    Ok(render::render_profile_caveats(&doc))
+}
+
+/// Render the 11-column hits TSV of a `/assembly` JSON document.
+#[wasm_bindgen]
+pub fn render_assembly_tsv(doc_json: &str) -> Result<String, JsError> {
+    let doc = AssemblyDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
+    Ok(render::render_assembly_tsv(&doc))
+}
+
+/// Render the one-line human summary of a `/assembly` JSON document.
+#[wasm_bindgen]
+pub fn render_assembly_summary(doc_json: &str) -> Result<String, JsError> {
+    let doc = AssemblyDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
+    Ok(render::render_assembly_summary(&doc))
+}
+
+/// Render the full stderr summary (summary line + optional species-threshold warning) of `/assembly`.
+#[wasm_bindgen]
+pub fn render_assembly_stderr(doc_json: &str) -> Result<String, JsError> {
+    let doc = AssemblyDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
+    Ok(render::render_assembly_stderr(&doc))
+}
+
+/// Merge a JSON array of `/contigs` batch response documents plus client-side merge options
+/// into a single run document JSON of the same shape.
+#[wasm_bindgen]
+pub fn merge_contigs_run(
+    batches_json: &str,
+    options_json: Option<String>,
+) -> Result<String, JsError> {
+    #[derive(serde::Deserialize)]
+    struct VersionProbe {
+        #[serde(default)]
+        api_version: Option<serde_json::Value>,
+    }
+    let probes: Vec<VersionProbe> = serde_json::from_str(batches_json)
+        .map_err(|e| js_err(format!("invalid contigs batches JSON: {e}")))?;
+    for probe in &probes {
+        let ver = probe
+            .api_version
+            .as_ref()
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| js_err(document::DocumentError::MissingApiVersion.to_string()))?;
+        document::check_api_version(ver).map_err(|e| js_err(e.to_string()))?;
+    }
+    let batches: Vec<ContigsDocument> = serde_json::from_str(batches_json)
+        .map_err(|e| js_err(format!("invalid contigs batches JSON: {e}")))?;
+    let options: ContigsRunMergeOptions = match options_json.as_deref() {
+        None | Some("") => ContigsRunMergeOptions::default(),
+        Some(raw) => serde_json::from_str(raw)
+            .map_err(|e| js_err(format!("invalid merge options JSON: {e}")))?,
+    };
+    let merged =
+        document::merge_contigs_run(&batches, &options).map_err(|e| js_err(e.to_string()))?;
+    serde_json::to_string(&merged)
+        .map_err(|e| js_err(format!("failed to serialize run document: {e}")))
+}
+
+/// Render the flat per-contig TSV of a `/contigs` (single-batch or merged run) JSON document.
+#[wasm_bindgen]
+pub fn render_contigs_tsv(doc_json: &str) -> Result<String, JsError> {
+    let doc = ContigsDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
+    Ok(render::render_contigs_tsv(&doc))
+}
+
+/// Render the two-line human summary plus caveats of a `/contigs` JSON document.
+#[wasm_bindgen]
+pub fn render_contigs_summary(doc_json: &str) -> Result<String, JsError> {
+    let doc = ContigsDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
+    Ok(render::render_contigs_summary(&doc))
+}
+
+/// Render human-readable `/info` text (matching `sylphd info`) from `/info` and optional `/messages` JSON.
+#[wasm_bindgen]
+pub fn render_info(info_json: &str, messages_json: Option<String>) -> Result<String, JsError> {
+    let info = InfoDocument::from_json_str(info_json).map_err(|e| js_err(e.to_string()))?;
+    let messages: Vec<MessageItem> = match messages_json.as_deref() {
+        None | Some("") => Vec::new(),
+        Some(raw) => {
+            if raw.trim_start().starts_with('[') {
+                serde_json::from_str(raw)
+                    .map_err(|e| js_err(format!("invalid messages JSON: {e}")))?
+            } else {
+                let resp: MessagesResponse = serde_json::from_str(raw)
+                    .map_err(|e| js_err(format!("invalid messages JSON: {e}")))?;
+                resp.messages
+            }
+        }
+    };
+    Ok(render::render_info(&info, &messages))
 }

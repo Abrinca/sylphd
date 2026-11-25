@@ -29,6 +29,7 @@ const take = () => {
       name: record.name,
       length: record.length,
       gcCount: record.gcCount,
+      gc: record.gc,
       contigKmers: record.contigKmers,
       sketch: record.sketch ? Buffer.from(record.sketch).toString("base64") : null,
     });

@@ -1,0 +1,497 @@
+{
+  "cases": [
+    {
+      "name": "assembly_gtdb_assigned",
+      "document": {
+        "api_version": 1,
+        "query": {
+          "name": "clodf13",
+          "records": 1,
+          "length": 9957,
+          "gc": 54.4,
+          "sketch_kmers": 45,
+          "input": "sequence"
+        },
+        "assignment": {
+          "rank": "species",
+          "taxon": "Escherichia coli",
+          "gtdb_taxonomy": "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli",
+          "accession": "GCA_000000001.1",
+          "ani": 100.0,
+          "taxonomy": {
+            "domain": "Bacteria",
+            "phylum": "Pseudomonadota",
+            "class": "Gammaproteobacteria",
+            "order": "Enterobacterales",
+            "family": "Enterobacteriaceae",
+            "genus": "Escherichia",
+            "species": "Escherichia coli"
+          },
+          "taxonomy_source": "GTDB_r232"
+        },
+        "closest": {
+          "rank": "species",
+          "taxon": "Escherichia coli",
+          "gtdb_taxonomy": "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli",
+          "accession": "GCA_000000001.1",
+          "ani": 100.0,
+          "taxonomy": {
+            "domain": "Bacteria",
+            "phylum": "Pseudomonadota",
+            "class": "Gammaproteobacteria",
+            "order": "Enterobacterales",
+            "family": "Enterobacteriaceae",
+            "genus": "Escherichia",
+            "species": "Escherichia coli"
+          },
+          "taxonomy_source": "GTDB_r232"
+        },
+        "database": {
+          "name": "tiny.syldb",
+          "genomes": 1,
+          "c": 200,
+          "k": 31
+        },
+        "params": {
+          "top": 5,
+          "min_ani": 80.0
+        },
+        "thresholds": {
+          "species": 95.0,
+          "imprecise_below": 85.0
+        },
+        "elapsed_ms": 0.7,
+        "table": {
+          "columns": [
+            "rank",
+            "ani",
+            "relation",
+            "shared_rank",
+            "accession",
+            "genome_id",
+            "taxon",
+            "gtdb_species",
+            "taxonomy_source",
+            "ncbi_organism_name",
+            "ncbi_taxid",
+            "containment",
+            "containment_fraction",
+            "ani_species_level",
+            "genome_file",
+            "taxonomy",
+            "gtdb_taxonomy",
+            "gtdb_representative",
+            "gtdb_genome_representative",
+            "gtdb_type_species_of_genus",
+            "gtdb_type_designation_ncbi_taxa",
+            "ncbi_species_taxid",
+            "ncbi_taxonomy",
+            "ncbi_taxonomy_unfiltered",
+            "ncbi_strain_identifiers",
+            "ncbi_isolate",
+            "ncbi_genome_category",
+            "ncbi_assembly_level",
+            "ncbi_refseq_category",
+            "ncbi_type_material_designation",
+            "ncbi_biosample",
+            "ncbi_bioproject",
+            "checkm2_completeness",
+            "checkm2_contamination",
+            "genome_size",
+            "gc_percentage",
+            "contig_count",
+            "n50_contigs",
+            "mimag_high_quality",
+            "tax_source",
+            "tax_key",
+            "tax_lineage",
+            "tax_host"
+          ],
+          "data": [
+            [
+              1,
+              100.0,
+              "same species",
+              "species",
+              "GCA_000000001.1",
+              "GCA_000000001.1",
+              "Escherichia coli",
+              "Escherichia coli",
+              "GTDB_r232",
+              "Escherichia coli K-12",
+              562,
+              [
+                44,
+                44
+              ],
+              1.0,
+              true,
+              "GCA_000000001.1_genomic.fna.gz",
+              {
+                "domain": "Bacteria",
+                "phylum": "Pseudomonadota",
+                "class": "Gammaproteobacteria",
+                "order": "Enterobacterales",
+                "family": "Enterobacteriaceae",
+                "genus": "Escherichia",
+                "species": "Escherichia coli"
+              },
+              "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli",
+              1,
+              null,
+              0,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              100.0,
+              0.25,
+              9957,
+              54.4,
+              null,
+              null,
+              null,
+              "GTDB_r232",
+              "GCA_000000001.1",
+              "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli",
+              null
+            ]
+          ]
+        }
+      },
+      "expected_tsv": "rank\tani\trelation\tshared_rank\taccession\tgenome_id\ttaxon\tgtdb_species\ttaxonomy_source\tncbi_organism_name\tncbi_taxid\n1\t100.00\tsame species\tspecies\tGCA_000000001.1\tGCA_000000001.1\tEscherichia coli\tEscherichia coli\tGTDB_r232\tEscherichia coli K-12\t562\n",
+      "expected_summary": "assigned to species Escherichia coli (100.00 % ANI)",
+      "expected_note": null,
+      "expected_stderr": "assigned to species Escherichia coli (100.00 % ANI)\n"
+    },
+    {
+      "name": "assembly_no_hits",
+      "document": {
+        "api_version": 1,
+        "query": {
+          "name": "empty",
+          "records": 1,
+          "length": 8000,
+          "gc": 50.0,
+          "sketch_kmers": 0,
+          "input": "sequence"
+        },
+        "assignment": null,
+        "closest": null,
+        "database": {
+          "name": "tiny.syldb",
+          "genomes": 1,
+          "c": 200,
+          "k": 31
+        },
+        "params": {
+          "top": 5,
+          "min_ani": 80.0
+        },
+        "thresholds": {
+          "species": 95.0,
+          "imprecise_below": 85.0
+        },
+        "elapsed_ms": 0.3,
+        "table": {
+          "columns": [
+            "rank",
+            "ani",
+            "relation",
+            "shared_rank",
+            "accession",
+            "genome_id",
+            "taxon",
+            "gtdb_species",
+            "taxonomy_source",
+            "ncbi_organism_name",
+            "ncbi_taxid",
+            "containment",
+            "containment_fraction",
+            "ani_species_level",
+            "genome_file",
+            "taxonomy",
+            "gtdb_taxonomy",
+            "gtdb_representative",
+            "gtdb_genome_representative",
+            "gtdb_type_species_of_genus",
+            "gtdb_type_designation_ncbi_taxa",
+            "ncbi_species_taxid",
+            "ncbi_taxonomy",
+            "ncbi_taxonomy_unfiltered",
+            "ncbi_strain_identifiers",
+            "ncbi_isolate",
+            "ncbi_genome_category",
+            "ncbi_assembly_level",
+            "ncbi_refseq_category",
+            "ncbi_type_material_designation",
+            "ncbi_biosample",
+            "ncbi_bioproject",
+            "checkm2_completeness",
+            "checkm2_contamination",
+            "genome_size",
+            "gc_percentage",
+            "contig_count",
+            "n50_contigs",
+            "mimag_high_quality",
+            "tax_source",
+            "tax_key",
+            "tax_lineage",
+            "tax_host"
+          ],
+          "data": []
+        }
+      },
+      "expected_tsv": "rank\tani\trelation\tshared_rank\taccession\tgenome_id\ttaxon\tgtdb_species\ttaxonomy_source\tncbi_organism_name\tncbi_taxid\n",
+      "expected_summary": "no hits",
+      "expected_note": null,
+      "expected_stderr": "no hits\n"
+    },
+    {
+      "name": "assembly_non_gtdb_assigned_with_note",
+      "document": {
+        "api_version": 1,
+        "query": {
+          "name": "phage",
+          "records": 1,
+          "length": 48502,
+          "gc": 49.86,
+          "sketch_kmers": 212,
+          "input": "sketch"
+        },
+        "database": {
+          "name": "uhgv.syldb",
+          "genomes": 100,
+          "c": 200,
+          "k": 31
+        },
+        "params": {
+          "top": 5,
+          "min_ani": 80.0
+        },
+        "thresholds": {
+          "species": 95.0,
+          "imprecise_below": 85.0
+        },
+        "assignment": {
+          "rank": "level 5",
+          "taxon": "vOTU-052719",
+          "gtdb_taxonomy": null,
+          "accession": null,
+          "ani": 99.12,
+          "taxonomy": {
+            "level 1": "vFAM-00013",
+            "level 5": "vOTU-052719"
+          },
+          "taxonomy_source": "UHGV_default",
+          "note": "UHGV_default (viruses): 95 % ANI matches the vOTU convention (MIUViG: 95 % ANI over 85 % of the shorter genome), but sylph's ANI ignores the aligned fraction, so a species call may be wrong"
+        },
+        "closest": {
+          "rank": "level 5",
+          "taxon": "vOTU-052719",
+          "gtdb_taxonomy": null,
+          "accession": null,
+          "ani": 99.12,
+          "taxonomy": {
+            "level 1": "vFAM-00013",
+            "level 5": "vOTU-052719"
+          },
+          "taxonomy_source": "UHGV_default",
+          "note": "UHGV_default (viruses): 95 % ANI matches the vOTU convention (MIUViG: 95 % ANI over 85 % of the shorter genome), but sylph's ANI ignores the aligned fraction, so a species call may be wrong"
+        },
+        "elapsed_ms": 1.2,
+        "table": {
+          "columns": [
+            "rank",
+            "ani",
+            "relation",
+            "shared_rank",
+            "accession",
+            "genome_id",
+            "taxon",
+            "gtdb_species",
+            "taxonomy_source",
+            "ncbi_organism_name",
+            "ncbi_taxid",
+            "containment",
+            "containment_fraction",
+            "ani_species_level",
+            "genome_file",
+            "taxonomy"
+          ],
+          "data": [
+            [
+              1,
+              99.12,
+              "same level 5",
+              "level 5",
+              null,
+              "UHGV-0001",
+              "vOTU-052719",
+              null,
+              "UHGV_default",
+              null,
+              null,
+              [
+                200,
+                212
+              ],
+              0.943,
+              true,
+              "votus_full.fna.gz",
+              {
+                "level 1": "vFAM-00013",
+                "level 5": "vOTU-052719"
+              }
+            ]
+          ]
+        }
+      },
+      "expected_tsv": "rank\tani\trelation\tshared_rank\taccession\tgenome_id\ttaxon\tgtdb_species\ttaxonomy_source\tncbi_organism_name\tncbi_taxid\n1\t99.12\tsame level 5\tlevel 5\t\tUHGV-0001\tvOTU-052719\t\tUHGV_default\t\t\n",
+      "expected_summary": "assigned to vOTU-052719 at the 95 % species threshold (99.12 % ANI)",
+      "expected_note": "UHGV_default (viruses): 95 % ANI matches the vOTU convention (MIUViG: 95 % ANI over 85 % of the shorter genome), but sylph's ANI ignores the aligned fraction, so a species call may be wrong",
+      "expected_stderr": "assigned to vOTU-052719 at the 95 % species threshold (99.12 % ANI)\nsylphd: warning: UHGV_default (viruses): 95 % ANI matches the vOTU convention (MIUViG: 95 % ANI over 85 % of the shorter genome), but sylph's ANI ignores the aligned fraction, so a species call may be wrong\n"
+    },
+    {
+      "name": "assembly_closest_relative_with_note",
+      "document": {
+        "api_version": 1,
+        "query": {
+          "name": "novel",
+          "records": 1,
+          "length": 100000,
+          "gc": 50.0,
+          "sketch_kmers": 400,
+          "input": "sketch"
+        },
+        "database": {
+          "name": "fungi.syldb",
+          "genomes": 50,
+          "c": 200,
+          "k": 31
+        },
+        "params": {
+          "top": 5,
+          "min_ani": 80.0
+        },
+        "thresholds": {
+          "species": 95.0,
+          "imprecise_below": 85.0
+        },
+        "assignment": null,
+        "closest": {
+          "rank": "species",
+          "taxon": "Candida albicans",
+          "gtdb_taxonomy": null,
+          "accession": "GCF_000182965.3",
+          "ani": 91.4,
+          "taxonomy": {
+            "kingdom": "Fungi",
+            "species": "Candida albicans"
+          },
+          "taxonomy_source": "FungiRefSeq-latest",
+          "note": "FungiRefSeq-latest (fungi): there is no established ANI species boundary, so 95 % is a heuristic and species calls may be wrong"
+        },
+        "elapsed_ms": 2.0,
+        "table": {
+          "columns": [
+            "rank",
+            "ani",
+            "relation",
+            "shared_rank",
+            "accession",
+            "genome_id",
+            "taxon",
+            "gtdb_species",
+            "taxonomy_source",
+            "ncbi_organism_name",
+            "ncbi_taxid",
+            "containment",
+            "containment_fraction",
+            "ani_species_level",
+            "genome_file",
+            "taxonomy"
+          ],
+          "data": [
+            [
+              1,
+              91.4,
+              "closest relative",
+              null,
+              "GCF_000182965.3",
+              "GCF_000182965.3",
+              "Candida albicans",
+              null,
+              "FungiRefSeq-latest",
+              "Candida albicans SC5314",
+              237561,
+              [
+                120,
+                400
+              ],
+              0.3,
+              false,
+              "GCF_000182965.3_genomic.fna.gz",
+              {
+                "kingdom": "Fungi",
+                "species": "Candida albicans"
+              }
+            ]
+          ]
+        }
+      },
+      "expected_tsv": "rank\tani\trelation\tshared_rank\taccession\tgenome_id\ttaxon\tgtdb_species\ttaxonomy_source\tncbi_organism_name\tncbi_taxid\n1\t91.40\tclosest relative\t\tGCF_000182965.3\tGCF_000182965.3\tCandida albicans\t\tFungiRefSeq-latest\tCandida albicans SC5314\t237561\n",
+      "expected_summary": "no species-level match (< 95 % ANI); closest relative Candida albicans (91.40 % ANI)",
+      "expected_note": "FungiRefSeq-latest (fungi): there is no established ANI species boundary, so 95 % is a heuristic and species calls may be wrong",
+      "expected_stderr": "no species-level match (< 95 % ANI); closest relative Candida albicans (91.40 % ANI)\nsylphd: warning: FungiRefSeq-latest (fungi): there is no established ANI species boundary, so 95 % is a heuristic and species calls may be wrong\n"
+    },
+    {
+      "name": "assembly_fallback_the_best_hit",
+      "document": {
+        "api_version": 1,
+        "query": {},
+        "database": {},
+        "params": {},
+        "thresholds": {
+          "species": 95.5,
+          "imprecise_below": 85.0
+        },
+        "assignment": null,
+        "closest": {
+          "rank": null,
+          "taxon": null,
+          "accession": null,
+          "ani": 88.0
+        },
+        "table": {
+          "columns": [
+            "rank",
+            "ani",
+            "relation",
+            "shared_rank",
+            "accession",
+            "genome_id",
+            "taxon",
+            "gtdb_species",
+            "taxonomy_source",
+            "ncbi_organism_name",
+            "ncbi_taxid"
+          ],
+          "data": []
+        }
+      },
+      "expected_tsv": "rank\tani\trelation\tshared_rank\taccession\tgenome_id\ttaxon\tgtdb_species\ttaxonomy_source\tncbi_organism_name\tncbi_taxid\n",
+      "expected_summary": "no species-level match (< 95.5 % ANI); closest relative the best hit (88.00 % ANI)",
+      "expected_note": null,
+      "expected_stderr": "no species-level match (< 95.5 % ANI); closest relative the best hit (88.00 % ANI)\n"
+    }
+  ]
+}

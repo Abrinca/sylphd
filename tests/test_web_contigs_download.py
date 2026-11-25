@@ -1,14 +1,23 @@
-"""The web app's per-contig TSV and JSON must match ``sylphd assembly --per-contig``.
+"""The web app's downloads and summaries come from ``sylphd-core`` through wasm.
 
-The browser writes the downloads itself (``web/contigs.js``), because the CLI's
-``per_contig_client.PerContigRun`` writers cannot run there.  This test feeds the
-same merged records, the same per-request summary and the same options to both
-writers and compares them byte for byte (TSV) and value for value (the JSON
-document): column order and the Python number/None/bool formatting are a
-contract with the command line.
+Since step 3 of the thin-client plan the browser has no TSV/JSON/summary
+writers of its own: ``web/reads.js``, ``web/app.js`` and ``web/contigs.js``
+call the renderer and the per-contig merge exposed by ``sylphd-wasm``
+(``rust/sylphd-core/src/document.rs`` and ``render.rs``). This test runs the
+built wasm module under node and compares the browser's outputs with the
+Python implementation, which is the specification:
 
-The pure writers in ``web/contigs.js`` are exported through ``module.exports``
-when the file is loaded by node, so no browser or DOM is needed.
+* the per-contig merge (``merge_contigs_run``) against
+  ``per_contig_client.PerContigRun``, byte for byte for the TSV and value for
+  value for the counters, consensus breakdown and contig order;
+* the renderer exports against the golden documents in
+  ``rust/sylphd-core/tests/data/``, whose expected strings were produced by
+  the Python server and renderers;
+* the ``api_version`` check (the exact "'update sylphd' error").
+
+``web/contigs.js`` still owns the server-limit helpers, which are checked
+through its ``module.exports``. The wasm is gitignored, so the tests skip when
+it has not been built (``rust/sylphd-wasm/build.sh``).
 """
 
 from __future__ import annotations
@@ -26,15 +35,22 @@ from sylphd import per_contig, per_contig_client
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTIGS_JS = ROOT / "web" / "contigs.js"
+WASM = ROOT / "web" / "wasm" / "sylph_sketch.js"
+RENDER_CHECK = ROOT / "rust" / "sylphd-wasm" / "tests" / "render_check.mjs"
+GOLDEN = ROOT / "rust" / "sylphd-core" / "tests" / "data"
 
 
 @pytest.fixture(autouse=True)
-def _require_node() -> None:
+def _require_node_and_wasm() -> None:
     if shutil.which("node") is None:
         (pytest.fail if os.environ.get("CI") else pytest.skip)("node is not installed")
+    if not WASM.exists():
+        pytest.skip("web/wasm is not built (run rust/sylphd-wasm/build.sh)")
 
 
 FIELDS = ("gtdb_taxonomy", "ncbi_organism_name", "checkm2_completeness", "tax_host")
+DATABASE = {"name": "fixture.syldb", "genomes": 10, "c": 200, "k": 31}
+THRESHOLDS = {"species": 95.0, "imprecise_below": 85.0}
 
 
 def _hit(rank: int, ani: float, *, accession: str | None, taxon: str | None, mixed: bool = False) -> dict:
@@ -63,6 +79,7 @@ def _hit(rank: int, ani: float, *, accession: str | None, taxon: str | None, mix
 
 RECORDS = [
     {
+        "name": "contig1",
         "id": "contig1",
         "index": 1,
         "length": 1954431,
@@ -79,6 +96,7 @@ RECORDS = [
         "consensus": {"rank": "family", "taxon": "Enterobacteriaceae", "n_close": 2, "species": ["Escherichia coli", "Escherichia sp002"]},
     },
     {
+        "name": "contig2",
         "id": "contig2",
         "index": 2,
         "length": 40000,
@@ -92,6 +110,7 @@ RECORDS = [
         "consensus": {"rank": None, "taxon": None, "n_close": 2, "species": ["Lambda", "other"], "mixed_sources": True},
     },
     {
+        "name": "contig7",
         "id": "contig7",
         "index": 3,
         "length": 2500,
@@ -105,6 +124,7 @@ RECORDS = [
         "consensus": None,
     },
     {
+        "name": "contig8",
         "id": "contig8",
         "index": 4,
         "length": 18000,
@@ -119,6 +139,7 @@ RECORDS = [
         "consensus": None,
     },
     {
+        "name": "contig9",
         "id": "contig9",
         "index": 5,
         "length": 30000,
@@ -134,31 +155,34 @@ RECORDS = [
 ]
 
 
-NODE = r"""
-const F = require(process.argv[1]);
-const payload = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-console.log(JSON.stringify({
-  tsv: F.tsv(payload.records, payload.fields),
-  doc: F.document({
-    records: payload.records,
-    summaries: payload.summaries,
-    options: payload.options,
-    database: payload.database,
-    file: payload.file,
-    totals: payload.totals,
-    skippedShort: payload.skippedShort,
-    skippedFewKmers: payload.skippedFewKmers,
-    notClassified: payload.notClassified,
-  }),
-}));
-"""
+def batch_document(records: list[dict], elapsed_ms: float) -> dict:
+    """One ``POST /contigs`` response, built by the server's own helpers."""
+    return {
+        "api_version": 1,
+        "params": {"top": 2, "min_ani": 80.0, "consensus_ratio": 1.5, "consensus_z": 2.0, "fields": list(FIELDS)},
+        "table": per_contig.contigs_table(records, FIELDS),
+        "contigs": per_contig.contigs_map(records),
+        "summary": per_contig.summarize(records),
+        "caveats": per_contig.caveats(records),
+        "database": DATABASE,
+        "thresholds": THRESHOLDS,
+        "elapsed_ms": elapsed_ms,
+    }
 
 
-def test_tsv_and_json_match_the_cli() -> None:
-    # Only contigs that were sent have records (the browser does not keep the
-    # skipped ones); the CLI's table is compared on exactly those rows.
+def run_wasm(payload: dict) -> dict:
+    done = subprocess.run(
+        ["node", str(RENDER_CHECK)],
+        input=json.dumps(payload), capture_output=True, text=True, check=True, cwd=ROOT,
+    )
+    return json.loads(done.stdout)
+
+
+def test_wasm_merge_and_tsv_match_the_cli() -> None:
+    # Only contigs that were sent have records: records skipped for min_length
+    # or too few k-mers never become documents, they are counts in the options.
     classified = [record for record in RECORDS if record["status"] in {"ok", "no_hit"} and "reason" not in record]
-    summaries = [per_contig.summarize(classified)]
+    batch = batch_document(classified, 12.5)
     options = per_contig_client.PerContigOptions(
         top=2,
         min_ani=80.0,
@@ -167,50 +191,117 @@ def test_tsv_and_json_match_the_cli() -> None:
         consensus_ratio=1.5,
         consensus_z=2.0,
     )
-    database = {"name": "fixture.syldb", "genomes": 10, "c": 200, "k": 31}
     skipped_short = per_contig_client.Skipped(contigs=1, bp=2500)
     skipped_few_kmers = per_contig_client.Skipped(contigs=1, bp=18000)
-    run = per_contig_client.PerContigRun(
+    reference = per_contig_client.PerContigRun(
         classified,
-        summaries=summaries,
+        summaries=[batch["summary"]],
         options=options,
         params=per_contig.QUERY_PARAMS,
-        database=database,
+        database=DATABASE,
         skipped_short=skipped_short,
         skipped_few_kmers=skipped_few_kmers,
     )
     expected_tsv = io.StringIO()
-    run.write_tsv(expected_tsv)
+    reference.write_tsv(expected_tsv)
+    expected_summary = io.StringIO()
+    reference.print_summary(expected_summary)
 
-    totals = {"contigs": len(RECORDS), "bp": sum(record["length"] for record in RECORDS)}
-    payload = {
-        "records": classified,
-        "summaries": summaries,
-        "fields": list(FIELDS),
+    got = run_wasm({
+        "batches": [batch],
         "options": {
-            "top": options.top,
-            "min_ani": options.min_ani,
-            "minLength": options.min_length,
-            "consensus_ratio": options.consensus_ratio,
-            "consensus_z": options.consensus_z,
+            "skipped_short": {"contigs": 1, "bp": 2500},
+            "skipped_few_kmers": {"contigs": 1, "bp": 18000},
+            "min_contig_length": 3000,
         },
-        "database": database,
-        "file": "mock.fa",
-        "totals": totals,
-        "skippedShort": {"contigs": skipped_short.contigs, "bp": skipped_short.bp},
-        "skippedFewKmers": {"contigs": skipped_few_kmers.contigs, "bp": skipped_few_kmers.bp},
-    }
-    done = subprocess.run(
-        ["node", "-e", NODE, str(CONTIGS_JS)],
-        input=json.dumps(payload), capture_output=True, text=True, check=True, cwd=ROOT,
-    )
-    got = json.loads(done.stdout)
+    })["merged"]
+    doc = got["doc"]
 
+    # The per-contig TSV and the two stderr summary lines are byte-identical.
     assert got["tsv"] == expected_tsv.getvalue()
-    # The whole JSON document, including the two skipped-count objects.
-    assert got["doc"] == run.document("mock.fa")
-    assert got["doc"]["summary"]["contigs"] == totals["contigs"]
-    assert got["doc"]["summary"]["bp"] == totals["bp"]
+    assert got["summary"] == expected_summary.getvalue()
+
+    # Counters, bucketed skips and the (top-5) consensus breakdown match the CLI.
+    summary = doc["summary"]
+    for key, value in reference.summary().items():
+        assert summary[key] == value, key
+    assert "not_classified" not in summary
+
+    # One flat table, the union of the batch tables, with the requested fields.
+    assert doc["table"] == per_contig.contigs_table(classified, FIELDS)
+    assert doc["contigs"] == per_contig.contigs_map(classified)
+    assert list(doc["contigs"]) == ["contig1", "contig2", "contig9"]
+    assert doc["caveats"] == reference.caveats()
+    assert doc["params"] == batch["params"]
+    assert doc["database"] == DATABASE
+    assert doc["thresholds"] == THRESHOLDS
+    assert doc["api_version"] == 1
+
+
+def test_skipped_records_have_no_rows_and_no_contig_entries() -> None:
+    classified = [record for record in RECORDS if record["status"] == "ok"]
+    got = run_wasm({
+        "batches": [batch_document(classified, 1.0)],
+        "options": {"fields": list(FIELDS), "min_contig_length": 3000},
+    })["merged"]
+    lines = got["tsv"].splitlines()
+    columns = list(per_contig_client.COLUMNS) + list(FIELDS)
+    assert lines[0].split("\t") == columns
+    assert [line.split("\t")[0] for line in lines[1:]] == ["contig1", "contig1", "contig2"]
+    assert "contig7" not in got["tsv"]
+    assert "contig8" not in got["tsv"]
+    assert set(got["doc"]["contigs"]) == {"contig1", "contig2"}
+
+
+def test_browser_limit_is_an_extra_summary_field() -> None:
+    """The browser's 100-contig cap is reported separately, not as a CLI bucket."""
+    got = run_wasm({
+        "batches": [],
+        "options": {
+            "fields": ["gtdb_taxonomy"],
+            "min_contig_length": 20000,
+            "skipped_short": {"contigs": 3, "bp": 30000},
+            "skipped_few_kmers": {"contigs": 7, "bp": 20000},
+            "not_classified": {"contigs": 140, "bp": 3500000, "limit": 100},
+        },
+    })["merged"]
+    doc = got["doc"]
+    assert doc["summary"]["contigs"] == 150
+    assert doc["summary"]["bp"] == 3_550_000
+    assert doc["summary"]["queried_contigs"] == 0
+    assert doc["summary"]["not_classified"] == {"contigs": 140, "bp": 3_500_000, "limit": 100}
+    assert doc["summary"]["skipped_short"] == {"contigs": 3, "bp": 30_000}
+    assert doc["summary"]["skipped_few_kmers"] == {"contigs": 7, "bp": 20_000}
+    assert doc["table"]["columns"] == [*per_contig_client.COLUMNS, "gtdb_taxonomy"]
+    assert doc["table"]["data"] == []
+    # With no batch, the run document still has the merge options' params/database.
+    assert doc["params"] == {}
+    assert doc["database"] == {}
+    assert got["summary"].splitlines()[0].startswith("per-contig: 0 of 150 contig(s), 0 bp queried;")
+
+
+def test_wasm_renderer_exports_match_the_python_goldens() -> None:
+    """Profile/assembly/info exports through the JS glue, against the goldens."""
+    profile_case = json.loads((GOLDEN / "profile_golden.json").read_text())["cases"][0]
+    assembly_case = json.loads((GOLDEN / "assembly_golden.json").read_text())["cases"][0]
+    info_case = json.loads((GOLDEN / "info_golden.json").read_text())["cases"][0]
+
+    got = run_wasm({
+        "profile": profile_case["document"],
+        "assembly": assembly_case["document"],
+        "info": info_case["info"],
+        "messages": info_case["messages"],
+    })
+
+    assert got["supported_api_version"] == 1
+    assert got["api_version_1"] == "ok"
+    assert "server API version 2, this client supports 1: update sylphd" in got["api_version_2"]["error"]
+
+    assert got["profile"]["tsv"] == profile_case["expected_tsv"]
+    assert got["assembly"]["tsv"] == assembly_case["expected_tsv"]
+    assert got["assembly"]["summary"] == assembly_case["expected_summary"]
+    assert got["assembly"]["stderr"] == assembly_case["expected_stderr"]
+    assert got["info"] == info_case["expected_text"]
 
 
 NODE_CHUNK = r"""
@@ -231,46 +322,3 @@ def test_the_web_batches_by_max_contigs_and_keeps_its_own_cap() -> None:
     )
     result = json.loads(done.stdout)
     assert result == {"configured": 2, "default": 4096, "cap": 100}
-
-
-def test_skipped_records_have_no_tsv_rows() -> None:
-    """A skipped record is a count, not a row (the CLI is changing the same way)."""
-    classified = [record for record in RECORDS if record["status"] == "ok"]
-    node = r"""
-    const F = require(process.argv[1]);
-    const records = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-    process.stdout.write(F.tsv(records, []));
-    """
-    done = subprocess.run(
-        ["node", "-e", node, str(CONTIGS_JS)],
-        input=json.dumps(classified), capture_output=True, text=True, check=True, cwd=ROOT,
-    )
-    lines = done.stdout.splitlines()
-    assert lines[0].split("\t") == list(__import__("sylphd.per_contig_client", fromlist=["COLUMNS"]).COLUMNS)
-    assert [line.split("\t")[0] for line in lines[1:]] == ["contig1", "contig1", "contig2"]
-    assert "contig7" not in done.stdout
-    assert "contig8" not in done.stdout
-
-
-def test_browser_limit_is_an_extra_summary_field() -> None:
-    """The browser's 100-contig cap is reported separately, not as a CLI bucket."""
-    node = r"""
-    const F = require(process.argv[1]);
-    const options = { top: 1, min_ani: 80, minLength: 20000, consensus_ratio: 1.5, consensus_z: 2 };
-    const summary = F.document({
-      records: [], summaries: [], options, database: {},
-      file: 'x.fa', totals: { contigs: 250, bp: 5_000_000 },
-      skippedShort: { contigs: 3, bp: 30_000 },
-      skippedFewKmers: { contigs: 7, bp: 20_000 },
-      notClassified: { contigs: 140, bp: 3_500_000, limit: 100 },
-    }).summary;
-    console.log(JSON.stringify(summary));
-    """
-    done = subprocess.run(
-        ["node", "-e", node, str(CONTIGS_JS)],
-        capture_output=True, text=True, check=True, cwd=ROOT,
-    )
-    summary = json.loads(done.stdout)
-    assert summary["not_classified"] == {"contigs": 140, "bp": 3_500_000, "limit": 100}
-    assert summary["skipped_short"] == {"contigs": 3, "bp": 30_000}
-    assert summary["skipped_few_kmers"] == {"contigs": 7, "bp": 20_000}

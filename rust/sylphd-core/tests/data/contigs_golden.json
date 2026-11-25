@@ -1,0 +1,612 @@
+{
+  "batches": [
+    {
+      "api_version": 1,
+      "params": {
+        "top": 2,
+        "min_ani": 80.0,
+        "consensus_ratio": 1.5,
+        "consensus_z": 2.0,
+        "fields": [
+          "gtdb_taxonomy",
+          "ncbi_organism_name",
+          "checkm2_completeness",
+          "tax_host"
+        ]
+      },
+      "table": {
+        "columns": [
+          "contig",
+          "contig_length",
+          "gc",
+          "status",
+          "rank",
+          "ani",
+          "shared_kmers",
+          "contig_kmers",
+          "explained_fraction",
+          "reference_ani",
+          "relation",
+          "shared_rank",
+          "ani_species_level",
+          "accession",
+          "genome_id",
+          "gtdb_species",
+          "taxon",
+          "n_close",
+          "consensus_rank",
+          "consensus_taxon",
+          "gtdb_taxonomy",
+          "ncbi_organism_name",
+          "checkm2_completeness",
+          "tax_host"
+        ],
+        "data": [
+          [
+            "contig1",
+            1954431,
+            50.76,
+            "ok",
+            1,
+            99.12,
+            78,
+            84,
+            0.9286,
+            96.16,
+            "same species",
+            "species",
+            true,
+            "GCA_000005845.2",
+            "GCA_000005845.2",
+            "Escherichia coli",
+            "Escherichia coli",
+            2,
+            "family",
+            "Enterobacteriaceae",
+            "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli",
+            "Escherichia coli K-12",
+            100.0,
+            null
+          ],
+          [
+            "contig1",
+            1954431,
+            50.76,
+            "ok",
+            2,
+            90.5,
+            78,
+            84,
+            0.9286,
+            96.16,
+            "same genus",
+            "genus",
+            false,
+            null,
+            "UHGV-0001",
+            "Escherichia coli",
+            "Escherichia sp002",
+            2,
+            "family",
+            "Enterobacteriaceae",
+            "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli",
+            "Escherichia coli K-12",
+            99.5,
+            null
+          ],
+          [
+            "contig2",
+            40000,
+            44.1,
+            "ok",
+            1,
+            97.0,
+            78,
+            84,
+            0.9286,
+            96.16,
+            "same species",
+            "species",
+            true,
+            null,
+            "UHGV-0001",
+            null,
+            "Lambda",
+            2,
+            null,
+            null,
+            null,
+            null,
+            100.0,
+            null
+          ]
+        ]
+      },
+      "contigs": {
+        "contig1": {
+          "length": 1954431,
+          "gc": 50.76,
+          "sketch_kmers": 8413,
+          "contig_kmers": 8413,
+          "status": "ok",
+          "assignment": {
+            "rank": "species",
+            "taxon": "Escherichia coli",
+            "accession": "GCA_000005845.2",
+            "ani": 99.12
+          },
+          "closest": {
+            "rank": "species",
+            "taxon": "Escherichia coli",
+            "accession": "GCA_000005845.2",
+            "ani": 99.12
+          },
+          "consensus": {
+            "rank": "family",
+            "taxon": "Enterobacteriaceae",
+            "n_close": 2,
+            "species": [
+              "Escherichia coli",
+              "Escherichia sp002"
+            ]
+          }
+        },
+        "contig2": {
+          "length": 40000,
+          "gc": 44.1,
+          "sketch_kmers": 190,
+          "contig_kmers": 185,
+          "status": "ok",
+          "assignment": null,
+          "closest": {
+            "rank": null,
+            "taxon": null,
+            "accession": null,
+            "ani": 97.0,
+            "note": "UHGV_default (viruses): 95 % ANI matches the vOTU convention."
+          },
+          "consensus": {
+            "rank": null,
+            "taxon": null,
+            "n_close": 2,
+            "species": [
+              "Lambda",
+              "other"
+            ],
+            "mixed_sources": true
+          }
+        }
+      },
+      "summary": {
+        "contigs": 2,
+        "bp": 1994431,
+        "queried_contigs": 2,
+        "queried_bp": 1994431,
+        "too_few_kmers_contigs": 0,
+        "too_few_kmers_bp": 0,
+        "no_hit_contigs": 0,
+        "consensus_bp": [
+          {
+            "rank": "family",
+            "taxon": "Enterobacteriaceae",
+            "bp": 1954431,
+            "fraction": 0.9799
+          },
+          {
+            "rank": null,
+            "taxon": "unassigned",
+            "bp": 40000,
+            "fraction": 0.0201
+          }
+        ]
+      },
+      "caveats": [
+        "UHGV_default (viruses): 95 % ANI matches the vOTU convention."
+      ],
+      "database": {
+        "name": "fixture.syldb",
+        "genomes": 10,
+        "c": 200,
+        "k": 31
+      },
+      "thresholds": {
+        "species": 95.0,
+        "imprecise_below": 85.0
+      },
+      "elapsed_ms": 10.3
+    },
+    {
+      "api_version": 1,
+      "params": {
+        "top": 2,
+        "min_ani": 80.0,
+        "consensus_ratio": 1.5,
+        "consensus_z": 2.0,
+        "fields": [
+          "gtdb_taxonomy",
+          "ncbi_organism_name",
+          "checkm2_completeness",
+          "tax_host"
+        ]
+      },
+      "table": {
+        "columns": [
+          "contig",
+          "contig_length",
+          "gc",
+          "status",
+          "rank",
+          "ani",
+          "shared_kmers",
+          "contig_kmers",
+          "explained_fraction",
+          "reference_ani",
+          "relation",
+          "shared_rank",
+          "ani_species_level",
+          "accession",
+          "genome_id",
+          "gtdb_species",
+          "taxon",
+          "n_close",
+          "consensus_rank",
+          "consensus_taxon",
+          "gtdb_taxonomy",
+          "ncbi_organism_name",
+          "checkm2_completeness",
+          "tax_host"
+        ],
+        "data": [
+          [
+            "contig3",
+            30000,
+            55.0,
+            "no_hit",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          [
+            "contig4",
+            50000,
+            48.25,
+            "ok",
+            1,
+            98.5,
+            78,
+            84,
+            0.9286,
+            96.16,
+            "same species",
+            "species",
+            true,
+            null,
+            "UHGV-0001",
+            null,
+            "Lambda",
+            0,
+            "level 5",
+            "Lambda",
+            null,
+            null,
+            100.0,
+            null
+          ]
+        ]
+      },
+      "contigs": {
+        "contig3": {
+          "length": 30000,
+          "gc": 55.0,
+          "sketch_kmers": 150,
+          "contig_kmers": 146,
+          "status": "no_hit",
+          "assignment": null,
+          "closest": null,
+          "consensus": null
+        },
+        "contig4": {
+          "length": 50000,
+          "gc": 48.25,
+          "sketch_kmers": 240,
+          "contig_kmers": 230,
+          "status": "ok",
+          "assignment": {
+            "rank": "level 5",
+            "taxon": "Lambda",
+            "accession": null,
+            "ani": 98.5,
+            "note": "UHGV_default (viruses): 95 % ANI matches the vOTU convention."
+          },
+          "closest": {
+            "rank": "level 5",
+            "taxon": "Lambda",
+            "accession": null,
+            "ani": 98.5,
+            "note": "UHGV_default (viruses): 95 % ANI matches the vOTU convention."
+          },
+          "consensus": {
+            "rank": "level 5",
+            "taxon": "Lambda",
+            "n_close": 0,
+            "species": [
+              "Lambda"
+            ]
+          }
+        }
+      },
+      "summary": {
+        "contigs": 2,
+        "bp": 80000,
+        "queried_contigs": 2,
+        "queried_bp": 80000,
+        "too_few_kmers_contigs": 0,
+        "too_few_kmers_bp": 0,
+        "no_hit_contigs": 1,
+        "consensus_bp": [
+          {
+            "rank": "level 5",
+            "taxon": "Lambda",
+            "bp": 50000,
+            "fraction": 0.625
+          },
+          {
+            "rank": null,
+            "taxon": "unassigned",
+            "bp": 30000,
+            "fraction": 0.375
+          }
+        ]
+      },
+      "caveats": [
+        "UHGV_default (viruses): 95 % ANI matches the vOTU convention."
+      ],
+      "database": {
+        "name": "fixture.syldb",
+        "genomes": 10,
+        "c": 200,
+        "k": 31
+      },
+      "thresholds": {
+        "species": 95.0,
+        "imprecise_below": 85.0
+      },
+      "elapsed_ms": 5.2
+    }
+  ],
+  "merge_options": {
+    "skipped_short": {
+      "contigs": 3,
+      "bp": 2500
+    },
+    "skipped_few_kmers": {
+      "contigs": 2,
+      "bp": 18000
+    },
+    "min_contig_length": 3000
+  },
+  "expected_tsv": "contig\tcontig_length\tgc\tstatus\trank\tani\tshared_kmers\tcontig_kmers\texplained_fraction\treference_ani\trelation\tshared_rank\tani_species_level\taccession\tgenome_id\tgtdb_species\ttaxon\tn_close\tconsensus_rank\tconsensus_taxon\tgtdb_taxonomy\tncbi_organism_name\tcheckm2_completeness\ttax_host\ncontig1\t1954431\t50.76\tok\t1\t99.12\t78\t84\t0.9286\t96.16\tsame species\tspecies\ttrue\tGCA_000005845.2\tGCA_000005845.2\tEscherichia coli\tEscherichia coli\t2\tfamily\tEnterobacteriaceae\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\tEscherichia coli K-12\t100.0\t\ncontig1\t1954431\t50.76\tok\t2\t90.50\t78\t84\t0.9286\t96.16\tsame genus\tgenus\tfalse\t\tUHGV-0001\tEscherichia coli\tEscherichia sp002\t2\tfamily\tEnterobacteriaceae\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\tEscherichia coli K-12\t99.5\t\ncontig2\t40000\t44.10\tok\t1\t97.00\t78\t84\t0.9286\t96.16\tsame species\tspecies\ttrue\t\tUHGV-0001\t\tLambda\t2\t\t\t\t\t100.0\t\ncontig3\t30000\t55.00\tno_hit\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\ncontig4\t50000\t48.25\tok\t1\t98.50\t78\t84\t0.9286\t96.16\tsame species\tspecies\ttrue\t\tUHGV-0001\t\tLambda\t0\tlevel 5\tLambda\t\t\t100.0\t\n",
+  "expected_summary_text": "per-contig: 4 of 9 contig(s), 2,074,431 bp queried; 3 contigs (2.5 kb) below 3000 bp not classified; 2 contigs (18.0 kb) with too few k-mers not classified; 1 without a hit\nbp by consensus: Enterobacteriaceae (family) 1,954,431 bp (94.2 %), unassigned 70,000 bp (3.4 %), Lambda (level 5) 50,000 bp (2.4 %)\nsylphd: warning: UHGV_default (viruses): 95 % ANI matches the vOTU convention.\n",
+  "expected_summary_json": {
+    "contigs": 9,
+    "bp": 2094931,
+    "queried_contigs": 4,
+    "queried_bp": 2074431,
+    "skipped_short": {
+      "contigs": 3,
+      "bp": 2500
+    },
+    "skipped_few_kmers": {
+      "contigs": 2,
+      "bp": 18000
+    },
+    "no_hit_contigs": 1,
+    "min_contig_length": 3000,
+    "consensus_bp": [
+      {
+        "rank": "family",
+        "taxon": "Enterobacteriaceae",
+        "bp": 1954431,
+        "fraction": 0.9422
+      },
+      {
+        "rank": null,
+        "taxon": "unassigned",
+        "bp": 70000,
+        "fraction": 0.0337
+      },
+      {
+        "rank": "level 5",
+        "taxon": "Lambda",
+        "bp": 50000,
+        "fraction": 0.0241
+      }
+    ]
+  },
+  "expected_caveats": [
+    "UHGV_default (viruses): 95 % ANI matches the vOTU convention."
+  ],
+  "many_taxa_parts": [
+    {
+      "contigs": 4,
+      "bp": 40000,
+      "queried_contigs": 4,
+      "queried_bp": 40000,
+      "too_few_kmers_contigs": 0,
+      "too_few_kmers_bp": 0,
+      "no_hit_contigs": 0,
+      "consensus_bp": [
+        {
+          "rank": "species",
+          "taxon": "Beta",
+          "bp": 10000,
+          "fraction": 0.25
+        },
+        {
+          "rank": "species",
+          "taxon": "Alpha",
+          "bp": 10000,
+          "fraction": 0.25
+        },
+        {
+          "rank": "genus",
+          "taxon": "Gamma",
+          "bp": 15000,
+          "fraction": 0.375
+        },
+        {
+          "rank": "family",
+          "taxon": "Delta",
+          "bp": 5000,
+          "fraction": 0.125
+        }
+      ]
+    },
+    {
+      "contigs": 4,
+      "bp": 40000,
+      "queried_contigs": 4,
+      "queried_bp": 40000,
+      "too_few_kmers_contigs": 0,
+      "too_few_kmers_bp": 0,
+      "no_hit_contigs": 0,
+      "consensus_bp": [
+        {
+          "rank": "species",
+          "taxon": "Epsilon",
+          "bp": 10000,
+          "fraction": 0.25
+        },
+        {
+          "rank": "genus",
+          "taxon": "Alpha",
+          "bp": 10000,
+          "fraction": 0.25
+        },
+        {
+          "rank": "species",
+          "taxon": "Zeta",
+          "bp": 12000,
+          "fraction": 0.3
+        },
+        {
+          "rank": "species",
+          "taxon": "Alpha",
+          "bp": 8000,
+          "fraction": 0.2
+        }
+      ]
+    }
+  ],
+  "expected_many_taxa_full": {
+    "contigs": 8,
+    "bp": 80000,
+    "queried_contigs": 8,
+    "queried_bp": 80000,
+    "too_few_kmers_contigs": 0,
+    "too_few_kmers_bp": 0,
+    "no_hit_contigs": 0,
+    "consensus_bp": [
+      {
+        "rank": "species",
+        "taxon": "Alpha",
+        "bp": 18000,
+        "fraction": 0.225
+      },
+      {
+        "rank": "genus",
+        "taxon": "Gamma",
+        "bp": 15000,
+        "fraction": 0.1875
+      },
+      {
+        "rank": "species",
+        "taxon": "Zeta",
+        "bp": 12000,
+        "fraction": 0.15
+      },
+      {
+        "rank": "genus",
+        "taxon": "Alpha",
+        "bp": 10000,
+        "fraction": 0.125
+      },
+      {
+        "rank": "species",
+        "taxon": "Beta",
+        "bp": 10000,
+        "fraction": 0.125
+      },
+      {
+        "rank": "species",
+        "taxon": "Epsilon",
+        "bp": 10000,
+        "fraction": 0.125
+      },
+      {
+        "rank": "family",
+        "taxon": "Delta",
+        "bp": 5000,
+        "fraction": 0.0625
+      }
+    ]
+  },
+  "expected_many_taxa_top5": {
+    "contigs": 8,
+    "bp": 80000,
+    "queried_contigs": 8,
+    "queried_bp": 80000,
+    "too_few_kmers_contigs": 0,
+    "too_few_kmers_bp": 0,
+    "no_hit_contigs": 0,
+    "consensus_bp": [
+      {
+        "rank": "species",
+        "taxon": "Alpha",
+        "bp": 18000,
+        "fraction": 0.225
+      },
+      {
+        "rank": "genus",
+        "taxon": "Gamma",
+        "bp": 15000,
+        "fraction": 0.1875
+      },
+      {
+        "rank": "species",
+        "taxon": "Zeta",
+        "bp": 12000,
+        "fraction": 0.15
+      },
+      {
+        "rank": "genus",
+        "taxon": "Alpha",
+        "bp": 10000,
+        "fraction": 0.125
+      },
+      {
+        "rank": "species",
+        "taxon": "Beta",
+        "bp": 10000,
+        "fraction": 0.125
+      }
+    ]
+  }
+}

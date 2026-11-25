@@ -2,24 +2,17 @@
 // (WebAssembly, in Web Workers), send the sketches to POST /contigs in batches, and show the
 // per-contig classification plus the taxonomic consensus. Plain JS, no dependencies.
 //
-// The transport mirrors src/sylphd/per_contig_client.py (batching by the server's limits and
-// merging the per-request summaries); everything scientific happens on the server. The table and
-// JSON writers reproduce the CLI byte for byte (the columns of `sylphd assembly --per-contig`).
+// Everything scientific happens on the server; batch merging, summary aggregation and TSV
+// rendering live in sylphd-core (WebAssembly) so downloads match `sylphd assembly --per-contig`.
 //
 // All server/user strings are inserted with textContent / text nodes only.
 (() => {
   'use strict';
 
-  /* ---------------------------------------------------------------- format */
-  // Pure writers and summary merging. Also exported through module.exports so
-  // tests/test_web_contigs_download.py can compare them with the Python client.
+  /* ---------------------------------------------------------------- limits */
+  // Client constants and server-limit helpers. Also exported through module.exports
+  // for node tests.
   const Format = (() => {
-    const COLUMNS = [
-      'contig', 'contig_length', 'gc', 'status', 'rank', 'ani', 'shared_kmers', 'contig_kmers',
-      'explained_fraction', 'reference_ani', 'relation', 'shared_rank', 'ani_species_level',
-      'accession', 'genome_id', 'gtdb_species', 'taxon', 'n_close', 'consensus_rank',
-      'consensus_taxon',
-    ];
     // The query settings sent with every /contigs request (per_contig.QUERY_PARAMS).
     const QUERY_PARAMS = {
       no_adjust: true, minimum_ani: 0.0, screen_ani: 0.0, min_contain: 3, min_number_kmers: 10,
@@ -33,275 +26,9 @@
     //: Most contigs the browser classifies per run (the 100 longest sendable ones).
     const MAX_CLASSIFIED = 100;
 
-    // Python's f"{x:.2f}" / round(x, 2) round the exact binary value, ties to
-    // even. toFixed() agrees except on an exact tie, where it rounds up; detect
-    // that case from the exact decimal expansion and truncate to the even digit.
-    function exactTieDigits(x, digits) {
-      const text = Number(x).toFixed(20);
-      const dot = text.indexOf('.');
-      if (dot < 0 || text.length < dot + digits + 2) return null;
-      if (text[dot + 1 + digits] !== '5') return null;
-      if (text.slice(dot + 2 + digits).replace(/0+$/, '') !== '') return null;
-      return { text, dot };
-    }
-    function fixed(x, digits) {
-      const value = Number(x);
-      if (!Number.isFinite(value)) return String(value);
-      const tie = exactTieDigits(value, digits);
-      if (tie) {
-        const last = Number(tie.text[tie.dot + digits]);
-        if (last % 2 === 0) return tie.text.slice(0, tie.dot + digits + 1);
-      }
-      return value.toFixed(digits);
-    }
-    const roundHalfEven = (x, digits) => Number(fixed(x, digits));
-
-    // str(value) of Python for the metadata columns: None -> "", bool -> True/False.
-    function pyStr(value) {
-      if (value == null) return '';
-      if (typeof value === 'boolean') return value ? 'True' : 'False';
-      return String(value);
-    }
-    // Columns the server stores as REAL: JSON.parse turns 100.0 into 100, while
-    // Python's str(100.0) is "100.0".
-    const FLOAT_FIELDS = new Set(['checkm2_completeness', 'checkm2_contamination', 'gc_percentage']);
-    function fieldStr(column, value) {
-      if (value == null) return '';
-      if (typeof value === 'number' && FLOAT_FIELDS.has(column) && Number.isInteger(value)) {
-        return `${value}.0`;
-      }
-      return pyStr(value);
-    }
-
     // A record that took part in the search: status ok or no_hit, without a lost-evidence reason.
-    const isQueried = (record) => (record.status === 'ok' || record.status === 'no_hit') && !isLostEvidence(record);
-
-    function isLostEvidence(record) {
-      if (record.status === 'too_few_kmers') return true;
-      return record.status === 'no_hit' && Object.prototype.hasOwnProperty.call(record, 'reason');
-    }
-
-    function breakdown(bases, queriedBp, top) {
-      const items = [...bases.values()].map((item) => ({
-        rank: item.rank,
-        taxon: item.taxon,
-        bp: item.bp,
-        // Python round(bp / queried_bp, 4)
-        fraction: queriedBp ? roundHalfEven(item.bp / queriedBp, 4) : 0.0,
-      }));
-      items.sort((a, b) => {
-        if (b.bp !== a.bp) return b.bp - a.bp;
-        const at = a.taxon || '', bt = b.taxon || '';
-        if (at !== bt) return at < bt ? -1 : 1;
-        const ar = a.rank || '', br = b.rank || '';
-        if (ar !== br) return ar < br ? -1 : 1;
-        return 0;
-      });
-      return top == null ? items : items.slice(0, top);
-    }
-
-    function summarize(records) {
-      const totalBp = records.reduce((sum, r) => sum + Number(r.length || 0), 0);
-      const lost = records.filter(isLostEvidence);
-      const queried = records.filter(isQueried);
-      const queriedBp = queried.reduce((sum, r) => sum + Number(r.length || 0), 0);
-      const bases = new Map();
-      for (const record of queried) {
-        const consensus = record.consensus || {};
-        const taxon = consensus.taxon;
-        const rank = taxon ? consensus.rank : null;
-        const key = `${rank === null || rank === undefined ? '' : rank}\u0000${taxon || 'unassigned'}`;
-        const cur = bases.get(key);
-        if (cur) cur.bp += Number(record.length || 0);
-        else bases.set(key, { rank: rank == null ? null : rank, taxon: taxon || 'unassigned', bp: Number(record.length || 0) });
-      }
-      return {
-        contigs: records.length,
-        bp: totalBp,
-        queried_contigs: queried.length,
-        queried_bp: queriedBp,
-        too_few_kmers_contigs: lost.length,
-        too_few_kmers_bp: lost.reduce((sum, r) => sum + Number(r.length || 0), 0),
-        no_hit_contigs: queried.filter((r) => !Array.isArray(r.hits) || !r.hits.length).length,
-        consensus_bp: breakdown(bases, queriedBp, null),
-      };
-    }
-
-    const COUNTERS = ['contigs', 'bp', 'queried_contigs', 'queried_bp',
-      'too_few_kmers_contigs', 'too_few_kmers_bp', 'no_hit_contigs'];
-
-    function mergeSummaries(parts) {
-      const totals = Object.fromEntries(COUNTERS.map((key) => [key, 0]));
-      const bases = new Map();
-      for (const part of parts) {
-        for (const key of COUNTERS) totals[key] += Number(part[key] || 0);
-        for (const item of part.consensus_bp || []) {
-          const key = `${item.rank == null ? '' : item.rank}\u0000${item.taxon || 'unassigned'}`;
-          const cur = bases.get(key);
-          if (cur) cur.bp += Number(item.bp || 0);
-          else bases.set(key, { rank: item.rank == null ? null : item.rank, taxon: item.taxon || 'unassigned', bp: Number(item.bp || 0) });
-        }
-      }
-      totals.consensus_bp = breakdown(bases, Number(totals.queried_bp), null);
-      return totals;
-    }
-
-    function finalizeSummary(summary, top = 5) {
-      const bases = new Map();
-      for (const item of summary.consensus_bp || []) {
-        const key = `${item.rank == null ? '' : item.rank}\u0000${item.taxon || 'unassigned'}`;
-        const cur = bases.get(key);
-        if (cur) cur.bp += Number(item.bp || 0);
-        else bases.set(key, { rank: item.rank == null ? null : item.rank, taxon: item.taxon || 'unassigned', bp: Number(item.bp || 0) });
-      }
-      const result = {};
-      for (const key of [...COUNTERS, 'consensus_bp']) result[key] = summary[key];
-      result.consensus_bp = breakdown(bases, Number(summary.queried_bp || 0), top);
-      return result;
-    }
-
-    // The per-request summaries of the sent batches, merged. Records the browser
-    // never sent have no record object at all: their counts travel separately.
-    function mergeRun({ summaries }) {
-      return mergeSummaries(summaries || []);
-    }
-
-    // The CLI's JSON summary, with the two skipped buckets as {contigs, bp}
-    // objects (records that were skipped are no longer listed anywhere) and the
-    // browser-only classification limit, when one applied.
-    function summaryFrom({ records, summaries, minLength, totals, skippedShort, skippedFewKmers, notClassified }) {
-      const merged = mergeRun({ summaries });
-      const seen = totals || {
-        contigs: (records || []).length,
-        bp: (records || []).reduce((sum, r) => sum + Number(r.length || 0), 0),
-      };
-      // The server may itself refuse a kept contig for too few k-mers; those are
-      // in the per-request summaries and belong to the same bucket.
-      const fewKmers = Number((skippedFewKmers && skippedFewKmers.contigs) || 0)
-        + Number(merged.too_few_kmers_contigs || 0);
-      const fewBp = Number((skippedFewKmers && skippedFewKmers.bp) || 0)
-        + Number(merged.too_few_kmers_bp || 0);
-      const summary = {
-        contigs: Number(seen.contigs || 0),
-        bp: Number(seen.bp || 0),
-        queried_contigs: merged.queried_contigs,
-        queried_bp: merged.queried_bp,
-        skipped_short: {
-          contigs: Number((skippedShort && skippedShort.contigs) || 0),
-          bp: Number((skippedShort && skippedShort.bp) || 0),
-        },
-        skipped_few_kmers: { contigs: fewKmers, bp: fewBp },
-        no_hit_contigs: merged.no_hit_contigs,
-        min_contig_length: minLength,
-        consensus_bp: finalizeSummary(merged).consensus_bp,
-      };
-      if (notClassified && notClassified.limit != null) {
-        summary.not_classified = {
-          contigs: Number(notClassified.contigs || 0),
-          bp: Number(notClassified.bp || 0),
-          limit: Number(notClassified.limit),
-        };
-      }
-      return summary;
-    }
-
-    function caveats(records) {
-      const notes = [];
-      for (const record of records) {
-        const summary = record.assignment || record.closest || {};
-        const note = summary.note;
-        if (note && !notes.includes(note)) notes.push(note);
-      }
-      return notes;
-    }
-
-    // PerContigRun.write_tsv().
-    function tsv(records, fields) {
-      const header = [...COLUMNS, ...(fields || [])];
-      let out = `${header.join('\t')}\n`;
-      const empty = new Array(Math.max(0, header.length - 4)).fill('');
-      for (const record of records) {
-        const prefix = [
-          record.id,
-          String(record.length),
-          fixed(record.gc, 2),
-          record.status,
-        ];
-        const hits = Array.isArray(record.hits) ? record.hits : [];
-        if (!hits.length) {
-          out += `${[...prefix, ...empty].join('\t')}\n`;
-          continue;
-        }
-        const consensus = record.consensus || {};
-        for (const hit of hits) {
-          out += [
-            ...prefix,
-            pyStr(hit.rank),
-            fixed(hit.ani, 2),
-            pyStr(hit.shared_kmers),
-            pyStr(hit.contig_kmers),
-            fixed(hit.explained_fraction, 4),
-            fixed(hit.reference_ani, 2),
-            pyStr(hit.relation || ''),
-            pyStr(hit.shared_rank || ''),
-            hit.ani_species_level ? 'true' : 'false',
-            pyStr(hit.accession || ''),
-            pyStr(hit.genome_id || ''),
-            pyStr(hit.gtdb_species || ''),
-            pyStr(hit.taxon || ''),
-            pyStr(consensus.n_close || 0),
-            pyStr(consensus.rank || ''),
-            pyStr(consensus.taxon || ''),
-            ...(fields || []).map((column) => fieldStr(column, hit[column])),
-          ].join('\t') + '\n';
-        }
-      }
-      return out;
-    }
-
-    // PerContigRun.document().
-    function document({ records, summaries, options, database, file, totals, skippedShort, skippedFewKmers, notClassified }) {
-      const db = database || {};
-      return {
-        query: { file, per_contig: true },
-        database: {
-          name: db.name == null ? null : db.name,
-          genomes: db.genomes == null ? null : db.genomes,
-          c: db.c == null ? null : db.c,
-          k: db.k == null ? null : db.k,
-        },
-        params: {
-          top: options.top,
-          min_ani: options.min_ani,
-          min_contig_length: options.minLength,
-          consensus_ratio: options.consensus_ratio,
-          consensus_z: options.consensus_z,
-          ...QUERY_PARAMS,
-        },
-        thresholds: { species: 95, imprecise_below: 85 },
-        summary: summaryFrom({
-          records, summaries, minLength: options.minLength,
-          totals, skippedShort, skippedFewKmers, notClassified,
-        }),
-        contigs: records.map((record) => {
-          const item = {
-            id: record.id,
-            index: record.index,
-            length: record.length,
-            gc: record.gc,
-            status: record.status,
-            sketch_kmers: record.sketch_kmers,
-            contig_kmers: record.contig_kmers,
-          };
-          if (Object.prototype.hasOwnProperty.call(record, 'reason')) item.reason = record.reason;
-          item.assignment = record.assignment == null ? null : record.assignment;
-          item.closest = record.closest == null ? null : record.closest;
-          item.consensus = record.consensus == null ? null : record.consensus;
-          item.hits = record.hits || [];
-          return item;
-        }),
-      };
-    }
+    const isQueried = (record) => (record.status === 'ok' || record.status === 'no_hit')
+      && !Object.prototype.hasOwnProperty.call(record, 'reason');
 
     // How many contig sketches to send per POST /contigs (chunk_size_for).
     function chunkSizeFor(info) {
@@ -319,10 +46,9 @@
     }
 
     return {
-      COLUMNS, QUERY_PARAMS, DEFAULT_MIN_LENGTH, DEFAULT_TOP, DEFAULT_MIN_ANI,
+      QUERY_PARAMS, DEFAULT_MIN_LENGTH, DEFAULT_TOP, DEFAULT_MIN_ANI,
       DEFAULT_CONSENSUS_RATIO, DEFAULT_CONSENSUS_Z, DEFAULT_PARAMS_BUDGET, MAX_CLASSIFIED,
-      fixed, pyStr, isQueried, summarize, mergeSummaries, finalizeSummary, mergeRun, summaryFrom, caveats,
-      tsv, document, chunkSizeFor, paramsBudget,
+      isQueried, chunkSizeFor, paramsBudget,
     };
   })();
 
@@ -843,22 +569,15 @@
   /* -------------------------------------------------------------- downloads */
   const exportAs = (ext) => S.exportName(st.view.label, 'contigs', ext);
 
-  function downloadTsv() {
+  async function downloadTsv() {
     if (!st.view) return;
-    S.download(exportAs('tsv'), Format.tsv(st.view.records, st.view.fields), 'text/tab-separated-values');
+    const wasm = await window.SylphdSketch.loadWasm();
+    S.download(exportAs('tsv'), wasm.render_contigs_tsv(st.view.docJson), 'text/tab-separated-values');
   }
 
   function downloadJson() {
     if (!st.view) return;
-    const doc = Format.document({
-      records: st.view.records, summaries: st.view.summaries,
-      options: st.view.options, database: st.view.info.database, file: st.view.file,
-      totals: st.view.counts.totals,
-      skippedShort: st.view.counts.skippedShort,
-      skippedFewKmers: st.view.counts.skippedFewKmers,
-      notClassified: st.view.counts.notClassified,
-    });
-    S.downloadJson(exportAs('json'), doc);
+    S.downloadJson(exportAs('json'), st.view.doc);
   }
 
   /* ------------------------------------------------------------------- run */
@@ -1046,7 +765,7 @@
     }
   }
 
-  // POST /contigs for one batch; resolves the parsed response.
+  // POST /contigs for one batch; resolves { raw, data } for the raw JSON document.
   async function postContigs(params, items, signal) {
     const body = new FormData();
     body.append('params', JSON.stringify(params));
@@ -1070,40 +789,33 @@
       const retry = parseInt(res.headers.get('Retry-After'), 10);
       throw httpError(res.status, data && data.error, Number.isFinite(retry) ? retry : null, raw);
     }
-    return S.fromContigsDoc(data);
+    if (!data || !data.table || !Array.isArray(data.table.columns) || !Array.isArray(data.table.data)
+      || !data.contigs || typeof data.contigs !== 'object' || Array.isArray(data.contigs)) {
+      throw new Error('Unexpected response from /contigs.');
+    }
+    return { raw, data };
   }
 
-  // Copies the server's answer for a batch into its records.
-  function applyResults(response, items) {
-    const list = response && response.contigs;
-    if (!Array.isArray(list) || list.length !== items.length) {
-      throw new Error('Unexpected response from /contigs: contig count mismatch.');
+  // UI view records built directly from the core's merged ContigsDocument.
+  function recordsFromDoc(doc) {
+    const byContig = new Map();
+    for (const row of S.tableToRows(doc.table)) {
+      if (row.rank == null) continue;
+      const name = String(row.contig);
+      if (!byContig.has(name)) byContig.set(name, []);
+      byContig.get(name).push(row);
     }
-    items.forEach(({ record }, i) => {
-      const result = list[i];
-      if (!result || String(result.name) !== record.id) {
-        throw new Error('Unexpected response from /contigs: contigs are out of order.');
-      }
-      record.hits = Array.isArray(result.hits) ? result.hits : [];
-      record.assignment = result.assignment == null ? null : result.assignment;
-      record.closest = result.closest == null ? null : result.closest;
-      record.consensus = result.consensus == null ? null : result.consensus;
-      if (result.contig_kmers != null) record.contig_kmers = result.contig_kmers;
-      record.status = result.status === 'ok' ? 'ok' : 'no_hit';
-      if (result.status === 'too_few_kmers') record.reason = String(result.reason || 'too few k-mers to score the contig');
-    });
+    let index = 0;
+    return Object.entries(doc.contigs || {}).map(([id, entry]) => Object.assign(
+      { id, index: ++index },
+      entry,
+      { hits: byContig.get(id) || [] },
+    ));
   }
 
   function newRecord(contig) {
-    // Python's round() is half-even; the wasm reports a toFixed() value, which
-    // can differ on an exact .xx5 (and the TSV must match the CLI byte for byte).
-    const gc = contig.length ? Number(Format.fixed((100 * contig.gcCount) / contig.length, 2)) : 0;
     return {
-      id: contig.name, index: contig.index, length: contig.length, gc,
-      status: 'no_hit',
-      sketch_kmers: sketchKmers(contig.sketch),
-      contig_kmers: contig.contigKmers == null ? null : contig.contigKmers,
-      hits: [], assignment: null, closest: null, consensus: null,
+      id: contig.name, index: contig.index, length: contig.length, gc: contig.gc,
     };
   }
 
@@ -1174,7 +886,7 @@
     const skippedFewKmers = { contigs: 0, bp: 0 };
     const keepAll = longestKept(Format.MAX_CLASSIFIED);
     const keepLarge = longestKept(Format.MAX_CLASSIFIED);
-    const summaries = [];
+    const batchJsons = [];
     let toSendTotal = 0;
     let classified = 0;
     let serverMs = 0;
@@ -1256,42 +968,52 @@
       notClassified.bp = Math.max(0, poolTotals.bp - keptBp);
       progressSend();
       for (const items of batches(candidates, limits)) {
-        const response = await postContigs({ ...paramsBase, contigs: items.map((item) => item.spec) }, items, signal);
-        applyResults(response, items);
-        if (response.summary && typeof response.summary === 'object') summaries.push(response.summary);
+        const { raw, data: response } = await postContigs({ ...paramsBase, contigs: items.map((item) => item.spec) }, items, signal);
+        batchJsons.push(raw);
         if (S.isNum(response.elapsed_ms)) serverMs += Number(response.elapsed_ms);
         classified += items.length;
         progressSend();
       }
+      const wasm = await window.SylphdSketch.loadWasm();
+      const mergeOpts = {
+        skipped_short: skippedShort,
+        skipped_few_kmers: skippedFewKmers,
+        min_contig_length: options.minLength,
+        not_classified: notClassified.contigs > 0 ? notClassified : null,
+        fields,
+        params: {
+          top: options.top,
+          min_ani: options.min_ani,
+          consensus_ratio: options.consensus_ratio,
+          consensus_z: options.consensus_z,
+          fields,
+        },
+        database: {
+          name: db.name == null ? null : db.name,
+          genomes: db.genomes == null ? null : db.genomes,
+          c: db.c == null ? null : db.c,
+          k: db.k == null ? null : db.k,
+        },
+      };
+      const docJson = wasm.merge_contigs_run(`[${batchJsons.join(',')}]`, JSON.stringify(mergeOpts));
+      const doc = JSON.parse(docJson);
+      const records = recordsFromDoc(doc);
+      const view = {
+        doc, docJson, records, fields, info, limitedAll,
+        summary: doc.summary,
+        caveats: doc.caveats || [],
+        label: input.file ? input.file.name : 'pasted FASTA',
+        sketchMs: (stats && stats.lifetimeMs) || (performance.now() - t0),
+        searchMs: serverMs,
+        totalMs: performance.now() - t0,
+      };
+      render(view);
     } catch (error) {
       showRunError(error);
       return;
     } finally {
       st.sketchRun = null;
     }
-
-    const records = candidates.map((item) => item.record);
-    const merged = Format.mergeSummaries(summaries);
-    const view = {
-      records, summaries, fields, info, limitedAll,
-      counts: { totals, skippedShort, skippedFewKmers, notClassified },
-      options: {
-        top: options.top, min_ani: options.min_ani, minLength: options.minLength,
-        consensus_ratio: options.consensus_ratio, consensus_z: options.consensus_z,
-      },
-      summary: Format.summaryFrom({
-        records, summaries, minLength: options.minLength,
-        totals, skippedShort, skippedFewKmers, notClassified,
-      }),
-      fullBreakdown: merged.consensus_bp,
-      caveats: Format.caveats(records),
-      label: input.file ? input.file.name : 'pasted FASTA',
-      file: input.file ? input.file.name : 'pasted.fasta',
-      sketchMs: (stats && stats.lifetimeMs) || (performance.now() - t0),
-      searchMs: serverMs,
-      totalMs: performance.now() - t0,
-    };
-    render(view);
   }
 
   function cancel() {

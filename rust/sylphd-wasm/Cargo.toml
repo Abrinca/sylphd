@@ -11,6 +11,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 sylphd-core = { path = "../sylphd-core", default-features = false, features = ["approx-dedup"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 flate2 = { workspace = true }
