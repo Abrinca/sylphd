@@ -71,7 +71,7 @@ def _write_sylphmpa_files(body: dict, directory: Path, prefix: str = "") -> list
 def _write_profile_json(body: dict, path: Path) -> Path:
     samples = body["samples"]
     doc = {
-        "api_version": 1,
+        "api_version": 2,
         "params": {},
         "samples": [{"name": sample["name"]} for sample in samples],
         "table": {"columns": ["Sample_file"], "data": []},

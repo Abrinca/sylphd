@@ -16,7 +16,7 @@ from starlette.requests import Request
 
 from . import per_contig
 from .metadata import MetadataDB
-from .protocol import ProfileParams, ProtocolError, table_columns
+from .protocol import ProfileParams, ProtocolError, sample_stats, table_columns
 from .samples import InputError, check_sample_name, sample_name_from_path
 from .server_errors import RequestError, check_queue
 from .taxonomy import TaxonomyError, parse_taxonomies, resolve_taxonomy_columns
@@ -167,8 +167,11 @@ async def read_upload(
     list[bytes],
     Sequence[str] | None,
     Sequence[str] | None,
+    list[dict[str, int | None]],
 ]:
-    """Parse the form into ``(params, fields, names, payloads, tax_sources, taxprof)``.
+    """Parse the form into ``(params, fields, names, payloads, tax_sources, taxprof, stats)``.
+
+    ``stats`` holds the client-sent ``reads``/``bases`` of every sketch.
 
     Raises the :class:`RequestError` when the request is invalid.
     """
@@ -197,8 +200,12 @@ async def read_upload(
         taxprof = _validate_taxprof(params_data.get("taxprof"), state.metadata, mode)
         sketches = _sketch_parts(form)
         names = _resolve_names(params_data.get("names"), sketches)
+        try:
+            stats = sample_stats(params_data.get("samples"), len(sketches))
+        except ProtocolError as error:
+            raise RequestError(str(error)) from None
         payloads = await _read_payloads(sketches)
-        return params, fields, names, payloads, tax_sources, taxprof
+        return params, fields, names, payloads, tax_sources, taxprof, stats
 
 
 def _validate_fields(

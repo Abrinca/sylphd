@@ -562,7 +562,9 @@
     if (taxprof.length) params.taxprof = taxprof;
     const form = new FormData();
     form.append('sketch', run.sketch, sketchName(run));
-    form.append('params', JSON.stringify(params));
+    // what the browser counted while sketching (unknown for a ready-made .sylsp) rides along
+    const samples = [{ name: run.name, reads: run.stats?.reads ?? null, bases: run.stats?.bases ?? null }];
+    form.append('params', JSON.stringify({ ...params, samples }));
     try {
       const res = await postForm(run, `${S.api}/profile`, form);
       let data = null;

@@ -162,7 +162,7 @@ EXPECTED_CONSENSUS_BP = [
 def batch_document(records: list[dict], elapsed_ms: float) -> dict:
     """One ``POST /contigs`` response, built by the server's own helpers."""
     return {
-        "api_version": 1,
+        "api_version": 2,
         "params": {"top": 2, "min_ani": 80.0, "consensus_ratio": 1.5, "consensus_z": 2.0, "fields": list(FIELDS)},
         "table": per_contig.contigs_table(records, FIELDS),
         "contigs": per_contig.contigs_map(records),
@@ -223,7 +223,7 @@ def test_wasm_merge_and_tsv_match_the_server() -> None:
     assert doc["params"] == batch["params"]
     assert doc["database"] == DATABASE
     assert doc["thresholds"] == THRESHOLDS
-    assert doc["api_version"] == 1
+    assert doc["api_version"] == 2
 
     # The TSV: the header, then one row per hit, the skipped contigs nowhere.
     lines = got["tsv"].splitlines()
@@ -295,8 +295,8 @@ def test_wasm_renderer_exports_match_the_goldens() -> None:
         "assembly": assembly_case["document"],
     })
 
-    assert got["api_version_1"] == "ok"
-    assert "server API version 2 is newer than this client's (1): update sylphd" in got["api_version_2"]["error"]
+    assert got["api_version_current"] == "ok"
+    assert "server API version 3 is newer than this client's (2): update sylphd" in got["api_version_newer"]["error"]
 
     assert got["profile"]["tsv"] == profile_case["expected_tsv"]
     assert got["assembly"]["tsv"] == assembly_case["expected_tsv"]
@@ -348,8 +348,8 @@ def test_the_web_batches_by_the_servers_limits() -> None:
 def test_the_web_checks_the_api_version_from_info_with_the_core() -> None:
     """``loadInfo`` passes ``/info``'s api_version to this export before anything is sketched."""
     got = run_wasm({})
-    assert got["api_version_1"] == "ok"
-    assert "newer than this client's (1): update sylphd" in got["api_version_2"]["error"]
+    assert got["api_version_current"] == "ok"
+    assert "newer than this client's (2): update sylphd" in got["api_version_newer"]["error"]
     missing = subprocess.run(
         ["node", "--input-type=module", "-e",
          ("import {readFileSync} from 'node:fs';"

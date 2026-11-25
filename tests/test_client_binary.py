@@ -178,7 +178,7 @@ def test_info_json(server: Path) -> None:
     result = _run("info", "--json", "--socket", server)
     assert result.returncode == 0, result.stderr
     document = json.loads(result.stdout)
-    assert document["api_version"] == 1
+    assert document["api_version"] == 2
     assert document["database"]["c"] == 200
     assert document["database"]["k"] == 31
     assert document["messages"] == []
@@ -196,7 +196,7 @@ def test_profile_tsv(server: Path) -> None:
     assert result.stderr == ""
     header, *rows = result.stdout.splitlines()
     columns = header.split("\t")
-    assert columns[:16] == [
+    assert columns[:17] == [
         "Sample_file",
         "Genome_file",
         "Taxonomic_abundance",
@@ -213,14 +213,16 @@ def test_profile_tsv(server: Path) -> None:
         "kmers_reassigned",
         "Contig_name",
         "accession",
+        "genome_id",
     ]
     # Then the metadata columns of the loaded database, in its order.
-    assert columns[16] == "gtdb_taxonomy"
+    assert columns[17] == "gtdb_taxonomy"
     assert len(columns) == len(set(columns))
     (row,) = [line.split("\t") for line in rows]
     assert row[:6] == ["clodf13", "GCA_000000001.1_genomic.fna.gz", "100.0000", "100.0000", "100.00", "1.000"]
     assert row[15] == "GCA_000000001.1"
-    assert row[16].startswith("d__Bacteria")
+    assert row[16] == "GCA_000000001.1"
+    assert row[17].startswith("d__Bacteria")
 
 
 def test_profile_json_is_a_document_and_renders_identically(server: Path, tmp_path: Path) -> None:
@@ -230,7 +232,7 @@ def test_profile_json_is_a_document_and_renders_identically(server: Path, tmp_pa
     # --json writes only the document: no summary, no notes on stdout.
     assert saved.stderr == ""
     document = json.loads(output.read_text())
-    assert document["api_version"] == 1
+    assert document["api_version"] == 2
     assert isinstance(document["table"]["data"], list)
     assert [sample["name"] for sample in document["samples"]] == ["clodf13"]
     assert document["table"]["columns"][:3] == [
@@ -245,10 +247,65 @@ def test_profile_json_is_a_document_and_renders_identically(server: Path, tmp_pa
     assert rendered.stdout == tsv.stdout
 
 
+def test_json_samples_carry_sketch_statistics_and_client_counts(server: Path) -> None:
+    """FASTQ input: the client sends reads/bases; the server adds the sketch header's values."""
+    document = json.loads(_run("profile", "--socket", server, K12_R1, "--json").stdout)
+    (sample,) = document["samples"]
+    assert set(sample) == {"name", "kmers", "mean_read_length", "paired", "reads", "bases"}
+    with dnaio.open(K12_R1) as reader:
+        records = [record.sequence for record in reader]
+    assert sample["reads"] == len(records)
+    assert sample["bases"] == sum(len(sequence) for sequence in records)
+    assert sample["paired"] is False
+    assert sample["kmers"] > 0
+    assert sample["mean_read_length"] == pytest.approx(sample["bases"] / sample["reads"])
+
+
+def test_paired_reads_count_a_pair_once(server: Path) -> None:
+    document = json.loads(_run("profile", "--socket", server, "-1", K12_R1, "-2", K12_R2, "--json").stdout)
+    (sample,) = document["samples"]
+    assert sample["paired"] is True
+    with dnaio.open(K12_R1) as reader:
+        pairs = sum(1 for _ in reader)
+    assert sample["reads"] == pairs
+
+
+def test_sylsp_input_has_no_read_counts(server: Path, tmp_path: Path) -> None:
+    with dnaio.open(CLODF13_FASTA) as reader:
+        sequences = [record.sequence for record in reader]
+    sketch_path = tmp_path / "clodf13.sylsp"
+    sketch_path.write_bytes(pysylph.Sketcher(c=200, k=31).sketch_single("clodf13", sequences).to_bytes())
+    document = json.loads(_run("profile", "--socket", server, sketch_path, "--json").stdout)
+    (sample,) = document["samples"]
+    assert sample["reads"] is None and sample["bases"] is None
+    assert sample["kmers"] > 0
+
+
+def test_a_sample_without_hits_is_named_on_stderr(server: Path) -> None:
+    """R1 alone can give no hits: the summary says so, with the sketch's k-mers and the reads."""
+    sketch = pysylph.Sketcher(c=200, k=31).sketch_single("empty", ["ACGT" * 200])
+    path = Path(server).parent / "empty.sylsp"
+    path.write_bytes(sketch.to_bytes())
+    result = _run("profile", "--socket", server, path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.startswith("sylphd: no hits for empty (")
+    assert "k-mers" in result.stderr and "reads" not in result.stderr  # a .sylsp has no read count
+    assert len(result.stderr.splitlines()) == 1
+
+
+def test_fastq_without_hits_reports_kmers_and_reads_on_stderr(server: Path) -> None:
+    """The database holds one other genome, so K12 reads have no hits: the line says how many reads."""
+    result = _run("profile", "--socket", server, K12_R1)
+    assert result.returncode == 0, result.stderr
+    (line,) = result.stderr.splitlines()
+    assert line.startswith("sylphd: no hits for ")
+    assert " k-mers, " in line and line.endswith(" reads)")
+
+
 def test_json_passthrough_stdout(server: Path) -> None:
     """``--json`` without ``-o`` prints the server's document, unchanged."""
     document = json.loads(_run("profile", "--socket", server, CLODF13_FASTA, "--json").stdout)
-    assert document["api_version"] == 1
+    assert document["api_version"] == 2
     assert set(document) >= {"api_version", "params", "samples", "table", "caveats"}
 
 
@@ -307,7 +364,7 @@ def test_fields_and_taxonomy_flags(server: Path, tmp_path: Path) -> None:
     # --fields none keeps the fixed columns only.
     none = _run("profile", "--socket", server, CLODF13_FASTA, "--fields", "none", "--json")
     assert none.returncode == 0, none.stderr
-    assert json.loads(none.stdout)["table"]["columns"][-1] == "accession"
+    assert json.loads(none.stdout)["table"]["columns"][-1] == "genome_id"
 
     # An unknown field is a server-side 400, so a client error (1).
     bad = _run("profile", "--socket", server, CLODF13_FASTA, "--fields", "nope")
@@ -415,7 +472,7 @@ def test_assembly_json_and_render(server: Path, tmp_path: Path) -> None:
     assert saved.returncode == 0, saved.stderr
     assert saved.stderr == ""
     document = json.loads(output.read_text())
-    assert document["api_version"] == 1
+    assert document["api_version"] == 2
     assert document["query"]["input"] == "sketch"
     assert (document["query"]["records"], document["query"]["length"]) == (1, 9957)
     hits = [dict(zip(document["table"]["columns"], values)) for values in document["table"]["data"]]
@@ -499,7 +556,7 @@ def test_per_contig_json_is_the_run_document(server: Path, genome: str, tmp_path
     )
     assert saved.returncode == 0, saved.stderr
     document = json.loads(output.read_text())
-    assert document["api_version"] == 1
+    assert document["api_version"] == 2
     assert document["summary"]["queried_contigs"] == 1
     assert document["summary"]["contigs"] == 4
     assert document["summary"]["skipped_short"] == {"contigs": 2, "bp": 3_500}
@@ -678,7 +735,7 @@ PASSTHROUGH_DOCUMENT = json.dumps(
 )
 
 
-def _info_document(api_version: int = 1) -> dict:
+def _info_document(api_version: int = 2) -> dict:
     return {
         "api_version": api_version,
         "service": "sylphd",
@@ -773,10 +830,10 @@ def test_a_broken_messages_endpoint_is_silent(messages: tuple[int, str]) -> None
 
 
 def test_api_version_mismatch_fails_before_sketching() -> None:
-    with _fake_server(_info_document(api_version=2), PASSTHROUGH_DOCUMENT) as url:
+    with _fake_server(_info_document(api_version=3), PASSTHROUGH_DOCUMENT) as url:
         result = _run("profile", "--url", url, K12_R1)
     assert result.returncode == 1
-    assert "server API version 2 is newer than this client's (1): update sylphd" in result.stderr
+    assert "server API version 3 is newer than this client's (2): update sylphd" in result.stderr
     assert "update sylphd" in result.stderr
     # Nothing was sketched, so the profile response was never requested:
     assert result.stdout == ""
@@ -867,7 +924,7 @@ def test_run_returns_the_document(server: Path) -> None:
     from sylphd import run
 
     document = run("profile", CLODF13_FASTA, "--socket", server)
-    assert document["api_version"] == 1
+    assert document["api_version"] == 2
     assert [sample["name"] for sample in document["samples"]] == ["clodf13"]
     assert document["table"]["columns"][:2] == ["Sample_file", "Genome_file"]
 

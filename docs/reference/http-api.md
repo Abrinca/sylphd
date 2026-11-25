@@ -64,7 +64,7 @@ job, however many contigs it carries.
 
 Reports:
 
-- `service`, `version`, `api_version` (integer, currently `1`: bumped on any change to the response
+- `service`, `version`, `api_version` (integer, currently `2`: bumped on any change to the response
   shape; distinct from the server software `version` and from `metadata.format_version`),
   `pysylph_version`, `python_version`;
 - `database`: `name`, `size`, `sha256` (`null` unless `--hash`), `genomes`, `c`, `k`,
@@ -240,10 +240,11 @@ At most 4096 sketches fit in one request. Non-file form fields such as `params` 
 | `screen_ani` | 0-100 (default `85`) |
 | `no_adjust` | boolean, report the naive ANI |
 | `names` | list with one name per sketch (defaults to the part file names, else `sample-N`) |
-| `fields` | list of metadata columns; omitted means all, `[]` means none; needs a metadata database. Any requested field whose name collides with a fixed column of the response table (`accession`, `Sample_file`, `Lambda_status`, ...) is a `400` |
+| `fields` | list of metadata columns; omitted means all, `[]` means none; needs a metadata database. Any requested field whose name collides with a fixed column of the response table (`accession`, `genome_id`, `Sample_file`, `Lambda_status`, ...) is a `400` |
 | `tax_sources` | list of taxonomy source names: resolve hits against these sources only (default: all of them; an empty list is the same). Unknown names, or a server without sylph-tax sources, are a 400 |
 | `taxprof` | `profile` only: taxonomies to aggregate on the server, from `gtdb`, `ncbi`, `tax` and `tax:<source>` (listed in `/info` `metadata.taxonomies`). Validated against the metadata file's columns and sylph-tax sources (a 400 names what is missing). The response document then carries `taxprof[sample_name][taxonomy]` (see below) |
 | `mode` | optional, must match the endpoint (`query` or `profile`) |
+| `samples` | optional list with one object per sketch, in request order: `{"name": "...", "reads": 1000, "bases": 150000}`. `reads` (a read pair counts once) and `bases` are what the client counted while sketching; each is a non-negative integer or `null`/omitted when unknown (a pre-made `.sylsp` has no read counts). They only come back in the response `samples`; a bad value, another key or a wrong length is a 400 |
 
 Unknown keys are rejected with a 400. The client sketches with `database.c` and `database.k` from
 `GET /info`. A sketch must match `k` exactly and must not be sparser than the database
@@ -260,23 +261,26 @@ pysylph's message, not a generic 500. `POST /query` and `POST /profile` run agai
 The response is a single JSON document covering all samples in request order:
 
 ```json
-{"api_version": 1,
+{"api_version": 2,
  "params": {"minimum_ani": null, "seq_id": null, "estimate_unknown": false,
             "estimate_read_counts": false, "min_number_kmers": 10,
             "min_contain": 7, "screen_ani": 85.0, "no_adjust": false},
- "samples": [{"name": "sample-a"}, {"name": "sample-b"}],
+ "samples": [{"name": "sample-a", "kmers": 25621, "mean_read_length": 150.0, "paired": false,
+              "reads": 1000, "bases": 150000},
+             {"name": "sample-b", "kmers": 31002, "mean_read_length": 148.7, "paired": true,
+              "reads": null, "bases": null}],
  "table": {
    "columns": ["Sample_file", "Genome_file", "Taxonomic_abundance", "Sequence_abundance",
                "Adjusted_ANI", "Eff_cov", "ANI_5-95_percentile", "Eff_lambda",
                "Lambda_5-95_percentile", "Median_cov", "Mean_cov_geq1", "Containment_ind",
                "Naive_ANI", "kmers_reassigned", "Contig_name", "Lambda_status",
-               "accession", "gtdb_taxonomy"],
+               "accession", "genome_id", "gtdb_taxonomy"],
    "data": [
      ["sample-a", "GCA_000005845.2_genomic.fna.gz", 100.0, 100.0,
       99.79, 1.187, [99.64, 99.95], 0.36,
       [0.34, 0.38], 1.0, 1.187, [6208, 21899],
       96.02, 0, "NC_000913.3", "OK",
-      "GCA_000005845.2", "d__Bacteria;..."]
+      "GCA_000005845.2", "GCA_000005845.2", "d__Bacteria;..."]
    ]
  },
  "caveats": []}
@@ -284,8 +288,11 @@ The response is a single JSON document covering all samples in request order:
 
 - **`api_version`** is the integer wire-protocol version (same as in `GET /info`).
 - **`params`** echoes the **effective** profiling parameters, defaults included, as provenance.
-- **`samples`** has one `{"name": ...}` entry per sample sent, in request order, so a sample
-  without hits is distinguishable from one that was never sent.
+- **`samples`** has one entry per sample sent, in request order, so a sample without hits is
+  distinguishable from one that was never sent: `name`; `kmers` (distinct k-mers of the uploaded
+  sketch), `mean_read_length` and `paired` (from the sketch header); and `reads` and `bases`, the
+  values the client sent in `params.samples` (`null` when it did not). An entry with no hits and few
+  k-mers explains an empty result, e.g. one mate of a pair alone.
 - **`table`** holds every hit of every sample in one standard table (`{"columns": [...], "data": [[...], ...]}`,
   pandas' `orient="split"` layout without an index; `pd.DataFrame(**doc["table"])` loads it directly).
   Every row carries its `Sample_file`. `columns` is the final ordered header: `Taxonomic_abundance`,
@@ -293,9 +300,9 @@ The response is a single JSON document covering all samples in request order:
   `estimate_read_counts`, the actual column name is `True_cov` (not `Eff_cov`); with
   `estimate_read_counts`, `Sequence_abundance` holds the estimated number of reads per genome
   (a rounded float) instead of a relative abundance. `Lambda_status` appears as a separate column
-  immediately before `accession`, keeping `Eff_lambda` numeric (or `null` when not estimable): this
+  immediately before `accession`, which `genome_id` follows (the stable identifier of the database genome: the accession of a GTDB hit, the taxon key of a hit a non-GTDB source resolved, else the first word of `Contig_name`, else `Genome_file`), keeping `Eff_lambda` numeric (or `null` when not estimable): this
   is the only column difference between the JSON table and the TSV header. Selected metadata columns
-  follow `accession` in request or metadata order.
+  follow `genome_id` in request or metadata order.
 - **`caveats`** is a list of distinct species-threshold warning strings for non-GTDB taxonomy
   sources present among the hits (empty for GTDB-only hits or without metadata).
 - Missing or non-finite values are JSON `null` (`Eff_lambda` when `Lambda_status` is `HIGH` or
@@ -429,7 +436,7 @@ carries `tax_lineage`/`tax_source` and is classified from that lineage: `taxonom
 [hit relations](#hit-relations)). A hit without any lineage stays `unknown lineage`.
 
 ```json
-{"api_version": 1,
+{"api_version": 2,
  "query": {"name": "assembly", "records": 1, "length": 6013491,
            "gc": 50.76, "sketch_kmers": 200, "input": "sequence"},
  "database": {"name": "gtdb-r232-c200-dbv2.syl2db", "genomes": 199937,
@@ -609,7 +616,7 @@ The response is a JSON document holding a flat per-hit `table`, per-contig metad
 keyed by contig name in `contigs` (in request order), and a per-request `summary`:
 
 ```json
-{"api_version": 1,
+{"api_version": 2,
  "params": {"top": 1, "min_ani": 80.0, "consensus_ratio": 1.5, "consensus_z": 2.0, "fields": []},
  "table": {
    "columns": ["contig", "contig_length", "gc", "status", "rank", "ani",

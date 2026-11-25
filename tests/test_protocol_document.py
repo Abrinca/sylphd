@@ -18,7 +18,8 @@ def test_the_document_lays_rows_out_in_table_column_order() -> None:
     document = result_document("profile", params, None, ["a", "b", "c"], samples)
     assert document["api_version"] == API_VERSION
     assert document["params"] == params.to_dict()
-    assert document["samples"] == [{"name": "a"}, {"name": "b"}, {"name": "c"}]
+    assert [sample["name"] for sample in document["samples"]] == ["a", "b", "c"]
+    assert document["samples"][0]["reads"] is None  # statistics default to unknown
     assert document["table"]["columns"] == columns
     (data_row,) = document["table"]["data"]
     # a row without True_cov falls back to Eff_cov in that column
@@ -36,3 +37,12 @@ def test_taxprof_is_keyed_by_sample_name() -> None:
     ]
     document = result_document("profile", params, None, ["a", "b"], samples)
     assert document["taxprof"] == {"a": {"gtdb": {"sylphmpa": "x"}}}
+
+
+def test_sample_statistics_are_merged_in_request_order() -> None:
+    info = [
+        {"kmers": 10, "mean_read_length": 150.0, "paired": False, "reads": 5, "bases": 750},
+        {"kmers": 20, "mean_read_length": 100.0, "paired": True, "reads": None, "bases": None},
+    ]
+    document = result_document("query", ProfileParams(), None, ["a", "b"], [], info)
+    assert document["samples"] == [{"name": "a", **info[0]}, {"name": "b", **info[1]}]

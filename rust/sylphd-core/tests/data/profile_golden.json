@@ -3,7 +3,7 @@
     {
       "name": "profile_k12_paired",
       "document": {
-        "api_version": 1,
+        "api_version": 2,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -16,7 +16,12 @@
         },
         "samples": [
           {
-            "name": "k12_paired"
+            "name": "k12_paired",
+            "kmers": 1000,
+            "mean_read_length": 150.0,
+            "paired": true,
+            "reads": null,
+            "bases": null
           }
         ],
         "table": {
@@ -37,7 +42,8 @@
             "kmers_reassigned",
             "Contig_name",
             "Lambda_status",
-            "accession"
+            "accession",
+            "genome_id"
           ],
           "data": [
             [
@@ -66,18 +72,19 @@
               0,
               "NC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence",
               "OK",
-              null
+              null,
+              "NC_007779.1"
             ]
           ]
         },
         "caveats": []
       },
-      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tEff_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\nk12_paired\ttest_files/e.coli-K12.fasta.gz\t100.0000\t100.0000\t98.89\t0.032\t96.80-100.69\t0.032\t0.02-0.06\t1\t1.016\t439/19485\t88.48\t0\tNC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence\t\n"
+      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tEff_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\tgenome_id\nk12_paired\ttest_files/e.coli-K12.fasta.gz\t100.0000\t100.0000\t98.89\t0.032\t96.80-100.69\t0.032\t0.02-0.06\t1\t1.016\t439/19485\t88.48\t0\tNC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence\t\tNC_007779.1\n"
     },
     {
       "name": "query_k12_paired",
       "document": {
-        "api_version": 1,
+        "api_version": 2,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -90,7 +97,12 @@
         },
         "samples": [
           {
-            "name": "k12_paired"
+            "name": "k12_paired",
+            "kmers": 1111,
+            "mean_read_length": 100.5,
+            "paired": false,
+            "reads": 5000,
+            "bases": 750000
           }
         ],
         "table": {
@@ -108,7 +120,8 @@
             "Naive_ANI",
             "Contig_name",
             "Lambda_status",
-            "accession"
+            "accession",
+            "genome_id"
           ],
           "data": [
             [
@@ -134,7 +147,8 @@
               88.48371706561561,
               "NC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence",
               "OK",
-              null
+              null,
+              "NC_007779.1"
             ],
             [
               "k12_paired",
@@ -159,7 +173,8 @@
               88.14729785235428,
               "NZ_CP016182.2 Escherichia coli strain EC590 chromosome, complete genome",
               "OK",
-              null
+              null,
+              "NZ_CP016182.2"
             ],
             [
               "k12_paired",
@@ -184,18 +199,19 @@
               86.72724189939227,
               "NZ_CP017438.1 Escherichia coli O157:H7 strain 2159 chromosome, complete genome",
               "OK",
-              null
+              null,
+              "NZ_CP017438.1"
             ]
           ]
         },
         "caveats": []
       },
-      "expected_tsv": "Sample_file\tGenome_file\tAdjusted_ANI\tEff_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tContig_name\taccession\nk12_paired\ttest_files/e.coli-K12.fasta.gz\t98.89\t0.032\t96.80-100.69\t0.032\t0.02-0.06\t1\t1.016\t439/19485\t88.48\tNC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence\t\nk12_paired\ttest_files/e.coli-EC590.fasta.gz\t98.11\t0.037\t96.22-99.63\t0.037\t0.02-0.07\t1\t1.018\t387/19330\t88.15\tNZ_CP016182.2 Escherichia coli strain EC590 chromosome, complete genome\t\nk12_paired\ttest_files/e.coli-o157.fasta.gz\t97.09\t0.031\t94.99-97.93\t0.031\t0.02-0.06\t1\t1.015\t265/21899\t86.73\tNZ_CP017438.1 Escherichia coli O157:H7 strain 2159 chromosome, complete genome\t\n"
+      "expected_tsv": "Sample_file\tGenome_file\tAdjusted_ANI\tEff_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tContig_name\taccession\tgenome_id\nk12_paired\ttest_files/e.coli-K12.fasta.gz\t98.89\t0.032\t96.80-100.69\t0.032\t0.02-0.06\t1\t1.016\t439/19485\t88.48\tNC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence\t\tNC_007779.1\nk12_paired\ttest_files/e.coli-EC590.fasta.gz\t98.11\t0.037\t96.22-99.63\t0.037\t0.02-0.07\t1\t1.018\t387/19330\t88.15\tNZ_CP016182.2 Escherichia coli strain EC590 chromosome, complete genome\t\tNZ_CP016182.2\nk12_paired\ttest_files/e.coli-o157.fasta.gz\t97.09\t0.031\t94.99-97.93\t0.031\t0.02-0.06\t1\t1.015\t265/21899\t86.73\tNZ_CP017438.1 Escherichia coli O157:H7 strain 2159 chromosome, complete genome\t\tNZ_CP017438.1\n"
     },
     {
       "name": "profile_k12_estimate_unknown",
       "document": {
-        "api_version": 1,
+        "api_version": 2,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -208,7 +224,12 @@
         },
         "samples": [
           {
-            "name": "k12_paired"
+            "name": "k12_paired",
+            "kmers": 1222,
+            "mean_read_length": 150.0,
+            "paired": true,
+            "reads": 5000,
+            "bases": 750000
           }
         ],
         "table": {
@@ -229,7 +250,8 @@
             "kmers_reassigned",
             "Contig_name",
             "Lambda_status",
-            "accession"
+            "accession",
+            "genome_id"
           ],
           "data": [
             [
@@ -258,18 +280,19 @@
               0,
               "NC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence",
               "OK",
-              null
+              null,
+              "NC_007779.1"
             ]
           ]
         },
         "caveats": []
       },
-      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tTrue_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\nk12_paired\ttest_files/e.coli-K12.fasta.gz\t100.0000\t87.7690\t98.89\t0.066\t96.80-100.69\t0.032\t0.02-0.06\t1\t1.016\t439/19485\t88.48\t0\tNC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence\t\n"
+      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tTrue_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\tgenome_id\nk12_paired\ttest_files/e.coli-K12.fasta.gz\t100.0000\t87.7690\t98.89\t0.066\t96.80-100.69\t0.032\t0.02-0.06\t1\t1.016\t439/19485\t88.48\t0\tNC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence\t\tNC_007779.1\n"
     },
     {
       "name": "profile_k12_read_counts",
       "document": {
-        "api_version": 1,
+        "api_version": 2,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -282,7 +305,12 @@
         },
         "samples": [
           {
-            "name": "k12_paired"
+            "name": "k12_paired",
+            "kmers": 1333,
+            "mean_read_length": 100.5,
+            "paired": false,
+            "reads": null,
+            "bases": null
           }
         ],
         "table": {
@@ -303,7 +331,8 @@
             "kmers_reassigned",
             "Contig_name",
             "Lambda_status",
-            "accession"
+            "accession",
+            "genome_id"
           ],
           "data": [
             [
@@ -332,18 +361,19 @@
               0,
               "NC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence",
               "OK",
-              null
+              null,
+              "NC_007779.1"
             ]
           ]
         },
         "caveats": []
       },
-      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tTrue_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\nk12_paired\ttest_files/e.coli-K12.fasta.gz\t100.0000\t3859.0000\t98.89\t0.066\t96.80-100.69\t0.032\t0.02-0.06\t1\t1.016\t439/19485\t88.48\t0\tNC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence\t\n"
+      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tTrue_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\tgenome_id\nk12_paired\ttest_files/e.coli-K12.fasta.gz\t100.0000\t3859.0000\t98.89\t0.066\t96.80-100.69\t0.032\t0.02-0.06\t1\t1.016\t439/19485\t88.48\t0\tNC_007779.1 Escherichia coli str. K-12 substr. W3110, complete sequence\t\tNC_007779.1\n"
     },
     {
       "name": "profile_empty_hits",
       "document": {
-        "api_version": 1,
+        "api_version": 2,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -356,7 +386,12 @@
         },
         "samples": [
           {
-            "name": "k12_single"
+            "name": "k12_single",
+            "kmers": 1444,
+            "mean_read_length": 150.0,
+            "paired": true,
+            "reads": 5000,
+            "bases": 750000
           }
         ],
         "table": {
@@ -377,18 +412,19 @@
             "kmers_reassigned",
             "Contig_name",
             "Lambda_status",
-            "accession"
+            "accession",
+            "genome_id"
           ],
           "data": []
         },
         "caveats": []
       },
-      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tEff_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\n"
+      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tEff_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\tgenome_id\n"
     },
     {
       "name": "query_empty_hits",
       "document": {
-        "api_version": 1,
+        "api_version": 2,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -401,7 +437,12 @@
         },
         "samples": [
           {
-            "name": "k12_single"
+            "name": "k12_single",
+            "kmers": 1555,
+            "mean_read_length": 100.5,
+            "paired": false,
+            "reads": 5000,
+            "bases": 750000
           }
         ],
         "table": {
@@ -419,18 +460,19 @@
             "Naive_ANI",
             "Contig_name",
             "Lambda_status",
-            "accession"
+            "accession",
+            "genome_id"
           ],
           "data": []
         },
         "caveats": []
       },
-      "expected_tsv": "Sample_file\tGenome_file\tAdjusted_ANI\tEff_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tContig_name\taccession\n"
+      "expected_tsv": "Sample_file\tGenome_file\tAdjusted_ANI\tEff_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tContig_name\taccession\tgenome_id\n"
     },
     {
       "name": "profile_high_low_inf_nan_metadata",
       "document": {
-        "api_version": 1,
+        "api_version": 2,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -443,10 +485,20 @@
         },
         "samples": [
           {
-            "name": "deep"
+            "name": "deep",
+            "kmers": 1666,
+            "mean_read_length": 150.0,
+            "paired": true,
+            "reads": null,
+            "bases": null
           },
           {
-            "name": "contig_like"
+            "name": "contig_like",
+            "kmers": 1777,
+            "mean_read_length": 100.5,
+            "paired": false,
+            "reads": 5001,
+            "bases": 750001
           }
         ],
         "table": {
@@ -468,6 +520,7 @@
             "Contig_name",
             "Lambda_status",
             "accession",
+            "genome_id",
             "gtdb_taxonomy",
             "gtdb_representative",
             "gtdb_genome_representative",
@@ -520,6 +573,7 @@
               "",
               "HIGH",
               "GCA_000000001.1",
+              "GCA_000000001.1",
               "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli",
               1,
               null,
@@ -571,6 +625,7 @@
               "",
               "LOW",
               "GCA_000000001.1",
+              "GCA_000000001.1",
               "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli",
               1,
               null,
@@ -605,12 +660,12 @@
         },
         "caveats": []
       },
-      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tTrue_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\tgtdb_taxonomy\tgtdb_representative\tgtdb_genome_representative\tgtdb_type_species_of_genus\tgtdb_type_designation_ncbi_taxa\tncbi_taxid\tncbi_species_taxid\tncbi_taxonomy\tncbi_taxonomy_unfiltered\tncbi_organism_name\tncbi_strain_identifiers\tncbi_isolate\tncbi_genome_category\tncbi_assembly_level\tncbi_refseq_category\tncbi_type_material_designation\tncbi_biosample\tncbi_bioproject\tcheckm2_completeness\tcheckm2_contamination\tgenome_size\tgc_percentage\tcontig_count\tn50_contigs\tmimag_high_quality\ttax_source\ttax_key\ttax_lineage\ttax_host\ndeep\tGCA_000000001.1_genomic.fna.gz\t100.0000\t100.0000\t100.00\t32.860\tNA-NA\tHIGH\tNA-NA\t23\t22.227\t44/44\t100.00\t0\t\tGCA_000000001.1\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\t1\t\t0\t\t562\t\t\t\tEscherichia coli K-12\t\t\t\t\t\t\t\t\t100.0\t0.25\t9957\t54.4\t\t\t\tGTDB_r232\tGCA_000000001.1\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\t\ncontig_like\tGCA_000000001.1_genomic.fna.gz\tNaN\tNaN\t100.00\tinf\tNA-NA\tLOW\tNA-NA\t1\t1.000\t44/44\t100.00\t0\t\tGCA_000000001.1\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\t1\t\t0\t\t562\t\t\t\tEscherichia coli K-12\t\t\t\t\t\t\t\t\t100.0\t0.25\t9957\t54.4\t\t\t\tGTDB_r232\tGCA_000000001.1\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\t\n"
+      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tTrue_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\tgenome_id\tgtdb_taxonomy\tgtdb_representative\tgtdb_genome_representative\tgtdb_type_species_of_genus\tgtdb_type_designation_ncbi_taxa\tncbi_taxid\tncbi_species_taxid\tncbi_taxonomy\tncbi_taxonomy_unfiltered\tncbi_organism_name\tncbi_strain_identifiers\tncbi_isolate\tncbi_genome_category\tncbi_assembly_level\tncbi_refseq_category\tncbi_type_material_designation\tncbi_biosample\tncbi_bioproject\tcheckm2_completeness\tcheckm2_contamination\tgenome_size\tgc_percentage\tcontig_count\tn50_contigs\tmimag_high_quality\ttax_source\ttax_key\ttax_lineage\ttax_host\ndeep\tGCA_000000001.1_genomic.fna.gz\t100.0000\t100.0000\t100.00\t32.860\tNA-NA\tHIGH\tNA-NA\t23\t22.227\t44/44\t100.00\t0\t\tGCA_000000001.1\tGCA_000000001.1\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\t1\t\t0\t\t562\t\t\t\tEscherichia coli K-12\t\t\t\t\t\t\t\t\t100.0\t0.25\t9957\t54.4\t\t\t\tGTDB_r232\tGCA_000000001.1\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\t\ncontig_like\tGCA_000000001.1_genomic.fna.gz\tNaN\tNaN\t100.00\tinf\tNA-NA\tLOW\tNA-NA\t1\t1.000\t44/44\t100.00\t0\t\tGCA_000000001.1\tGCA_000000001.1\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\t1\t\t0\t\t562\t\t\t\tEscherichia coli K-12\t\t\t\t\t\t\t\t\t100.0\t0.25\t9957\t54.4\t\t\t\tGTDB_r232\tGCA_000000001.1\td__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli\t\n"
     },
     {
       "name": "profile_synthetic_edge_cases",
       "document": {
-        "api_version": 1,
+        "api_version": 2,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -623,10 +678,20 @@
         },
         "samples": [
           {
-            "name": "s1"
+            "name": "s1",
+            "kmers": 1777,
+            "mean_read_length": 100.5,
+            "paired": false,
+            "reads": 5000,
+            "bases": 750000
           },
           {
-            "name": "s2"
+            "name": "s2",
+            "kmers": 1888,
+            "mean_read_length": 150.0,
+            "paired": true,
+            "reads": 5001,
+            "bases": 750001
           }
         ],
         "table": {
@@ -648,6 +713,7 @@
             "Contig_name",
             "Lambda_status",
             "accession",
+            "genome_id",
             "gtdb_representative",
             "checkm2_completeness",
             "ncbi_taxid"
@@ -680,6 +746,7 @@
               "NC_000913.3",
               "OK",
               "GCF_000005845.2",
+              "GCF_000005845.2",
               true,
               100.0,
               511145
@@ -704,6 +771,7 @@
               17,
               "contig1",
               "HIGH",
+              "GCA_000000001.1",
               "GCA_000000001.1",
               false,
               99.5,
@@ -730,6 +798,7 @@
               "contig2",
               "LOW",
               null,
+              "contig2",
               null,
               null,
               0
@@ -758,6 +827,7 @@
               "contig3",
               "OK",
               "GCA_000000003.1",
+              "GCA_000000003.1",
               true,
               0.0,
               42
@@ -768,7 +838,7 @@
           "UHGV_default (viruses): 95 % ANI matches the vOTU convention"
         ]
       },
-      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tTrue_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\tgtdb_representative\tcheckm2_completeness\tncbi_taxid\ns1\tGCF_000005845.2_genomic.fna.gz\t100.0000\t42.1255\t100.00\t0.360\t99.64-99.95\t0.360\t0.34-0.38\t1\t1.188\t6208/21899\t100.40\t0\tNC_000913.3\tGCF_000005845.2\tTrue\t100.0\t511145\ns2\tGCA_000000001.1_genomic.fna.gz\tNaN\tNaN\t95.12\tinf\tNA-NA\tHIGH\tNA-NA\t30\t31.250\t44/44\t95.12\t17\tcontig1\tGCA_000000001.1\tFalse\t99.5\t\ns2\tGCA_000000002.1_genomic.fna.gz\t0.0000\t0.0000\t95.14\t1.000\tNA-NA\tLOW\tNA-NA\t1\t1.000\t10/100\t90.00\t3\tcontig2\t\t\t\t0\ns2\tGCA_000000003.1_genomic.fna.gz\t12.3456\t98.7655\t99.79\t2.500\t98.00-100.00\t\tNA-NA\t2\t2.500\t50/100\t99.11\t0\tcontig3\tGCA_000000003.1\tTrue\t0.0\t42\n",
+      "expected_tsv": "Sample_file\tGenome_file\tTaxonomic_abundance\tSequence_abundance\tAdjusted_ANI\tTrue_cov\tANI_5-95_percentile\tEff_lambda\tLambda_5-95_percentile\tMedian_cov\tMean_cov_geq1\tContainment_ind\tNaive_ANI\tkmers_reassigned\tContig_name\taccession\tgenome_id\tgtdb_representative\tcheckm2_completeness\tncbi_taxid\ns1\tGCF_000005845.2_genomic.fna.gz\t100.0000\t42.1255\t100.00\t0.360\t99.64-99.95\t0.360\t0.34-0.38\t1\t1.188\t6208/21899\t100.40\t0\tNC_000913.3\tGCF_000005845.2\tGCF_000005845.2\tTrue\t100.0\t511145\ns2\tGCA_000000001.1_genomic.fna.gz\tNaN\tNaN\t95.12\tinf\tNA-NA\tHIGH\tNA-NA\t30\t31.250\t44/44\t95.12\t17\tcontig1\tGCA_000000001.1\tGCA_000000001.1\tFalse\t99.5\t\ns2\tGCA_000000002.1_genomic.fna.gz\t0.0000\t0.0000\t95.14\t1.000\tNA-NA\tLOW\tNA-NA\t1\t1.000\t10/100\t90.00\t3\tcontig2\t\tcontig2\t\t\t0\ns2\tGCA_000000003.1_genomic.fna.gz\t12.3456\t98.7655\t99.79\t2.500\t98.00-100.00\t\tNA-NA\t2\t2.500\t50/100\t99.11\t0\tcontig3\tGCA_000000003.1\tGCA_000000003.1\tTrue\t0.0\t42\n",
       "expected_caveats": "sylphd: warning: UHGV_default (viruses): 95 % ANI matches the vOTU convention\n"
     }
   ]

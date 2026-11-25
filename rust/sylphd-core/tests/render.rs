@@ -15,7 +15,7 @@ use sylphd_core::document::{
 use sylphd_core::render::{
     assembly_species_note, format_bases, format_size, format_thousands, format_value,
     render_assembly_stderr, render_assembly_summary, render_assembly_tsv, render_contigs_summary,
-    render_contigs_tsv, render_info, render_profile_caveats,
+    render_contigs_tsv, render_info, render_hitless_samples, render_profile_caveats,
     render_stderr_messages, render_tsv, render_usage_note,
 };
 
@@ -263,25 +263,77 @@ fn protocol_format_value_unit_cases() {
 }
 
 #[test]
-fn api_version_validation_and_error_messages() {
-    assert_eq!(SUPPORTED_API_VERSION, 1);
-    assert!(check_api_version(1).is_ok());
+fn golden_samples_carry_sketch_and_client_statistics() {
+    let fixture: Value = serde_json::from_str(PROFILE_GOLDEN).unwrap();
+    for case in fixture["cases"].as_array().unwrap() {
+        let doc = from_value::<ProfileDocument>(case["document"].clone()).unwrap();
+        assert_eq!(doc.api_version, 2);
+        for sample in &doc.samples {
+            assert!(sample.kmers.is_some() && sample.mean_read_length.is_some());
+            assert!(sample.paired.is_some());
+            // reads and bases are both sent or both unknown in the goldens
+            assert_eq!(sample.reads.is_some(), sample.bases.is_some());
+        }
+        // genome_id is the column right after accession, and the TSV keeps it there.
+        let columns = &doc.table.columns;
+        let at = columns.iter().position(|c| c == "accession").unwrap();
+        assert_eq!(columns[at + 1], "genome_id");
+    }
+}
 
-    let err = check_api_version(2).unwrap_err();
+#[test]
+fn samples_without_statistics_parse_as_unknown() {
+    let doc = from_value::<ProfileDocument>(json!({
+        "api_version": 2, "params": {}, "samples": [{"name": "a"}],
+        "table": {"columns": [], "data": []}, "caveats": []
+    }))
+    .unwrap();
+    let sample = &doc.samples[0];
+    assert_eq!((sample.kmers, sample.reads, sample.bases, sample.paired), (None, None, None, None));
+}
+
+#[test]
+fn hitless_samples_get_one_stderr_line_each() {
+    let doc = from_value::<ProfileDocument>(json!({
+        "api_version": 2, "params": {},
+        "samples": [
+            {"name": "R1", "kmers": 1234567, "mean_read_length": 150.0, "paired": false, "reads": 8000, "bases": 1200000},
+            {"name": "R2", "kmers": 12, "mean_read_length": 100.0, "paired": false, "reads": null, "bases": null},
+            {"name": "hit", "kmers": 5, "mean_read_length": 100.0, "paired": false, "reads": 1, "bases": 1},
+            {"name": "bare"}
+        ],
+        "table": {"columns": ["Sample_file", "Genome_file"], "data": [["hit", "g.fna"]]},
+        "caveats": []
+    }))
+    .unwrap();
+    assert_eq!(
+        render_hitless_samples(&doc),
+        "sylphd: no hits for R1 (1,234,567 k-mers, 8,000 reads)\n\
+         sylphd: no hits for R2 (12 k-mers)\n\
+         sylphd: no hits for bare\n"
+    );
+}
+
+#[test]
+fn api_version_validation_and_error_messages() {
+    assert_eq!(SUPPORTED_API_VERSION, 2);
+    assert!(check_api_version(2).is_ok());
+
+    let err = check_api_version(3).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "server API version 2 is newer than this client's (1): update sylphd"
+        "server API version 3 is newer than this client's (2): update sylphd"
     );
     let err0 = check_api_version(0).unwrap_err();
     assert_eq!(
         err0.to_string(),
-        "server API version 0 is older than this client's (1): the server predates this sylphd"
+        "server API version 0 is older than this client's (2): the server predates this sylphd"
     );
 
     // Missing api_version
     let err_missing = check_str_api_version(r#"{"samples": []}"#, "server").unwrap_err();
     assert!(matches!(err_missing, DocumentError::MissingApiVersion));
-    assert!(err_missing.to_string().contains("supports API version 1"));
+    assert!(err_missing.to_string().contains("supports API version 2"));
 
     // Future incompatible schema still reports version mismatch first, not missing field!
     let future_doc = json!({"api_version": 99, "completely_new_schema": true});
@@ -293,14 +345,14 @@ fn api_version_validation_and_error_messages() {
     ] {
         assert_eq!(
             res.unwrap_err().to_string(),
-            "server API version 99 is newer than this client's (1): update sylphd"
+            "server API version 99 is newer than this client's (2): update sylphd"
         );
     }
     assert_eq!(
         ResultDocument::parse(&future_doc.to_string())
             .unwrap_err()
             .to_string(),
-        "document API version 99 is newer than this client's (1): update sylphd"
+        "document API version 99 is newer than this client's (2): update sylphd"
     );
 }
 
@@ -349,7 +401,7 @@ fn contigs_merge_zero_batches_and_browser_cap() {
         ..Default::default()
     };
     let doc = merge_contigs_run(&[], &request, &opts).unwrap();
-    assert_eq!(doc.api_version, 1);
+    assert_eq!(doc.api_version, 2);
     assert_eq!(doc.table.columns.len(), 21);
     assert!(doc.table.data.is_empty());
     assert_eq!(doc.summary.contigs, 150);
@@ -436,7 +488,7 @@ fn stderr_messages_usage_note_and_format_helpers() {
 #[test]
 fn contigs_merge_preserves_non_alphabetical_order_and_combines_server_too_few_kmers() {
     let batch_json = r#"{
-      "api_version": 1,
+      "api_version": 2,
       "params": {"top": 1, "min_ani": 80.0, "consensus_ratio": 1.5, "consensus_z": 2.0, "fields": []},
       "table": {
         "columns": ["contig","contig_length","gc","status","rank","ani","shared_kmers","contig_kmers","explained_fraction","reference_ani","relation","shared_rank","ani_species_level","accession","genome_id","gtdb_species","taxon","n_close","consensus_rank","consensus_taxon"],

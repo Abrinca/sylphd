@@ -1,5 +1,5 @@
 {
-  "api_version": 1,
+  "api_version": 2,
   "query": {
     "name": "golden",
     "records": null,

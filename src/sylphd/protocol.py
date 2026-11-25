@@ -17,14 +17,23 @@ A JSON document with ``api_version``, effective ``params``, ``samples``,
 ``orient="split"`` without an index), ``caveats``, and (on ``/profile`` with
 ``taxprof``) ``taxprof``::
 
-    {"api_version": 1, "params": {...}, "samples": [{"name": "sample-a"}],
+    {"api_version": 2, "params": {...},
+     "samples": [{"name": "sample-a", "kmers": 1234, "mean_read_length": 150.0,
+                  "paired": false, "reads": 1000, "bases": 150000}],
      "table": {"columns": ["Sample_file", ..., "Lambda_status", "accession", ...],
                "data": [[...]]},
      "caveats": []}
 
 ``table.columns`` is the final ordered header (with ``True_cov`` in place of
 ``Eff_cov`` when ``estimate_unknown`` or ``estimate_read_counts`` is set) plus
-``Lambda_status`` before ``accession``.
+``Lambda_status`` before ``accession``, then ``genome_id``.
+
+Optional per-sample statistics a client measured while sketching go in the
+``params`` field as ``samples``: a list, one object per ``sketch`` part (same
+order), each ``{"name"?, "reads": int|null, "bases": int|null}``.  The response's
+``samples`` entries are ``{"name", "kmers", "mean_read_length", "paired",
+"reads", "bases"}``: the first three come from the uploaded sketch header, the
+last two are the client's values (``null`` when not sent).
 """
 
 from __future__ import annotations
@@ -34,11 +43,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Any
 
+from .assembly import genome_id
 from .metadata import METADATA_COLUMNS, accession_from_genome_name
 
 #: Wire-protocol version reported by ``GET /info`` and every result document.
 #: Bump on any breaking change to the response shape.
-API_VERSION: int = 1
+API_VERSION: int = 2
 
 #: Columns of ``sylph query`` output, in sylph's order.
 QUERY_COLUMNS: tuple[str, ...] = (
@@ -78,7 +88,7 @@ PROFILE_COLUMNS: tuple[str, ...] = (
 )
 
 #: Columns appended to the sylph ones.
-EXTRA_COLUMNS: tuple[str, ...] = ("accession",)
+EXTRA_COLUMNS: tuple[str, ...] = ("accession", "genome_id")
 
 class ProtocolError(ValueError):
     """Raised for malformed request parameters."""
@@ -154,6 +164,8 @@ PROFILE_PARAM_KEYS: tuple[str, ...] = (
     # /profile only: the taxonomies whose clade tables and .sylphmpa text the
     # server should render (`["gtdb", "ncbi", "tax"]`).
     "taxprof",
+    # Client-measured per-sample statistics (``reads``, ``bases``), optional.
+    "samples",
 )
 
 
@@ -298,6 +310,10 @@ def result_row(
     elif mode != "query":
         raise ValueError(f"unknown mode {mode!r}")
     row["accession"] = accession
+    row["genome_id"] = genome_id(
+        {**(metadata or {}), "accession": accession, "Genome_file": genome_file},
+        contig_name=genome.description,
+    )
 
     if metadata is not None:
         selected = METADATA_COLUMNS if fields is None else tuple(fields)
@@ -324,6 +340,48 @@ def _pair(value: object) -> list[float] | None:
     return [float(low), float(high)]
 
 
+def sample_stats(
+    value: object, count: int
+) -> list[dict[str, int | None]]:
+    """Validate ``params.samples``: per sketch ``{"name"?, "reads", "bases"}``.
+
+    Returns one ``{"reads", "bases"}`` dict per sketch (``None`` for a value the
+    client did not send).  Raises :class:`ProtocolError` for a bad shape.
+    """
+    if value is None:
+        return [{"reads": None, "bases": None} for _ in range(count)]
+    if not isinstance(value, list) or not all(isinstance(item, Mapping) for item in value):
+        raise ProtocolError("'params.samples' must be a list of objects")
+    if len(value) != count:
+        raise ProtocolError(f"'params.samples' has {len(value)} entries for {count} sketches")
+    stats: list[dict[str, int | None]] = []
+    for index, item in enumerate(value):
+        unknown = sorted(set(item) - {"name", "reads", "bases"})
+        if unknown:
+            raise ProtocolError(
+                f"unknown key(s) in 'params.samples[{index}]': {', '.join(unknown)}"
+            )
+        if not isinstance(item.get("name", ""), str):
+            raise ProtocolError(f"'params.samples[{index}].name' must be a string")
+        entry: dict[str, int | None] = {}
+        for key in ("reads", "bases"):
+            raw = item.get(key)
+            if raw is None:
+                entry[key] = None
+                continue
+            if not isinstance(raw, int) or isinstance(raw, bool):
+                raise ProtocolError(
+                    f"'params.samples[{index}].{key}' must be a non-negative integer or null"
+                )
+            if raw < 0 or raw > MAX_INTEGER:
+                raise ProtocolError(
+                    f"'params.samples[{index}].{key}' must be a non-negative integer or null"
+                )
+            entry[key] = raw
+        stats.append(entry)
+    return stats
+
+
 def table_columns(
     mode: str,
     params: ProfileParams | None = None,
@@ -346,6 +404,7 @@ def result_document(
     fields: Sequence[str] | None,
     names: Sequence[str],
     samples: Sequence[Mapping[str, Any]],
+    sample_info: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The ``/query`` / ``/profile`` response for the finished ``samples``.
 
@@ -376,7 +435,18 @@ def result_document(
     document: dict[str, Any] = {
         "api_version": API_VERSION,
         "params": params.to_dict(),
-        "samples": [{"name": name} for name in names],
+        "samples": [
+            {
+                "name": name,
+                "kmers": None,
+                "mean_read_length": None,
+                "paired": None,
+                "reads": None,
+                "bases": None,
+                **(sample_info[index] if sample_info is not None else {}),
+            }
+            for index, name in enumerate(names)
+        ],
         "table": {"columns": columns, "data": data},
         "caveats": caveats,
     }

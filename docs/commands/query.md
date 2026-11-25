@@ -26,7 +26,7 @@ The output columns are:
 ```text
 Sample_file Genome_file Adjusted_ANI Eff_cov ANI_5-95_percentile
 Eff_lambda Lambda_5-95_percentile Median_cov Mean_cov_geq1
-Containment_ind Naive_ANI Contig_name  accession <metadata...>
+Containment_ind Naive_ANI Contig_name  accession genome_id <metadata...>
 ```
 
 `<metadata...>` is the server's metadata columns; with the default `--fields all` a server whose

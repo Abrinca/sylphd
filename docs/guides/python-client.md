@@ -30,8 +30,8 @@ line's: `2` for usage or input errors, `1` for server or client errors.
 The result is the server's document, unchanged (see the [HTTP API](../reference/http-api.md)):
 
 ```python
-doc["api_version"]                  # 1; the client checks it before sketching
-doc["samples"]                      # [{"name": "reads"}, ...]
+doc["api_version"]                  # 2; the client checks it before sketching
+doc["samples"]                      # [{"name": "reads", "kmers": ..., "reads": ..., ...}, ...]
 doc["table"]["columns"]             # the ordered header
 doc["table"]["data"]                # rows, one per hit
 doc["caveats"]                      # note strings the server computed

@@ -24,6 +24,7 @@ from sylphd.protocol import (
     table_columns,
 )
 from sylphd.server import ServerConfig, create_app
+from sylphd.sketchcheck import parse_sketch_header
 from sylphd.server_launch import (
     _socket_identity,
     _unlink_socket_if_owned,
@@ -175,7 +176,10 @@ class TestProfileQuery:
         doc = response.json()
         assert set(doc) == {"api_version", "params", "samples", "table", "caveats"}
         assert doc["api_version"] == API_VERSION
-        assert doc["samples"] == [{"name": "o157"}]
+        (sample,) = doc["samples"]
+        assert sample["name"] == "o157"
+        assert set(sample) == {"name", "kmers", "mean_read_length", "paired", "reads", "bases"}
+        assert sample["reads"] is None and sample["bases"] is None
         assert doc["caveats"] == []
         assert doc["table"]["columns"] == table_columns("query")
         rows = _table_rows(doc)
@@ -187,6 +191,10 @@ class TestProfileQuery:
         assert "Taxonomic_abundance" not in rows[0]
         assert "kmers_reassigned" not in rows[0]
         assert rows[0]["accession"] is None
+        # not a GTDB accession: the id is the first word of the contig description
+        assert rows[0]["genome_id"] == rows[0]["Contig_name"].split()[0]
+        columns = doc["table"]["columns"]
+        assert columns[columns.index("accession") + 1] == "genome_id"
 
     def test_profile(self, client: TestClient) -> None:
         payload = O157_SKETCH.read_bytes()
@@ -194,7 +202,7 @@ class TestProfileQuery:
         assert response.status_code == 200
         doc = response.json()
         assert doc["api_version"] == API_VERSION
-        assert doc["samples"] == [{"name": "o157"}]
+        assert [sample["name"] for sample in doc["samples"]] == ["o157"]
         assert doc["table"]["columns"] == table_columns("profile")
         assert "taxprof" not in doc
         rows = _table_rows(doc)
@@ -202,6 +210,72 @@ class TestProfileQuery:
         assert rows[0]["Taxonomic_abundance"] == pytest.approx(100.0)
         assert rows[0]["Sequence_abundance"] == pytest.approx(100.0)
         assert rows[0]["kmers_reassigned"] == 0
+
+    def test_genome_id_of_a_gtdb_accession_genome(self, tiny_database, tiny_metadata) -> None:
+        app = create_app(ServerConfig(db_path=tiny_database, meta_path=tiny_metadata))
+        sketch = pysylph.Sketcher(c=200, k=31).sketch_single(
+            "clodf13", _reads(CLODF13_FASTA)
+        ).to_bytes()
+        with TestClient(app) as test_client:
+            for endpoint in ("profile", "query"):
+                response = _post(test_client, endpoint, [("clodf13", sketch)], names=["clodf13"])
+                assert response.status_code == 200
+                (row,) = _table_rows(response.json())
+                assert row["accession"] == "GCA_000000001.1"
+                assert row["genome_id"] == "GCA_000000001.1"
+
+    def test_genome_id_is_a_fixed_column(self, tiny_database, tiny_metadata, client: TestClient) -> None:
+        payload = O157_SKETCH.read_bytes()
+        response = _post(client, "query", [("o157", payload)], names=["o157"], fields=["genome_id"])
+        assert response.status_code == 400
+        assert "genome_id" in response.json()["error"]
+
+    def test_sample_statistics_from_the_sketch_and_the_client(self, client: TestClient) -> None:
+        payload = O157_SKETCH.read_bytes()
+        header = parse_sketch_header(payload)
+        response = _post(
+            client,
+            "profile",
+            [("a", payload), ("b", payload)],
+            names=["a", "b"],
+            samples=[{"name": "a", "reads": 1000, "bases": 150000}, {"name": "b", "reads": None}],
+        )
+        assert response.status_code == 200
+        first, second = response.json()["samples"]
+        assert first == {
+            "name": "a",
+            "kmers": header.kmer_count,
+            "mean_read_length": header.mean_read_length,
+            "paired": header.paired,
+            "reads": 1000,
+            "bases": 150000,
+        }
+        assert second["name"] == "b" and second["kmers"] == header.kmer_count
+        assert second["reads"] is None and second["bases"] is None
+
+    @pytest.mark.parametrize(
+        ("samples", "message"),
+        [
+            ("x", "'params.samples' must be a list of objects"),
+            ([1], "'params.samples' must be a list of objects"),
+            ([], "'params.samples' has 0 entries for 1 sketches"),
+            ([{"reads": -1}], "samples[0].reads"),
+            ([{"reads": 1.5}], "samples[0].reads"),
+            ([{"bases": "5"}], "samples[0].bases"),
+            ([{"bases": True}], "samples[0].bases"),
+            ([{"reads": 2**63}], "samples[0].reads"),
+            ([{"name": 3}], "samples[0].name"),
+            ([{"kmers": 5}], "unknown key(s) in 'params.samples[0]': kmers"),
+        ],
+    )
+    def test_bad_sample_statistics_are_a_400(
+        self, client: TestClient, samples: object, message: str
+    ) -> None:
+        payload = O157_SKETCH.read_bytes()
+        for endpoint in ("profile", "query"):
+            response = _post(client, endpoint, [("o157", payload)], names=["o157"], samples=samples)
+            assert response.status_code == 400
+            assert message in response.json()["error"]
 
     def test_taxprof_returns_clades_and_sylphmpa(self, tiny_database, tiny_metadata) -> None:
         """`taxprof` aggregates on the server: structured clades + exact text."""
@@ -417,7 +491,7 @@ class TestProfileQuery:
         )
         assert response.status_code == 200
         doc = response.json()
-        assert doc["samples"] == [{"name": "first"}, {"name": "second"}]
+        assert [sample["name"] for sample in doc["samples"]] == ["first", "second"]
         rows = _table_rows(doc)
         seen_samples = list(dict.fromkeys(row["Sample_file"] for row in rows))
         assert seen_samples == ["first", "second"]
@@ -434,13 +508,13 @@ class TestProfileQuery:
         )
         assert response.status_code == 200
         doc = response.json()
-        assert doc["samples"] == [{"name": "o157"}, {"name": "empty"}]
+        assert [sample["name"] for sample in doc["samples"]] == ["o157", "empty"]
         rows = _table_rows(doc)
         assert {row["Sample_file"] for row in rows} == {"o157"}
 
     def test_name_falls_back_to_filename(self, client: TestClient) -> None:
         response = _post(client, "query", [("from-file", O157_SKETCH.read_bytes())])
-        assert response.json()["samples"] == [{"name": "from-file"}]
+        assert [sample["name"] for sample in response.json()["samples"]] == ["from-file"]
 
 
 class TestErrors:

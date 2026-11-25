@@ -148,7 +148,7 @@ pub fn format_value(column: &str, value: &Value) -> String {
         };
     }
     match column {
-        "Sample_file" | "Genome_file" | "Contig_name" | "accession" => py_str(value),
+        "Sample_file" | "Genome_file" | "Contig_name" | "accession" | "genome_id" => py_str(value),
         "Adjusted_ANI" => format!("{:.2}", value_as_f64(value).min(100.0)),
         "Naive_ANI" => format!("{:.2}", value_as_f64(value)),
         "Eff_cov" | "True_cov" | "Mean_cov_geq1" => format!("{:.3}", value_as_f64(value)),
@@ -240,6 +240,42 @@ pub fn render_caveats(caveats: &[String]) -> String {
 /// Format the species-threshold caveats of a `/profile` document for stderr.
 pub fn render_profile_caveats(doc: &ProfileDocument) -> String {
     render_caveats(&doc.caveats)
+}
+
+/// One stderr line per sample of a `/profile` or `/query` document without any
+/// table row: `sylphd: no hits for <name> (1,234 k-mers, 5,678 reads)`.
+///
+/// The k-mer count is the sketch's; reads are shown when the client sent them.
+/// Empty when every sample has a hit.
+pub fn render_hitless_samples(doc: &ProfileDocument) -> String {
+    let mut with_hits = std::collections::HashSet::new();
+    if let Some(index) = doc.table.column_index("Sample_file") {
+        for row in &doc.table.data {
+            if let Some(Value::String(name)) = row.get(index) {
+                with_hits.insert(name.as_str());
+            }
+        }
+    }
+    let mut out = String::new();
+    for sample in &doc.samples {
+        if with_hits.contains(sample.name.as_str()) {
+            continue;
+        }
+        let mut facts = Vec::new();
+        if let Some(kmers) = sample.kmers {
+            facts.push(format!("{} k-mers", format_thousands(kmers)));
+        }
+        if let Some(reads) = sample.reads {
+            facts.push(format!("{} reads", format_thousands(reads)));
+        }
+        let detail = if facts.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", facts.join(", "))
+        };
+        let _ = writeln!(out, "{PROG}: no hits for {}{detail}", sample.name);
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------

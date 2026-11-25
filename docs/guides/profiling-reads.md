@@ -109,16 +109,16 @@ The defaults are sylph's.
 
 The default output is a TSV on stdout, or `-o FILE`. `--format json` prints the server payload (a
 list with one object per sample, see the [HTTP API](../reference/http-api.md#post-query-and-post-profile)).
-The TSV mirrors sylph's columns, followed by `accession` and the metadata columns:
+The TSV mirrors sylph's columns, followed by `accession`, `genome_id` and the metadata columns:
 
 ```text
 query:    Sample_file Genome_file Adjusted_ANI Eff_cov ANI_5-95_percentile
           Eff_lambda Lambda_5-95_percentile Median_cov Mean_cov_geq1
-          Containment_ind Naive_ANI Contig_name  accession <metadata...>
+          Containment_ind Naive_ANI Contig_name  accession genome_id <metadata...>
 profile:  Sample_file Genome_file Taxonomic_abundance Sequence_abundance
           Adjusted_ANI Eff_cov ANI_5-95_percentile Eff_lambda
           Lambda_5-95_percentile Median_cov Mean_cov_geq1 Containment_ind
-          Naive_ANI kmers_reassigned Contig_name  accession <metadata...>
+          Naive_ANI kmers_reassigned Contig_name  accession genome_id <metadata...>
 ```
 
 | Column | Meaning |
@@ -136,9 +136,10 @@ profile:  Sample_file Genome_file Taxonomic_abundance Sequence_abundance
 | `kmers_reassigned` | `profile` only: number of k-mers reassigned during profiling, as in sylph |
 | `Contig_name` | contig name and description recorded for the genome in the database |
 | `accession` | genome accession (`GCA_...`/`GCF_...`) derived from `Genome_file`; empty when there is none |
+| `genome_id` | stable identifier of the database genome: the accession of a GTDB hit, the taxon key of a hit a non-GTDB taxonomy source resolved (a UHGV contig id, ...), else the first word of `Contig_name`, else `Genome_file`; the same rule as `/assembly` and `/contigs` |
 
 Missing values are written as sylph writes them, so the text of every row is identical
-to sylph's (the metadata columns and `accession` use empty cells). The TSV is equivalent to sylph 1.0.0's:
+to sylph's (the metadata columns and `accession` use empty cells; `genome_id`, like `accession`, is not a sylph column, so [`sylphd diff`](../commands/diff.md) ignores it). The TSV is equivalent to sylph 1.0.0's:
 the same genomes and the same values, but rows with exactly equal abundance (or ANI) can come in a
 different order, which stock sylph itself varies between runs with several threads. Check with
 [`sylphd diff`](../commands/diff.md). For a sketch without read

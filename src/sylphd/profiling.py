@@ -766,7 +766,7 @@ def run_sample(
     columns it needs are fetched internally for aggregation without altering
     the response table's selected ``fields``.
     """
-    sketch, _ = _decode_sketch(databases, name, payload)
+    sketch, header = _decode_sketch(databases, name, payload)
 
     row_fields = _taxprof_fields(taxprof, metadata, fields) if taxprof else fields
     profiler = databases.profiler(params)
@@ -785,6 +785,11 @@ def run_sample(
         "rows": rows,
         "caveats": caveats,
         "params": params.to_dict(),
+        "stats": {
+            "kmers": header.kmer_count,
+            "mean_read_length": header.mean_read_length,
+            "paired": header.paired,
+        },
     }
     if taxprof:
         sources = (

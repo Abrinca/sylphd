@@ -705,7 +705,7 @@ def test_contigs_endpoint_response(endpoint_app, endpoint_data) -> None:
         "thresholds",
         "elapsed_ms",
     }
-    assert body["api_version"] == 1
+    assert body["api_version"] == 2
     assert body["database"] == {
         "name": ani_name(endpoint_app),
         "genomes": 3,

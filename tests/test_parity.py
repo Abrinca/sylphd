@@ -86,8 +86,8 @@ class TestTsv:
     def test_sylphd_extra_columns_are_ignored(self) -> None:
         rows = three()
         for item in rows:
-            item["accession"], item["gtdb_taxonomy"] = "GCF_1", "d__X"
-        extra = ("accession", "gtdb_taxonomy")
+            item["accession"], item["genome_id"], item["gtdb_taxonomy"] = "GCF_1", "GCF_1", "d__X"
+        extra = ("accession", "genome_id", "gtdb_taxonomy")
         assert compare_texts(tsv(three()), tsv(rows, extra=extra)).equivalent
 
     @pytest.mark.parametrize(

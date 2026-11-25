@@ -23,7 +23,7 @@ use sylphd_core::input::{
 };
 use sylphd_core::render::{
     format_size, render_assembly_stderr, render_assembly_tsv, render_contigs_summary,
-    render_contigs_tsv, render_info, render_profile_caveats, render_tsv,
+    render_contigs_tsv, render_hitless_samples, render_info, render_profile_caveats, render_tsv,
     render_stderr_messages, render_usage_note,
 };
 
@@ -533,10 +533,15 @@ fn cmd_contain(args: &ContainArgs, mode: Mode, tax: Option<&crate::cli::ProfileT
     }
 
     let names: Vec<String> = sketched.iter().map(|s| s.name.clone()).collect();
+    let sample_stats: Vec<Value> = sketched
+        .iter()
+        .map(|s| json!({"name": s.name, "reads": s.reads, "bases": s.bases}))
+        .collect();
     let params_json = profile_params_json(
         mode,
         &params,
         &names,
+        &sample_stats,
         &fields,
         (!tax_sources.is_empty()).then_some(tax_sources),
         taxonomies.as_deref(),
@@ -554,6 +559,7 @@ fn cmd_contain(args: &ContainArgs, mode: Mode, tax: Option<&crate::cli::ProfileT
     } else {
         write_output(output.output.as_deref(), &render_tsv(&document.table))?;
     }
+    eprint!("{}", render_hitless_samples(&document));
 
     if let Some(tax) = tax {
         let prefix = tax.taxprof.as_deref().unwrap_or_default();
@@ -576,6 +582,7 @@ fn profile_params_json(
     mode: Mode,
     params: &ProfileParamsOut,
     names: &[String],
+    sample_stats: &[Value],
     fields: &[String],
     tax_sources: Option<&[String]>,
     taxprof: Option<&[String]>,
@@ -605,6 +612,7 @@ fn profile_params_json(
     object.insert("screen_ani".into(), Value::from(params.screen_ani));
     object.insert("no_adjust".into(), Value::Bool(params.no_adjust));
     object.insert("names".into(), json!(names));
+    object.insert("samples".into(), json!(sample_stats));
     object.insert("mode".into(), Value::from(mode.endpoint()));
     object.insert("fields".into(), json!(fields));
     if let Some(sources) = tax_sources {

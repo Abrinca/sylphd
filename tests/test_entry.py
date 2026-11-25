@@ -121,7 +121,7 @@ def test_the_console_script_is_installed() -> None:
 # ---------------------------------------------------------------------------
 
 DOCUMENT = {
-    "api_version": 1,
+    "api_version": 2,
     "params": {},
     "samples": [{"name": "sample"}],
     "table": {"columns": ["Sample_file", "Genome_file"], "data": [["sample", "g.fna"]]},
@@ -131,7 +131,7 @@ DOCUMENT = {
 
 def _info_document() -> dict:
     return {
-        "api_version": 1,
+        "api_version": 2,
         "service": "sylphd",
         "version": __version__,
         "pysylph_version": "test",

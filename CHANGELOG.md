@@ -4,6 +4,28 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed (breaking)
+
+- **`api_version` is `2`.** `/profile` and `/query` result documents change shape, so a client of
+  version 1 (and a 0.8.0 client against a newer server) refuses the other with the usual
+  "update sylphd" message. `sylphd taxmatrix` accepts version 2 documents only.
+  - The table has a **`genome_id`** column right after `accession` (the stable identifier of the
+    database genome, as `/assembly` and `/contigs` already had it). It is part of the TSV too,
+    after sylph's columns, so `sylphd diff` against a sylph TSV is unchanged.
+  - Every entry of `samples` is now `{"name", "kmers", "mean_read_length", "paired", "reads",
+    "bases"}`: the first three come from the uploaded sketch, `reads` and `bases` from the client.
+
+### Added
+
+- **`params.samples`** on `/profile` and `/query`: optional `[{"name", "reads", "bases"}]`, one per
+  sketch, validated by the server (`null`/omitted when unknown). The native client and the web
+  page's Reads mode send what they counted while sketching; a `.sylsp` upload sends `null`.
+- `sylphd profile`/`query` print one stderr line per sample without any hit
+  (`sylphd: no hits for R1 (12,345 k-mers, 8,000 reads)`), which explains an empty result such as
+  a read file whose mate is missing.
+
 ## [0.8.0] - 2026-11-25
 
 ### Added

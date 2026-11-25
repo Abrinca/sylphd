@@ -653,6 +653,10 @@ pub struct SketchedSample {
     pub name: String,
     pub bytes: Vec<u8>,
     pub header: SketchHeader,
+    /// Reads (a read pair counts once) sketched locally; `None` for a pre-made `.sylsp`.
+    pub reads: Option<u64>,
+    /// Bases sketched locally (both mates of a pair); `None` for a pre-made `.sylsp`.
+    pub bases: Option<u64>,
 }
 
 /// Loads a pre-made `.sylsp` sketch file from disk and validates its header.
@@ -681,6 +685,8 @@ pub fn sketch_sample(
             name: sample.name.clone(),
             bytes,
             header,
+            reads: None,
+            bases: None,
         });
     }
 
@@ -696,6 +702,7 @@ pub fn sketch_sample(
             .try_for_each(|p| sketcher.push_interleaved_file(p)),
     };
     res.map_err(|e| InputError(format!("cannot sketch sample {:?}: {e}", sample.name)))?;
+    let (reads, bases) = (sketcher.reads(), sketcher.bases());
     let bytes = sketcher
         .finish(&sample.name)
         .map_err(|e| InputError(format!("cannot sketch sample {:?}: {e}", sample.name)))?;
@@ -705,6 +712,8 @@ pub fn sketch_sample(
         name: sample.name.clone(),
         bytes,
         header,
+        reads: Some(reads),
+        bases: Some(bases),
     })
 }
 

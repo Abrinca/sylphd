@@ -17,7 +17,7 @@ pub use crate::input::Skipped;
 use crate::input::DEFAULT_MIN_CONTIG_LENGTH;
 
 /// Wire-protocol `api_version` supported by this client.
-pub const SUPPORTED_API_VERSION: u64 = 1;
+pub const SUPPORTED_API_VERSION: u64 = 2;
 
 /// Default species ANI threshold (percent), (the server's `INTERPRETATION_THRESHOLDS`).
 pub const DEFAULT_SPECIES_THRESHOLD: f64 = 95.0;
@@ -201,9 +201,22 @@ impl Table {
 }
 
 /// One sample entry in a `/profile` or `/query` document.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `kmers`, `mean_read_length` and `paired` come from the uploaded sketch header;
+/// `reads` and `bases` are the values the client sent (`None` when it did not).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SampleEntry {
     pub name: String,
+    #[serde(default)]
+    pub kmers: Option<u64>,
+    #[serde(default)]
+    pub mean_read_length: Option<f64>,
+    #[serde(default)]
+    pub paired: Option<bool>,
+    #[serde(default)]
+    pub reads: Option<u64>,
+    #[serde(default)]
+    pub bases: Option<u64>,
 }
 
 /// Result document returned by `POST /profile` and `POST /query`.

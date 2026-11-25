@@ -654,7 +654,7 @@ def _metadata_columns(metadata: MetadataDB | None) -> tuple[str, ...]:
 async def _handle(request: Request, mode: str) -> JSONResponse:
     state = request.app.state
     require_multipart(request, "one 'sketch' part per sample")
-    params, fields, names, payloads, tax_sources, taxprof = await read_upload(
+    params, fields, names, payloads, tax_sources, taxprof, stats = await read_upload(
         request, mode
     )
 
@@ -685,7 +685,12 @@ async def _handle(request: Request, mode: str) -> JSONResponse:
         sketch_bytes=sum(len(payload) for payload in payloads),
     )
     completed = [sample for sample in samples if sample is not None]
-    document = result_document(mode, params, fields, names, completed)
+    sample_info = [
+        {**(sample.get("stats") or {}), **client}
+        for sample, client in zip(samples, stats)
+        if sample is not None
+    ]
+    document = result_document(mode, params, fields, names, completed, sample_info)
     return JSONResponse(document)
 
 
