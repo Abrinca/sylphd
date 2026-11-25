@@ -156,7 +156,7 @@ fn make_synth() {
     };
     let mutate = |seq: &mut Vec<u8>, rnd: &mut dyn FnMut() -> u64| {
         for b in seq.iter_mut() {
-            if rnd() % 200 == 0 {
+            if rnd().is_multiple_of(200) {
                 *b = b"ACGT"[(rnd() % 4) as usize];
             }
         }
@@ -184,7 +184,7 @@ fn make_synth() {
             out.extend_from_slice(format!("@sim{i}/{mate}\n").as_bytes());
             out.extend_from_slice(seq);
             out.extend_from_slice(b"\n+\n");
-            out.extend(std::iter::repeat(b'I').take(seq.len()));
+            out.extend(std::iter::repeat_n(b'I', seq.len()));
             out.push(b'\n');
         }
         last = Some((r1, r2));
@@ -367,7 +367,7 @@ fn multiline_fasta_and_quality_starting_with_at() {
     s.push(b"GT\n").unwrap();
     s.finish("x").unwrap();
     assert_eq!(s.reads(), 3);
-    assert_eq!(s.bases(), 18 + 0 + 4);
+    assert_eq!(s.bases(), 18 + 4);
 
     let mut s = StreamSketcher::new(1, 31, true).unwrap();
     s.push(b"@r\nACGT\n+\n@@@@\n@r2\nAC\n+r2\n@@\n").unwrap();
@@ -399,7 +399,7 @@ fn interleaved_equals_two_streams() {
     open(&p2).take(3_000_000).read_to_end(&mut d2).unwrap();
     let records = |d: &[u8]| -> Vec<Vec<u8>> {
         let lines: Vec<&[u8]> = d.split(|&b| b == b'\n').collect();
-        lines.chunks_exact(4).map(|r| r.join(&b'\n')).collect()
+        lines.as_chunks::<4>().0.iter().map(|r| r.join(&b'\n')).collect()
     };
     let (r1, r2) = (records(&d1), records(&d2));
     let n = r1.len().min(r2.len()) - 1; // last record may be cut

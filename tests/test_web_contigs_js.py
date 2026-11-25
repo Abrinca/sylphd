@@ -37,6 +37,7 @@ from sylphd.sketchcheck import parse_sketch_header
 
 ROOT = Path(__file__).resolve().parents[1]
 WASM = ROOT / "web" / "wasm" / "sylph_sketch.js"
+CORE_CHECK = ROOT / "rust" / "sylphd-wasm" / "tests" / "core_check.mjs"
 CONTIGS_CHECK = ROOT / "rust" / "sylphd-wasm" / "tests" / "contigs_check.mjs"
 PIPELINE_CHECK = ROOT / "rust" / "sylphd-wasm" / "tests" / "contigs_pipeline_check.mjs"
 LAMBDA = ROOT / "scratch" / "taxonomy" / "phase4a" / "lambda.fasta"
@@ -195,7 +196,6 @@ def test_records_match_pysylph(tmp_path: Path, c: int, k: int) -> None:
     for chunk in (4093, 997):
         result = run_wasm(path, c, k, min_length, chunk)
         compare(result["records"], expected, c, k)
-        assert result["pending"] == 0
         assert result["seen"] == len(sequences)
         # records are delivered incrementally: the last one needs end_file()
         assert result["beforeEnd"] == len(sequences) - 1
@@ -286,10 +286,10 @@ def test_pipeline_sketch_contigs(tmp_path: Path) -> None:
     assert [rec["name"] for rec in records if rec["headerName"] == "dupe"] == ["dupe", "dupe"]
 
     # ... and naming the kept records at send time reproduces the CLI's names,
-    # because `uniqueContigName` is applied in record order.
+    # because the names are made in record order.
     done = subprocess.run(
-        ["node", "-e", NODE_NAMING, str(ROOT / "web" / "sketching.js"),
-         json.dumps([rec["name"] if rec["headerName"] else "" for rec in records])],
+        ["node", str(CORE_CHECK)],
+        input=json.dumps({"names": [rec["name"] if rec["headerName"] else "" for rec in records]}),
         capture_output=True, text=True, check=True,
     )
     expected_names = [
@@ -299,27 +299,18 @@ def test_pipeline_sketch_contigs(tmp_path: Path) -> None:
         "contig-3",
         f"contig-{len(sequences)}",
     ]
-    assert json.loads(done.stdout) == expected_names
-
-
-NODE_NAMING = r"""
-globalThis.window = globalThis;
-require(process.argv[1]);
-const { uniqueContigName } = window.SylphdSketch;
-const counts = new Map(), used = new Set();
-const raws = JSON.parse(process.argv[2]);
-console.log(JSON.stringify(raws.map((raw, i) => uniqueContigName(raw, counts, used, i + 1))));
-"""
+    assert json.loads(done.stdout)["names"] == expected_names
 
 
 def test_unique_contig_name_rules() -> None:
-    """``uniqueContigName``'s rules (the same ones ``sylphd-core`` applies)."""
+    """the wasm contig naming rules (the same ones ``sylphd-core`` applies)."""
     raws = ["c", "c", "c_2", "", "c", "c_3", "d"]
     done = subprocess.run(
-        ["node", "-e", NODE_NAMING, str(ROOT / "web" / "sketching.js"), json.dumps(raws)],
+        ["node", str(CORE_CHECK)],
+        input=json.dumps({"names": raws}),
         capture_output=True, text=True, check=True,
     )
-    assert json.loads(done.stdout) == [
+    assert json.loads(done.stdout)["names"] == [
         "c",
         "c_2",  # a duplicate gets the next free _N
         "c_2_2",  # ... even when that name was taken literally before

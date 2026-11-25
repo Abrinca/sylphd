@@ -20,5 +20,6 @@ sylph = { workspace = true }
 memchr = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+indexmap = { workspace = true }
 flate2 = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }

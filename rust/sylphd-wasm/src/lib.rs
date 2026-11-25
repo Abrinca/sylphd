@@ -13,12 +13,16 @@
 
 pub mod gzip;
 
+use sylphd_core::batch::{
+    plan_contig_batches, BatchLimits, ContigSpec, ContigsRequestOptions,
+};
 use sylphd_core::contig::{self, ContigRecord, ContigSketcher};
 use sylphd_core::document::{
-    self, AssemblyDocument, ContigsDocument, ContigsRunMergeOptions, InfoDocument, MessageItem,
-    MessagesResponse, ProfileDocument, Table, SUPPORTED_API_VERSION,
+    self, AssemblyDocument, ContigsDocument, ContigsRunMergeOptions, ProfileDocument, Table,
 };
+use sylphd_core::input::{ContigNameTracker, DEFAULT_MIN_CONTIG_LENGTH};
 use sylphd_core::render;
+use sylphd_core::sketchcheck;
 use sylphd_core::sketch;
 use sylphd_core::stream::StreamSketcher;
 use sylphd_core::Seeding;
@@ -187,16 +191,6 @@ impl WasmSketcher {
     }
 }
 
-/// Streaming gzip decoder for the browser (multi-member / BGZF / plain gzip
-/// all behave the same; flate2 + zlib-rs inside).
-///
-/// ```js
-/// const gz = new WasmGunzip(2 << 20, 'deferred');   // output chunk size, CRC mode
-/// gz.push(compressedChunk);
-/// let out; while ((out = gz.pull()) !== undefined) post(out, gz.take_trailers());
-/// ...
-/// post(gz.finish(), gz.take_trailers());    // last partial chunk; throws if truncated
-/// ```
 /// Largest accepted `chunk_size` (keeps `chunk + chunk / 4` far from overflow).
 const MAX_CHUNK: usize = 256 << 20;
 
@@ -239,8 +233,7 @@ fn contig_record_to_js(record: ContigRecord) -> JsValue {
     set("name", JsValue::from_str(&record.name));
     set("length", JsValue::from_f64(record.length as f64));
     set("gcCount", JsValue::from_f64(record.gc_count as f64));
-    // Python's round(100 * gc / length, 2), computed by the core so the TSV's
-    // GC column matches the CLI on exact ties (JS toFixed() rounds ties up).
+    // Rounded by the core: JS `toFixed()` rounds exact ties up.
     set("gc", JsValue::from_f64(record.gc_percent()));
     set(
         "contigKmers",
@@ -279,7 +272,7 @@ impl WasmContigSketcher {
         max_records: Option<f64>,
         max_record_length: Option<f64>,
     ) -> Result<WasmContigSketcher, JsError> {
-        let min_length = min_length.unwrap_or(20_000.0);
+        let min_length = min_length.unwrap_or(DEFAULT_MIN_CONTIG_LENGTH as f64);
         if !(min_length >= 0.0 && min_length.is_finite()) {
             return Err(js_err(format!("invalid min_length: {min_length}")));
         }
@@ -337,11 +330,6 @@ impl WasmContigSketcher {
         self.inner.end_file().map_err(js_err)
     }
 
-    /// Announces the end of the input: the same as `end_file`.
-    pub fn finish(&mut self) -> Result<(), JsError> {
-        self.end_file()
-    }
-
     /// All finished records (JS objects, see the type docs), oldest first.
     pub fn drain(&mut self) -> js_sys::Array {
         let out = js_sys::Array::new();
@@ -349,15 +337,6 @@ impl WasmContigSketcher {
             out.push(&contig_record_to_js(record));
         }
         out
-    }
-
-    /// Next finished record as a JS object, or `null`.
-    #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> JsValue {
-        match self.inner.take_next() {
-            Some(record) => contig_record_to_js(record),
-            None => JsValue::NULL,
-        }
     }
 
     /// Records seen so far (including not-yet-drained ones).
@@ -378,11 +357,6 @@ impl WasmContigSketcher {
     /// Bases seen so far.
     pub fn bases(&self) -> f64 {
         self.inner.bases as f64
-    }
-
-    /// Finished records not yet taken by `drain`/`next`.
-    pub fn pending(&self) -> f64 {
-        self.inner.pending() as f64
     }
 }
 
@@ -514,7 +488,9 @@ impl WasmCrc {
 
     pub fn update(&mut self, data: &[u8], trailers: &[f64]) -> Result<(), JsError> {
         let triples: Vec<(u64, u32, u32)> = trailers
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|t| (t[0] as u64, t[1] as u32, t[2] as u32))
             .collect();
         self.inner.update(data, &triples).map_err(js_err)
@@ -534,12 +510,6 @@ impl Default for WasmCrc {
 // ---------------------------------------------------------------------------
 // Document validation, per-contig run merge, and rendering
 // ---------------------------------------------------------------------------
-
-/// Wire-protocol `api_version` supported by this build.
-#[wasm_bindgen]
-pub fn supported_api_version() -> u32 {
-    SUPPORTED_API_VERSION as u32
-}
 
 /// Validate a server/document `api_version`; throws on mismatch.
 #[wasm_bindgen]
@@ -565,8 +535,8 @@ pub fn render_tsv(doc_or_table_json: &str) -> Result<String, JsError> {
         .map_err(|e| js_err(format!("invalid JSON: {e}")))?;
     if probe.table.is_some() {
         let doc =
-            ProfileDocument::from_json_str(doc_or_table_json).map_err(|e| js_err(e.to_string()))?;
-        Ok(render::render_profile_tsv(&doc))
+            document::parse::<ProfileDocument>(doc_or_table_json).map_err(|e| js_err(e.to_string()))?;
+        Ok(render::render_tsv(&doc.table))
     } else {
         let table: Table = serde_json::from_str(doc_or_table_json)
             .map_err(|e| js_err(format!("invalid table JSON: {e}")))?;
@@ -574,65 +544,39 @@ pub fn render_tsv(doc_or_table_json: &str) -> Result<String, JsError> {
     }
 }
 
-/// Render the species-threshold caveat warning lines of a `/profile` JSON document.
-#[wasm_bindgen]
-pub fn render_profile_caveats(doc_json: &str) -> Result<String, JsError> {
-    let doc = ProfileDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
-    Ok(render::render_profile_caveats(&doc))
-}
-
 /// Render the 11-column hits TSV of a `/assembly` JSON document.
 #[wasm_bindgen]
 pub fn render_assembly_tsv(doc_json: &str) -> Result<String, JsError> {
-    let doc = AssemblyDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
-    Ok(render::render_assembly_tsv(&doc))
+    let doc = document::parse::<AssemblyDocument>(doc_json).map_err(|e| js_err(e.to_string()))?;
+    Ok(render::render_assembly_tsv(&doc.table))
 }
 
-/// Render the one-line human summary of a `/assembly` JSON document.
-#[wasm_bindgen]
-pub fn render_assembly_summary(doc_json: &str) -> Result<String, JsError> {
-    let doc = AssemblyDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
-    Ok(render::render_assembly_summary(&doc))
-}
-
-/// Render the full stderr summary (summary line + optional species-threshold warning) of `/assembly`.
-#[wasm_bindgen]
-pub fn render_assembly_stderr(doc_json: &str) -> Result<String, JsError> {
-    let doc = AssemblyDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
-    Ok(render::render_assembly_stderr(&doc))
-}
-
-/// Merge a JSON array of `/contigs` batch response documents plus client-side merge options
-/// into a single run document JSON of the same shape.
+/// Merge a JSON array of `/contigs` batch response documents plus the run's
+/// request and client-side counters into a single run document JSON.
+///
+/// `options_json` is a [`ContigsRunMergeOptions`] object that may carry the
+/// per-contig `request` options (`top`, `min_ani`, `consensus_ratio`,
+/// `consensus_z`, `fields`) the batches were requested with.
 #[wasm_bindgen]
 pub fn merge_contigs_run(
     batches_json: &str,
     options_json: Option<String>,
 ) -> Result<String, JsError> {
-    #[derive(serde::Deserialize)]
-    struct VersionProbe {
+    #[derive(serde::Deserialize, Default)]
+    struct RunOptions {
         #[serde(default)]
-        api_version: Option<serde_json::Value>,
+        request: ContigsRequestOptions,
+        #[serde(flatten)]
+        merge: ContigsRunMergeOptions,
     }
-    let probes: Vec<VersionProbe> = serde_json::from_str(batches_json)
-        .map_err(|e| js_err(format!("invalid contigs batches JSON: {e}")))?;
-    for probe in &probes {
-        let ver = probe
-            .api_version
-            .as_ref()
-            .and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| js_err(document::DocumentError::MissingApiVersion.to_string()))?;
-        document::check_api_version(ver).map_err(|e| js_err(e.to_string()))?;
-    }
-    let batches: Vec<ContigsDocument> = serde_json::from_str(batches_json)
-        .map_err(|e| js_err(format!("invalid contigs batches JSON: {e}")))?;
-    let options: ContigsRunMergeOptions = match options_json.as_deref() {
-        None | Some("") => ContigsRunMergeOptions::default(),
+    let batches = document::parse_contigs_batches(batches_json).map_err(|e| js_err(e.to_string()))?;
+    let options: RunOptions = match options_json.as_deref() {
+        None | Some("") => RunOptions::default(),
         Some(raw) => serde_json::from_str(raw)
             .map_err(|e| js_err(format!("invalid merge options JSON: {e}")))?,
     };
-    let merged =
-        document::merge_contigs_run(&batches, &options).map_err(|e| js_err(e.to_string()))?;
+    let merged = document::merge_contigs_run(&batches, &options.request, &options.merge)
+        .map_err(|e| js_err(e.to_string()))?;
     serde_json::to_string(&merged)
         .map_err(|e| js_err(format!("failed to serialize run document: {e}")))
 }
@@ -640,33 +584,142 @@ pub fn merge_contigs_run(
 /// Render the flat per-contig TSV of a `/contigs` (single-batch or merged run) JSON document.
 #[wasm_bindgen]
 pub fn render_contigs_tsv(doc_json: &str) -> Result<String, JsError> {
-    let doc = ContigsDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
-    Ok(render::render_contigs_tsv(&doc))
+    let doc = document::parse::<ContigsDocument>(doc_json).map_err(|e| js_err(e.to_string()))?;
+    Ok(render::render_contigs_tsv(&doc.table))
 }
 
-/// Render the two-line human summary plus caveats of a `/contigs` JSON document.
-#[wasm_bindgen]
-pub fn render_contigs_summary(doc_json: &str) -> Result<String, JsError> {
-    let doc = ContigsDocument::from_json_str(doc_json).map_err(|e| js_err(e.to_string()))?;
-    Ok(render::render_contigs_summary(&doc))
+// ---------------------------------------------------------------------------
+// Per-contig batching, request names and ready-made sketches
+// ---------------------------------------------------------------------------
+
+/// One contig to plan: its request entry and the byte length of its sketch.
+#[derive(serde::Deserialize)]
+struct PlannedContig {
+    #[serde(flatten)]
+    spec: ContigSpec,
+    payload_bytes: usize,
 }
 
-/// Render human-readable `/info` text (matching `sylphd info`) from `/info` and optional `/messages` JSON.
+/// The `/info` `limits` that bound a `/contigs` request.
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct ServerLimits {
+    max_contigs: Option<usize>,
+    max_params_bytes: Option<usize>,
+    max_upload_mb: Option<usize>,
+}
+
+/// Splits contigs into `/contigs` requests that fit the server's limits.
+///
+/// `contigs_json`: `[{name, contig_kmers, length, gc, payload_bytes}, ...]`;
+/// `limits_json`: the `limits` object of `/info`; `request_json`: the request
+/// options (`top`, `min_ani`, `consensus_ratio`, `consensus_z`, `fields`,
+/// optional `tax_sources`). Returns `[{"indices": [...], "params": "<json>"}, ...]`
+/// in request order: the positions in `contigs_json` of each request's contigs
+/// and the exact `params` text to send. Throws when one contig cannot fit.
 #[wasm_bindgen]
-pub fn render_info(info_json: &str, messages_json: Option<String>) -> Result<String, JsError> {
-    let info = InfoDocument::from_json_str(info_json).map_err(|e| js_err(e.to_string()))?;
-    let messages: Vec<MessageItem> = match messages_json.as_deref() {
-        None | Some("") => Vec::new(),
-        Some(raw) => {
-            if raw.trim_start().starts_with('[') {
-                serde_json::from_str(raw)
-                    .map_err(|e| js_err(format!("invalid messages JSON: {e}")))?
-            } else {
-                let resp: MessagesResponse = serde_json::from_str(raw)
-                    .map_err(|e| js_err(format!("invalid messages JSON: {e}")))?;
-                resp.messages
-            }
+pub fn plan_contig_requests(
+    contigs_json: &str,
+    limits_json: &str,
+    request_json: &str,
+) -> Result<String, JsError> {
+    let contigs: Vec<PlannedContig> = serde_json::from_str(contigs_json)
+        .map_err(|e| js_err(format!("invalid contigs JSON: {e}")))?;
+    let limits: ServerLimits = serde_json::from_str(limits_json)
+        .map_err(|e| js_err(format!("invalid limits JSON: {e}")))?;
+    let request: ContigsRequestOptions = serde_json::from_str(request_json)
+        .map_err(|e| js_err(format!("invalid request JSON: {e}")))?;
+    let limits = BatchLimits::from_server_limits(
+        limits.max_contigs,
+        limits.max_params_bytes,
+        limits.max_upload_mb,
+    );
+    let items = contigs
+        .into_iter()
+        .enumerate()
+        .map(|(index, c)| (c.spec, c.payload_bytes, index));
+    let batches = plan_contig_batches(items, limits, &request).map_err(|e| js_err(e.to_string()))?;
+    let out: Vec<serde_json::Value> = batches
+        .iter()
+        .map(|batch| {
+            serde_json::json!({
+                "indices": batch.items.iter().map(|item| item.item).collect::<Vec<_>>(),
+                "params": batch.params_json(&request),
+            })
+        })
+        .collect();
+    serde_json::to_string(&out).map_err(|e| js_err(e.to_string()))
+}
+
+/// Makes contig sample names unique within one request set: a repeated id
+/// gets `_2`, `_3`, ...; an empty id is `contig-<index>`.
+#[wasm_bindgen]
+pub struct WasmContigNames {
+    inner: ContigNameTracker,
+}
+
+#[wasm_bindgen]
+impl WasmContigNames {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmContigNames {
+        WasmContigNames {
+            inner: ContigNameTracker::new(),
         }
+    }
+
+    /// The unique name of the record `raw` (its header id) at 1-based `index`.
+    pub fn next_name(&mut self, raw: &str, index: f64) -> String {
+        self.inner.next_name(raw, index as u64)
+    }
+}
+
+impl Default for WasmContigNames {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Where the tail of a `.sylsp` file starts, from its first 8 bytes and its
+/// size: returns `[kmer count, tail offset]`. Throws when the file cannot be a
+/// sketch.
+#[wasm_bindgen]
+pub fn sylsp_tail_start(prefix: &[u8], size: f64) -> Result<Vec<f64>, JsError> {
+    let (count, start) =
+        sketchcheck::sketch_tail_start(prefix, size as u64).map_err(|e| js_err(e.to_string()))?;
+    Ok(vec![count as f64, start as f64])
+}
+
+/// Validates the tail of a `.sylsp` file (everything after the k-mer table)
+/// and returns its header as JSON: `{kmers, c, k, fileName, sampleName, paired}`.
+#[wasm_bindgen]
+pub fn sylsp_header(tail: &[u8], kmer_count: f64, tail_offset: f64) -> Result<String, JsError> {
+    let header = sketchcheck::parse_sketch_tail(tail, kmer_count as u64, tail_offset as u64)
+        .map_err(|e| js_err(e.to_string()))?;
+    Ok(serde_json::json!({
+        "kmers": header.kmer_count,
+        "c": header.c,
+        "k": header.k,
+        "fileName": header.file_name,
+        "sampleName": header.sample_name,
+        "paired": header.paired,
+    })
+    .to_string())
+}
+
+/// Why a sketch made with `(c, k)` cannot be searched in a database with
+/// `(db_c, db_k)`, or `undefined` when it can.
+#[wasm_bindgen]
+pub fn sketch_incompatibility(c: f64, k: f64, db_c: f64, db_k: f64) -> Option<String> {
+    let header = sketchcheck::SketchHeader {
+        c: c as u64,
+        k: k as u64,
+        file_name: String::new(),
+        sample_name: None,
+        paired: false,
+        mean_read_length: 0.0,
+        kmer_count: 0,
     };
-    Ok(render::render_info(&info, &messages))
+    sketchcheck::check_sketch_compatibility(&header, db_c as u64, db_k as u64, None)
+        .err()
+        .map(|e| e.to_string())
 }

@@ -4,31 +4,15 @@
 //! BGZF and concatenated gzip files all stream through the same reader.
 
 use std::fs::File;
-use std::io::{self, BufReader, Read};
+use std::io::{self, BufReader, Chain, Cursor, Read};
 use std::path::Path;
 
 use flate2::read::MultiGzDecoder;
 
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
-struct PrefixReader<R> {
-    prefix: [u8; 2],
-    pos: usize,
-    len: usize,
-    inner: R,
-}
-
-impl<R: Read> Read for PrefixReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.pos < self.len {
-            let n = (self.len - self.pos).min(buf.len());
-            buf[..n].copy_from_slice(&self.prefix[self.pos..self.pos + n]);
-            self.pos += n;
-            return Ok(n);
-        }
-        self.inner.read(buf)
-    }
-}
+/// The sniffed bytes put back in front of the rest of the stream.
+type Prefixed<R> = Chain<Cursor<Vec<u8>>, R>;
 
 /// Reader that transparently decompresses gzip (including multi-member / BGZF)
 /// when the stream starts with the gzip magic bytes `1f 8b`, and passes plain
@@ -38,8 +22,8 @@ pub struct MaybeGzReader<R: Read> {
 }
 
 enum MaybeGzInner<R: Read> {
-    Plain(PrefixReader<R>),
-    Gzip(Box<MultiGzDecoder<PrefixReader<R>>>),
+    Plain(Prefixed<R>),
+    Gzip(Box<MultiGzDecoder<Prefixed<R>>>),
 }
 
 impl<R: Read> MaybeGzReader<R> {
@@ -54,23 +38,13 @@ impl<R: Read> MaybeGzReader<R> {
                 n => len += n,
             }
         }
-        let prefixed = PrefixReader {
-            prefix,
-            pos: 0,
-            len,
-            inner: reader,
-        };
+        let prefixed = Cursor::new(prefix[..len].to_vec()).chain(reader);
         let inner = if len == 2 && prefix == GZIP_MAGIC {
             MaybeGzInner::Gzip(Box::new(MultiGzDecoder::new(prefixed)))
         } else {
             MaybeGzInner::Plain(prefixed)
         };
         Ok(Self { inner })
-    }
-
-    /// Whether gzip magic bytes were detected.
-    pub fn is_gzip(&self) -> bool {
-        matches!(self.inner, MaybeGzInner::Gzip(_))
     }
 }
 
@@ -87,4 +61,23 @@ impl<R: Read> Read for MaybeGzReader<R> {
 pub fn open_maybe_gzip(path: impl AsRef<Path>) -> io::Result<MaybeGzReader<BufReader<File>>> {
     let file = File::open(path)?;
     MaybeGzReader::new(BufReader::with_capacity(128 * 1024, file))
+}
+
+/// Size of the chunks [`for_each_chunk`] reads.
+const CHUNK_SIZE: usize = 128 * 1024;
+
+/// Reads `reader` (gzip detected automatically) to the end in chunks, passing
+/// each to `chunk`. I/O errors become `E` through its `From<String>`.
+pub fn for_each_chunk<R: Read, E: From<String>>(
+    reader: R,
+    mut chunk: impl FnMut(&[u8]) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut reader = MaybeGzReader::new(reader).map_err(|e| E::from(e.to_string()))?;
+    let mut buf = vec![0u8; CHUNK_SIZE];
+    loop {
+        match reader.read(&mut buf).map_err(|e| E::from(e.to_string()))? {
+            0 => return Ok(()),
+            n => chunk(&buf[..n])?,
+        }
+    }
 }

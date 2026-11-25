@@ -11,9 +11,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
-  initSync, supported_api_version, check_api_version, render_tsv, render_profile_caveats,
-  render_assembly_tsv, render_assembly_summary, render_assembly_stderr,
-  merge_contigs_run, render_contigs_tsv, render_contigs_summary, render_info,
+  initSync, check_api_version, render_tsv, render_assembly_tsv,
+  merge_contigs_run, render_contigs_tsv,
 } from "../../../web/wasm/sylph_sketch.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -29,7 +28,6 @@ const attempt = (f) => {
 };
 
 const out = {
-  supported_api_version: supported_api_version(),
   api_version_1: attempt(() => check_api_version(1) ?? "ok"),
   api_version_2: attempt(() => check_api_version(2)),
 };
@@ -43,29 +41,15 @@ if (payload.batches !== undefined) {
     return {
       doc: JSON.parse(docJson),
       tsv: render_contigs_tsv(docJson),
-      summary: render_contigs_summary(docJson),
     };
   });
 }
 if (payload.profile !== undefined) {
   const docJson = JSON.stringify(payload.profile);
-  out.profile = attempt(() => ({
-    tsv: render_tsv(docJson),
-    caveats: render_profile_caveats(docJson),
-  }));
+  out.profile = attempt(() => ({ tsv: render_tsv(docJson) }));
 }
 if (payload.assembly !== undefined) {
   const docJson = JSON.stringify(payload.assembly);
-  out.assembly = attempt(() => ({
-    tsv: render_assembly_tsv(docJson),
-    summary: render_assembly_summary(docJson),
-    stderr: render_assembly_stderr(docJson),
-  }));
-}
-if (payload.info !== undefined) {
-  out.info = attempt(() => render_info(
-    JSON.stringify(payload.info),
-    payload.messages === undefined ? undefined : JSON.stringify(payload.messages),
-  ));
+  out.assembly = attempt(() => ({ tsv: render_assembly_tsv(docJson) }));
 }
 console.log(JSON.stringify(out));

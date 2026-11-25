@@ -128,5 +128,15 @@
       "uid": 42,
       "expect": {"kind": "url", "value": "http://[::1]:9000"}
     }
+  ],
+  "token_cases": [
+    {"name": "remote_http_refused", "url": "http://example.org", "allowed": false},
+    {"name": "remote_http_with_port_refused", "url": "http://example.org:8080/sylphd", "allowed": false},
+    {"name": "remote_ipv4_http_refused", "url": "http://192.0.2.1:9000", "allowed": false},
+    {"name": "localhost_http_allowed", "url": "http://localhost:9000", "allowed": true},
+    {"name": "ipv4_loopback_http_allowed", "url": "http://127.0.0.1:9000", "allowed": true},
+    {"name": "ipv6_loopback_http_allowed", "url": "http://[::1]:9000", "allowed": true},
+    {"name": "remote_https_allowed", "url": "https://example.org", "allowed": true},
+    {"name": "ipv6_loopback_https_allowed", "url": "https://[::1]:9000", "allowed": true}
   ]
 }

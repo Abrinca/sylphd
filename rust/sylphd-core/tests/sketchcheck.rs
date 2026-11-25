@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use sylphd_core::sketchcheck::{
-    check_sketch_compatibility, parse_sketch_header, read_sketch_header, validate_sketch_bytes,
+    check_sketch_compatibility, parse_sketch_header, read_sketch_header,
 };
 use sylphd_core::stream::StreamSketcher;
 
@@ -95,7 +95,6 @@ fn accepts_all_stored_fixture_sketches() {
     for path in &sylsp_files {
         let bytes = fs::read(path).unwrap();
         let header = parse_sketch_header(&bytes).unwrap();
-        assert_eq!(validate_sketch_bytes(&bytes).unwrap(), (header.c, header.k));
         // Seek-based file reader must agree with in-memory parser
         assert_eq!(read_sketch_header(path).unwrap(), header);
     }
@@ -140,7 +139,7 @@ fn accepts_fresh_single_and_paired_sketches() {
 fn accepts_trailing_bytes_optional_sample_name_and_empty_kmers() {
     let mut data = build_sketch(BuildArgs::default());
     data.extend_from_slice(b"\x00trailing");
-    assert_eq!(validate_sketch_bytes(&data).unwrap(), (200, 31));
+    assert_eq!({ let h = parse_sketch_header(&data).unwrap(); (h.c, h.k) }, (200, 31));
 
     let with_name = parse_sketch_header(&build_sketch(BuildArgs {
         sample_name: Some(b"sample-a"),
@@ -166,14 +165,14 @@ fn accepts_trailing_bytes_optional_sample_name_and_empty_kmers() {
 
 #[test]
 fn rejects_malformed_and_every_truncation() {
-    assert!(validate_sketch_bytes(b"")
+    assert!(parse_sketch_header(b"")
         .unwrap_err()
         .0
         .contains("too short"));
 
     // 8-byte allocation bombs, including u64 overflow cases
     for count in [100_000_000u64, 1u64 << 63, u64::MAX] {
-        let err = validate_sketch_bytes(&count.to_le_bytes()).unwrap_err();
+        let err = parse_sketch_header(&count.to_le_bytes()).unwrap_err();
         assert!(err.0.contains("declares"), "{err}");
     }
 
@@ -183,7 +182,7 @@ fn rejects_malformed_and_every_truncation() {
         ..Default::default()
     });
     patched[..8].copy_from_slice(&3u64.to_le_bytes());
-    assert!(validate_sketch_bytes(&patched)
+    assert!(parse_sketch_header(&patched)
         .unwrap_err()
         .0
         .contains("declares"));
@@ -199,7 +198,7 @@ fn rejects_malformed_and_every_truncation() {
     ] {
         for cut in 0..data.len() {
             assert!(
-                validate_sketch_bytes(&data[..cut]).is_err(),
+                parse_sketch_header(&data[..cut]).is_err(),
                 "cut at {cut}/{} was accepted",
                 data.len()
             );

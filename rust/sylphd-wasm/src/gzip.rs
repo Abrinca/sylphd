@@ -101,7 +101,7 @@ impl Default for GzipDecoder {
 /// `Ok(Some(len))`: the header is complete and `len` bytes long; `Ok(None)`:
 /// more bytes are needed.
 fn parse_header(h: &[u8]) -> Result<Option<usize>, String> {
-    if h.len() >= 1 && h[0] != 0x1f || h.len() >= 2 && h[1] != 0x8b {
+    if !h.is_empty() && h[0] != 0x1f || h.len() >= 2 && h[1] != 0x8b {
         return Err("not gzip data (bad magic)".into());
     }
     if h.len() < 10 {

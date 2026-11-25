@@ -1,11 +1,12 @@
 //! Blocking `reqwest` transport for a Unix socket or an HTTP(S) base URL.
 //!
-//! Mirrors `src/sylphd/client.py`: `User-Agent: sylphd/<version>`, the bearer
+//! Sends `User-Agent: sylphd/<version>`, the bearer
 //! token, `x-token-valid` warnings, and retries of `429`/`503` honouring
 //! `Retry-After`.
 
 use std::time::Duration;
 
+use bytes::Bytes;
 use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::{Client as HttpClient, ClientBuilder, RequestBuilder};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
@@ -51,7 +52,7 @@ pub fn init_crypto() {
 }
 
 /// A retry delay for the next attempt: `Retry-After`, but at least
-/// `1, 2, 4...` seconds, capped at [`MAX_RETRY_DELAY`] (`client._retry_delay`).
+/// `1, 2, 4...` seconds, capped at [`MAX_RETRY_DELAY`] .
 pub fn retry_delay(retry_after: Option<&str>, attempt: u32) -> f64 {
     let advised = retry_after
         .and_then(|text| text.trim().parse::<f64>().ok())
@@ -71,11 +72,11 @@ pub struct Client {
 }
 
 impl Client {
-    /// Builds the transport for a resolved address (`client.connect`).
+    /// Builds the transport for a resolved address.
     pub fn new(
         address: Address,
         timeout: Option<f64>,
-        retries: i64,
+        retries: u32,
         token: Option<String>,
     ) -> Result<Self, ClientError> {
         init_crypto();
@@ -110,7 +111,7 @@ impl Client {
                     .map_err(|e| ClientError(format!("invalid server URL {url:?}: {e}")))?;
                 if parsed.scheme() == "http"
                     && token.is_some()
-                    && !crate::address::is_local_host(parsed.host_str().unwrap_or(""))
+                    && !crate::address::is_local_host(&parsed)
                 {
                     return Err(ClientError(
                         "refusing to send a token over plain http".into(),
@@ -136,11 +137,11 @@ impl Client {
             address,
             base,
             token_valid: None,
-            retries: retries.max(0) as u32,
+            retries,
         })
     }
 
-    /// The base URL, when the client talks HTTP(S) (`client.base_url`).
+    /// The base URL, when the client talks HTTP(S) .
     pub fn base_url(&self) -> Option<&str> {
         match &self.address {
             Address::Url(_) => Some(&self.base),
@@ -231,7 +232,7 @@ impl Client {
         let url = self.url("info");
         let inner = self.inner.clone();
         let raw = self.send_with_retry(move || Ok(inner.get(&url)))?;
-        let info = InfoDocument::from_json_str(&raw).map_err(|e| ClientError(e.to_string()))?;
+        let info: InfoDocument = sylphd_core::document::parse(&raw).map_err(|e| ClientError(e.to_string()))?;
         Ok((raw, info))
     }
 
@@ -271,19 +272,19 @@ impl Client {
         &mut self,
         endpoint: &str,
         params_json: &str,
-        parts: &[(String, Vec<u8>)],
+        parts: &[(String, Bytes)],
     ) -> Result<String, ClientError> {
         let url = self.url(endpoint);
         let inner = self.inner.clone();
         let params_json = params_json.to_string();
-        let parts = parts.to_vec();
+        let parts = parts.to_vec(); // `Bytes` clones share the sketch
         self.send_with_retry(move || {
             let mut form = Form::new().text("params", params_json.clone());
             for (name, bytes) in &parts {
                 form = form.part(
                     "sketch",
-                    Part::bytes(bytes.clone())
-                        .file_name(format!("{}.sylsp", name))
+                    Part::reader_with_length(std::io::Cursor::new(bytes.clone()), bytes.len() as u64)
+                        .file_name(format!("{name}.sylsp"))
                         .mime_str("application/octet-stream")
                         .map_err(|e| ClientError(format!("multipart error: {e}")))?,
                 );
@@ -296,7 +297,7 @@ impl Client {
     pub fn post_assembly(
         &mut self,
         query: &[(String, String)],
-        body: Vec<u8>,
+        body: Bytes,
         content_type: &str,
     ) -> Result<String, ClientError> {
         let url = self.url("assembly");
@@ -310,12 +311,12 @@ impl Client {
         })
     }
 
-    /// Builds the transport from CLI options (`_client_from_args`).
+    /// Builds the transport from CLI options .
     pub fn from_cli(
         args: &AddressArgs,
         env: &dyn Env,
         timeout: Option<f64>,
-        retries: i64,
+        retries: u32,
         token: Option<String>,
     ) -> Result<Self, ClientError> {
         let address = crate::address::resolve_address(args, env).map_err(|e| ClientError(e.0))?;
@@ -371,5 +372,113 @@ mod tests {
             response_error_text(503, "Service Unavailable", "   ".into()),
             "server error (503): Service Unavailable"
         );
+    }
+
+    /// A one-connection-per-response HTTP stub: answers the scripted raw
+    /// responses in order, one per accepted connection, and counts requests.
+    fn stub(responses: Vec<String>) -> (String, std::thread::JoinHandle<usize>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let mut served = 0;
+            for response in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buffer = [0u8; 4096];
+                let mut seen = Vec::new();
+                while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let n = stream.read(&mut buffer).unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    seen.extend_from_slice(&buffer[..n]);
+                }
+                stream.write_all(response.as_bytes()).unwrap();
+                served += 1;
+            }
+            served
+        });
+        (base, handle)
+    }
+
+    fn reply(status: &str, headers: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n{headers}\r\n{body}",
+            body.len()
+        )
+    }
+
+    fn get(client: &mut Client, path: &str) -> Result<String, ClientError> {
+        let url = client.url(path);
+        let inner = client.inner.clone();
+        client.send_with_retry(move || Ok(inner.get(&url)))
+    }
+
+    #[test]
+    fn retries_429_honouring_retry_after_then_succeeds() {
+        let (base, server) = stub(vec![
+            reply("429 Too Many Requests", "retry-after: 0\r\n", "slow down"),
+            reply("200 OK", "", "{\"ok\":true}"),
+        ]);
+        let mut client = Client::new(Address::Url(base), None, 2, None).unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(get(&mut client, "info").unwrap(), "{\"ok\":true}");
+        // `Retry-After: 0` still waits the 1 s backoff of the first attempt.
+        assert!(started.elapsed() >= Duration::from_secs(1));
+        assert_eq!(server.join().unwrap(), 2);
+    }
+
+    #[test]
+    fn exhausted_retries_report_the_server_error() {
+        let (base, server) = stub(vec![
+            reply("503 Service Unavailable", "retry-after: 0\r\n", "{\"error\":\"busy\"}"),
+            reply("503 Service Unavailable", "retry-after: 0\r\n", "{\"error\":\"busy\"}"),
+        ]);
+        let mut client = Client::new(Address::Url(base), None, 1, None).unwrap();
+        let error = get(&mut client, "info").unwrap_err();
+        assert_eq!(error.0, "server error (503): busy");
+        assert_eq!(server.join().unwrap(), 2);
+    }
+
+    #[test]
+    fn no_retries_by_default() {
+        let (base, server) = stub(vec![reply("429 Too Many Requests", "", "no")]);
+        let mut client = Client::new(Address::Url(base), None, 0, None).unwrap();
+        assert_eq!(get(&mut client, "info").unwrap_err().0, "server error (429): no");
+        assert_eq!(server.join().unwrap(), 1);
+    }
+
+    #[test]
+    fn rejected_token_is_noted_once() {
+        let (base, server) = stub(vec![
+            reply("200 OK", "x-token-valid: false\r\n", "{}"),
+            reply("200 OK", "x-token-valid: false\r\n", "{}"),
+        ]);
+        let mut client = Client::new(Address::Url(base), None, 0, Some("secret".into())).unwrap();
+        assert_eq!(client.token_valid, None);
+        get(&mut client, "info").unwrap();
+        assert_eq!(client.token_valid, Some(false));
+        get(&mut client, "info").unwrap();
+        assert_eq!(client.token_valid, Some(false));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn token_policy_matches_the_shared_table() {
+        let table: Value = serde_json::from_str(include_str!("../../../tests/data/address_cases.json"))
+            .expect("valid table");
+        let cases = table["token_cases"].as_array().expect("token_cases");
+        assert!(cases.len() >= 6);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let url = crate::address::normalize_base_url(case["url"].as_str().unwrap()).unwrap();
+            let result = Client::new(Address::Url(url), None, 0, Some("secret".into()));
+            if case["allowed"].as_bool().unwrap() {
+                assert!(result.is_ok(), "case {name}");
+            } else {
+                let error = result.err().unwrap_or_else(|| panic!("case {name}: accepted"));
+                assert!(error.0.contains("refusing to send a token"), "case {name}");
+            }
+        }
     }
 }

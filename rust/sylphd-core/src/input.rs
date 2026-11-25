@@ -1,8 +1,5 @@
 //! Sample naming, CLI input specification parsing, assembly stats, contig
 //! filtering and native sketching helpers.
-//!
-//! Ported from `src/sylphd/sketching.py`, `src/sylphd/cli.py::_load_samples`
-//! and `src/sylphd/per_contig_client.py`.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -20,7 +17,7 @@ use crate::contig::ContigRecord;
 #[cfg(feature = "io")]
 use crate::contig::{ContigSketcher, DEFAULT_MIN_SPACING};
 #[cfg(feature = "io")]
-use crate::io::{open_maybe_gzip, MaybeGzReader};
+use crate::io::for_each_chunk;
 use crate::parser::RecordParser;
 use crate::sketch::{default_fpr, gc_percent, SketchBuilder};
 #[cfg(feature = "io")]
@@ -42,7 +39,7 @@ pub const MAX_SAMPLE_NAME_CHARS: usize = 1024;
 /// Default minimum contig length in bases for `--per-contig`.
 pub const DEFAULT_MIN_CONTIG_LENGTH: u64 = 20_000;
 
-/// Minimum sketched k-mers required for a contig to be queried (`per_contig.QUERY_PARAMS.min_number_kmers`).
+/// Minimum sketched k-mers required for a contig to be queried.
 pub const DEFAULT_MIN_NUMBER_KMERS: u64 = 10;
 
 /// Error returned for invalid input specifications, unreadable files or
@@ -249,7 +246,7 @@ impl SampleInput {
         Ok(self)
     }
 
-    /// True for two-file paired inputs (false for interleaved, matching Python's `SampleInput.paired`).
+    /// True for two-file paired inputs (false for interleaved).
     pub fn is_paired(&self) -> bool {
         matches!(self.files, SampleFiles::Paired(_))
     }
@@ -452,7 +449,7 @@ pub struct AssemblyStats {
 
 /// Streaming single-assembly sketcher (FASTA/FASTQ -> `.sylsp` + [`AssemblyStats`]).
 ///
-/// Mirrors `sylphd.sketching.sketch_assembly`: rejects empty sequences and
+/// Rejects empty sequences and
 /// inputs with zero sequences.
 pub struct AssemblySketcher {
     builder: SketchBuilder,
@@ -462,17 +459,8 @@ pub struct AssemblySketcher {
 
 impl AssemblySketcher {
     pub fn new(label: impl Into<String>, c: usize, k: usize) -> Result<Self, InputError> {
-        Self::with_seeding(label, c, k, Seeding::Avx2Compat)
-    }
-
-    pub fn with_seeding(
-        label: impl Into<String>,
-        c: usize,
-        k: usize,
-        seeding: Seeding,
-    ) -> Result<Self, InputError> {
         Ok(Self {
-            builder: SketchBuilder::new(c, k, true, default_fpr(), seeding)?,
+            builder: SketchBuilder::new(c, k, true, default_fpr(), Seeding::Avx2Compat)?,
             parser: RecordParser::new(),
             label: label.into(),
         })
@@ -577,8 +565,6 @@ pub struct PreparedContig {
 
 /// Applies client-side per-contig name validation, deduplication, and
 /// short / too-few-k-mer filtering with skip counters.
-///
-/// Matches `sylphd.sketching.sketch_contigs` + `per_contig_client.run`.
 #[derive(Debug, Clone)]
 pub struct ContigFilter {
     min_number_kmers: u64,
@@ -619,6 +605,7 @@ impl ContigFilter {
         check_sample_name(&validated_raw)
             .map_err(|e| InputError(format!("record #{}: {e}", record.index)))?;
 
+        let sketch_kmers = record.sketch_kmers().unwrap_or(0);
         let (Some(sketch), Some(contig_kmers)) = (record.sketch, record.contig_kmers) else {
             self.counters.skipped_short.add(record.length);
             return Ok(None);
@@ -632,11 +619,6 @@ impl ContigFilter {
             },
             record.index,
         );
-        let sketch_kmers = sketch
-            .get(..8)
-            .and_then(|b| <[u8; 8]>::try_from(b).ok())
-            .map(u64::from_le_bytes)
-            .unwrap_or(0);
 
         if sketch_kmers < self.min_number_kmers || contig_kmers == 0 {
             self.counters.skipped_few_kmers.add(record.length);
@@ -653,10 +635,6 @@ impl ContigFilter {
             contig_kmers,
             sketch,
         }))
-    }
-
-    pub fn counters(&self) -> &SkipCounters {
-        &self.counters
     }
 
     pub fn into_counters(self) -> SkipCounters {
@@ -784,20 +762,19 @@ pub fn sketch_assembly_reader<R: Read>(
     c: usize,
     k: usize,
 ) -> Result<(Vec<u8>, AssemblyStats), InputError> {
-    let mut reader =
-        MaybeGzReader::new(reader).map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
     let mut sketcher = AssemblySketcher::new(label, c, k)?;
-    let mut buf = vec![0u8; 128 * 1024];
-    loop {
-        let n = reader
-            .read(&mut buf)
-            .map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
-        if n == 0 {
-            break;
-        }
-        sketcher.push(&buf[..n])?;
-    }
+    for_each_chunk(reader, |chunk| sketcher.push(chunk)).map_err(|e: InputError| {
+        InputError(format!("cannot sketch {label}: {e}"))
+    })?;
     sketcher.finish(name)
+}
+
+/// Opens `path` for reading, with the path in the error.
+#[cfg(feature = "io")]
+fn open_buffered(path: &Path, label: &str) -> Result<std::io::BufReader<fs::File>, InputError> {
+    fs::File::open(path)
+        .map(|file| std::io::BufReader::with_capacity(128 * 1024, file))
+        .map_err(|e| InputError(format!("cannot sketch {label}: {e}")))
 }
 
 /// Sketches one assembly file (FASTA/FASTQ, plain or gzip), returning the
@@ -811,21 +788,22 @@ pub fn sketch_assembly_file(
 ) -> Result<(Vec<u8>, AssemblyStats), InputError> {
     let path = path.as_ref();
     let label = path.display().to_string();
-    let reader = open_maybe_gzip(path)
-        .map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
-    let mut sketcher = AssemblySketcher::new(&label, c, k)?;
-    let mut buf = vec![0u8; 128 * 1024];
-    let mut reader = reader;
-    loop {
-        let n = reader
-            .read(&mut buf)
-            .map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
-        if n == 0 {
-            break;
-        }
-        sketcher.push(&buf[..n])?;
+    sketch_assembly_reader(open_buffered(path, &label)?, &label, name, c, k)
+}
+
+/// Why [`sketch_contigs_reader`] stopped: reading or sketching failed
+/// (`Sketch`, reported with the input's label) or the caller's `on_contig` did.
+#[cfg(feature = "io")]
+enum Stop<E> {
+    Sketch(String),
+    Caller(E),
+}
+
+#[cfg(feature = "io")]
+impl<E> From<String> for Stop<E> {
+    fn from(message: String) -> Self {
+        Self::Sketch(message)
     }
-    sketcher.finish(name)
 }
 
 /// Streams a FASTA/FASTQ source record by record for `--per-contig`, applying
@@ -834,15 +812,16 @@ pub fn sketch_assembly_file(
 /// Unlike the browser's `WasmContigSketcher`, imposes no record-count or
 /// record-length cap. Fails with an [`InputError`] if the input has no records.
 #[cfg(feature = "io")]
-pub fn sketch_contigs_reader<R: Read>(
+pub fn sketch_contigs_reader<R: Read, E: From<InputError>>(
     reader: R,
     label: &str,
     c: usize,
     k: usize,
     min_length: u64,
     min_number_kmers: u64,
-    mut on_contig: impl FnMut(PreparedContig) -> Result<(), InputError>,
-) -> Result<SkipCounters, InputError> {
+    mut on_contig: impl FnMut(PreparedContig) -> Result<(), E>,
+) -> Result<SkipCounters, E> {
+    let sketch_error = |e: String| E::from(InputError(format!("cannot sketch {label}: {e}")));
     let mut sketcher = ContigSketcher::with_limits(
         c,
         k,
@@ -852,59 +831,51 @@ pub fn sketch_contigs_reader<R: Read>(
         0,
         0,
     )
-    .map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
+    .map_err(sketch_error)?;
     let mut filter = ContigFilter::new(min_number_kmers);
-    let mut reader =
-        MaybeGzReader::new(reader).map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
-    let mut buf = vec![0u8; 128 * 1024];
-    loop {
-        let n = reader
-            .read(&mut buf)
-            .map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
-        if n == 0 {
-            break;
-        }
-        sketcher
-            .push(&buf[..n])
-            .map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
+    let mut drain = |sketcher: &mut ContigSketcher| -> Result<(), Stop<E>> {
         while let Some(record) = sketcher.take_next() {
-            if let Some(prepared) = filter.process(record)? {
-                on_contig(prepared)?;
+            let prepared = filter.process(record).map_err(|e| Stop::Caller(E::from(e)))?;
+            if let Some(prepared) = prepared {
+                on_contig(prepared).map_err(Stop::Caller)?;
             }
         }
-    }
-    sketcher
-        .end_file()
-        .map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
-    while let Some(record) = sketcher.take_next() {
-        if let Some(prepared) = filter.process(record)? {
-            on_contig(prepared)?;
-        }
-    }
+        Ok(())
+    };
+    for_each_chunk(reader, |chunk| {
+        sketcher.push(chunk)?;
+        drain(&mut sketcher)
+    })
+    .map_err(|stop| match stop {
+        Stop::Sketch(message) => sketch_error(message),
+        Stop::Caller(e) => e,
+    })?;
+    sketcher.end_file().map_err(sketch_error)?;
+    drain(&mut sketcher).map_err(|stop| match stop {
+        Stop::Sketch(message) => sketch_error(message),
+        Stop::Caller(e) => e,
+    })?;
     let counters = filter.into_counters();
     if counters.seen_contigs == 0 {
-        return Err(InputError(format!("{label} contains no sequences")));
+        return Err(E::from(InputError(format!("{label} contains no sequences"))));
     }
     Ok(counters)
 }
 
 /// Streams a FASTA/FASTQ file (plain or gzip) for `--per-contig`.
 #[cfg(feature = "io")]
-pub fn sketch_contigs_file(
+pub fn sketch_contigs_file<E: From<InputError>>(
     path: impl AsRef<Path>,
     c: usize,
     k: usize,
     min_length: u64,
     min_number_kmers: u64,
-    on_contig: impl FnMut(PreparedContig) -> Result<(), InputError>,
-) -> Result<SkipCounters, InputError> {
+    on_contig: impl FnMut(PreparedContig) -> Result<(), E>,
+) -> Result<SkipCounters, E> {
     let path = path.as_ref();
     let label = path.display().to_string();
-    let file = fs::File::open(path)
-        .map_err(|e| InputError(format!("cannot sketch {label}: {e}")))?;
-    let reader = std::io::BufReader::with_capacity(128 * 1024, file);
     sketch_contigs_reader(
-        reader,
+        open_buffered(path, &label)?,
         &label,
         c,
         k,

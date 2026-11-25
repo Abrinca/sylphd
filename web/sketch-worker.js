@@ -232,7 +232,7 @@ async function runContigs({ module, port, c, k, minLength, minSpacing, maxRecord
     finished = true;
     // normally a no-op (end_file already ran on the 'endfile' marker); guards
     // against an input that ends without one
-    sketcher.finish();
+    sketcher.end_file();
     flush(false);
     report(true);
     const result = {

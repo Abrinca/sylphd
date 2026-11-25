@@ -34,16 +34,19 @@ pub const PART_OVERHEAD: usize = 512;
 /// Fixed multipart framing overhead per request (outer boundaries, `params` part).
 pub const REQUEST_OVERHEAD: usize = 512;
 
-/// Default hits per contig (`per_contig.DEFAULT_TOP`).
+/// Default hits printed by `assembly` (without `--per-contig`).
+pub const DEFAULT_ASSEMBLY_TOP: usize = 10;
+
+/// Default hits per contig.
 pub const DEFAULT_TOP: usize = 1;
 
-/// Default minimum contig-relative ANI in percent (`per_contig.DEFAULT_MIN_ANI`).
+/// Default minimum contig-relative ANI in percent .
 pub const DEFAULT_MIN_ANI: f64 = 80.0;
 
-/// Default consensus divergence ratio (`per_contig.DEFAULT_CONSENSUS_RATIO`).
+/// Default consensus divergence ratio .
 pub const DEFAULT_CONSENSUS_RATIO: f64 = 1.5;
 
-/// Default consensus noise multiplier (`per_contig.DEFAULT_CONSENSUS_Z`).
+/// Default consensus noise multiplier .
 pub const DEFAULT_CONSENSUS_Z: f64 = 2.0;
 
 /// Contig count limit per request from `/info`'s `limits.max_contigs`.
@@ -120,6 +123,7 @@ impl From<&PreparedContig> for ContigSpec {
 
 /// Server-side scoring and metadata options carried in every `/contigs` `params` JSON.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ContigsRequestOptions {
     pub top: usize,
     pub min_ani: f64,
@@ -140,6 +144,18 @@ impl Default for ContigsRequestOptions {
             fields: Vec::new(),
             tax_sources: None,
         }
+    }
+}
+
+impl ContigsRequestOptions {
+    /// These options shaped like the `params` of a `/contigs` response (what
+    /// the server echoes: no `tax_sources`).
+    pub fn params_value(&self) -> serde_json::Value {
+        let mut value = serde_json::to_value(self).expect("options are JSON-serializable");
+        if let Some(object) = value.as_object_mut() {
+            object.remove("tax_sources");
+        }
+        value
     }
 }
 
@@ -278,35 +294,12 @@ impl<T> ContigBatchPlanner<T> {
         }
     }
 
-    /// Number of contigs currently buffered in the open batch.
-    pub fn current_len(&self) -> usize {
-        self.items.len()
-    }
-
-    /// Exact UTF-8 byte length of the open batch's `params` JSON.
-    pub fn current_params_bytes(&self) -> usize {
-        self.params_bytes
-    }
-
-    /// Sum of exact `.sylsp` payload lengths currently in the open batch.
-    pub fn current_payload_bytes(&self) -> usize {
-        self.payload_bytes
-    }
-
-    /// Conservative multipart body size of the open batch (`0` when empty).
-    pub fn current_estimated_upload_bytes(&self) -> usize {
-        if self.items.is_empty() {
-            return 0;
-        }
-        self.params_bytes
+    fn take_batch(&mut self) -> PlannedBatch<T> {
+        let estimated_upload_bytes = self.params_bytes
             + self.payload_bytes
             + self.names_bytes
             + self.items.len() * PART_OVERHEAD
-            + REQUEST_OVERHEAD
-    }
-
-    fn take_batch(&mut self) -> PlannedBatch<T> {
-        let estimated_upload_bytes = self.current_estimated_upload_bytes();
+            + REQUEST_OVERHEAD;
         let batch = PlannedBatch {
             items: std::mem::take(&mut self.items),
             params_bytes: self.params_bytes,

@@ -53,12 +53,14 @@
   // Main-thread WebAssembly module (renderer, per-contig merge, api_version checks),
   // reusing the compiled module shared with the sketching workers.
   let wasmPromise = null;
+  let wasmModule = null; // set once loadWasm() has resolved (for the synchronous checks)
   function loadWasm() {
     if (!wasmPromise) {
       wasmPromise = (async () => {
         const glueUrl = new URL('wasm/sylph_sketch.js', document.baseURI).href;
         const [mod, module] = await Promise.all([import(glueUrl), loadModule()]);
         await mod.default({ module_or_path: module });
+        wasmModule = mod;
         return mod;
       })();
       wasmPromise.catch(() => { wasmPromise = null; });
@@ -138,24 +140,6 @@
 
   const isSylsp = (file) => /\.sylsp$/i.test(file.name || '');
 
-  // A sample name for one contig, unique within the *sent* set: repeated header
-  // ids get `_2`, `_3`, ... like sylphd's `unique_contig_name`; a record with no
-  // id is `contig-<index>`. `counts` (Map) and `used` (Set) belong to the caller
-  // and must only cover records it keeps (the sent batch): doing this for every
-  // record of a fragmented assembly would grow with the file.
-  function uniqueContigName(raw, counts, used, index) {
-    const base = raw || `contig-${index}`;
-    let count = (counts.get(base) || 0) + 1;
-    let name = count === 1 ? base : `${base}_${count}`;
-    while (used.has(name)) {
-      count += 1;
-      name = `${base}_${count}`;
-    }
-    counts.set(base, count);
-    used.add(name);
-    return name;
-  }
-
   // One sample sketch per record of a FASTA/FASTQ file (plain or gzip), for
   // POST /contigs: records are streamed to `onContig` as they finish, so memory
   // stays bounded by the largest record (plus the chunks in flight).
@@ -168,7 +152,7 @@
   // `name` is the record's header id (raw), or `contig-<index>` when the header
   // has none; it is **not** unique. Records are transient -- the caller keeps at
   // most a bounded set -- so unique request names are made for the kept records
-  // only, at send time (see uniqueContigName). `sketch` is the .sylsp bytes of
+  // only, at send time (see WasmContigNames). `sketch` is the .sylsp bytes of
   // the record's sample sketch and `contigKmers` the record's genome-style k-mer
   // count, both null for an empty record or one shorter than `minLength`.
   // `gc` is the GC percent (two decimals), `gcCount` the number of G/C bases.
@@ -247,57 +231,32 @@
     return { done, cancel: () => { cancelled = true; kill(); } };
   }
 
-  // Header of a ready-made sketch (.sylsp = bincode of sylph's SequencesSketch; same layout as
-  // src/sylphd/sketchcheck.py): u64 n, n x (u64 kmer, u32 count), u64 c, u64 k, String file_name,
-  // Option<String> sample_name, u8 paired, f64 mean_read_length. Only the 8 bytes at the start and the
-  // small tail after the k-mer entries are read, so a 200 MB sketch is not loaded.
+  // Header of a ready-made sketch (.sylsp), validated by sylphd-core (wasm). Only the 8 bytes at the
+  // start and the small tail after the k-mer entries are read, so a 200 MB sketch is not loaded.
   // Resolves { kmers, c, k, fileName, sampleName, paired }; rejects with a short reason.
   async function readSylspHeader(file) {
-    const bad = (why) => new Error(`not a valid sketch (${why})`);
-    if (file.size < 8) throw bad('too short');
-    const n = new DataView(await file.slice(0, 8).arrayBuffer()).getBigUint64(0, true);
-    const end = 8n + n * 12n;
-    if (end > BigInt(file.size)) throw bad(`declares ${n} k-mers but is only ${file.size} bytes long`);
-    const start = Number(end);
-    const tail = await file.slice(start, Math.min(file.size, start + 4096)).arrayBuffer();
-    const dv = new DataView(tail);
-    const u8 = new Uint8Array(tail);
-    const dec = new TextDecoder('utf-8', { fatal: true });
-    let o = 0;
-    const need = (len, what) => { if (o + len > tail.byteLength) throw bad(`truncated in ${what}`); };
-    const u64 = (what) => { need(8, what); const v = dv.getBigUint64(o, true); o += 8; return v; };
-    const str = (what) => {
-      const len = u64(`${what} length`);
-      if (len > BigInt(tail.byteLength - o)) throw bad(`${what} is too long`);
-      const text = dec.decode(u8.subarray(o, o + Number(len)));
-      o += Number(len);
-      return text;
-    };
+    const wasm = await loadWasm();
+    const bad = (e) => new Error(`not a valid sketch (${e.message || e})`);
     try {
-      const c = u64('c');
-      const k = u64('k');
-      const fileName = str('file_name');
-      need(1, 'sample_name');
-      const tag = u8[o++];
-      if (tag > 1) throw bad('bad sample_name tag');
-      const sampleName = tag ? str('sample_name') : null;
-      need(1, 'paired');
-      const paired = u8[o++] === 1;
-      return { kmers: Number(n), c: Number(c), k: Number(k), fileName, sampleName, paired };
+      const prefix = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+      const [count, start] = wasm.sylsp_tail_start(prefix, file.size);
+      const tail = new Uint8Array(await file.slice(start, Math.min(file.size, start + 4096)).arrayBuffer());
+      return JSON.parse(wasm.sylsp_header(tail, count, start));
     } catch (e) {
-      if (e instanceof TypeError) throw bad('text is not valid UTF-8');
-      throw e;
+      throw bad(e);
     }
   }
 
   // Why the ready-made sketch `file` (with its readSylspHeader result, or { error }) cannot be sent to
   // the server described by `info` (/info), or null: unreadable, c/k the server does not accept, too
-  // big. `what` ('assembly' | 'reads') names the input in the "sketch it again" hint.
+  // big. `what` ('assembly' | 'reads') names the input in the "sketch it again" hint. Needs the wasm
+  // module, which readSylspHeader has loaded by the time there is a header.
   function sketchProblem(file, header, info, what) {
     if (header.error) return `${file.name} is ${header.error}.`;
     const db = (info && info.database) || {};
-    if (Number.isFinite(db.c) && Number.isFinite(db.k) && (header.k !== db.k || header.c > db.c)) {
-      return `This sketch was made with c=${header.c}, k=${header.k}, but the server uses c=${db.c}, k=${db.k}. A sketch must have the same k and may not be sparser (c ≤ ${db.c}); sketch the ${what} again here.`;
+    if (wasmModule && Number.isFinite(db.c) && Number.isFinite(db.k)) {
+      const why = wasmModule.sketch_incompatibility(header.c, header.k, db.c, db.k);
+      if (why) return `This ${why}; sketch the ${what} again here.`;
     }
     const maxMb = (info && info.limits && info.limits.max_upload_mb) || 0;
     if (maxMb && file.size > maxMb * 1048576) {
@@ -307,7 +266,7 @@
   }
 
   window.SylphdSketch = {
-    unsupported, loadModule, loadWasm, start, sketchContigs, uniqueContigName, isSylsp,
+    unsupported, loadModule, loadWasm, start, sketchContigs, isSylsp,
     readSylspHeader, sketchProblem, MAX_CONTIG_RECORDS, MAX_CONTIG_LENGTH,
   };
 })();

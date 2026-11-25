@@ -3,7 +3,7 @@
 Cargo workspace for sylphd's client-side Rust crates:
 
 * **`sylphd-core/`** — pure library (no `wasm-bindgen`, no I/O, no networking): FASTA/FASTQ streaming parser, sylph read and per-contig sketchers (over the `sylph` library core), sample naming and input specification parsing, assembly stats, `.sylsp` header validation, per-contig batch planning, the wire-protocol document model with its `api_version` check and per-contig run merge, result rendering (sylph-identical TSV, summaries, caveats, `info` text), and optional native `std::io::Read` + `flate2` (`io` feature) and `rayon` parallel sketching (`rayon` feature).
-* **`sylphd-client/`** — the `sylphd-client` binary: `profile`, `query`, `assembly` (including `--per-contig` and `--no-local-sketch`), `info` and the offline `render`. It adds address/token resolution (socket, TCP, URL; environment variables; retries) and a blocking `reqwest` transport (multipart, gzip, rustls with the `ring` provider so static musl builds need no cmake) around the core. Behaviour mirrors the Python implementation of steps 1-4 (`src/sylphd/{cli,client,per_contig_client}.py`, deleted in step 5); the Python `sylphd` command forwards to this binary.
+* **`sylphd-client/`** — the `sylphd-client` binary: `profile`, `query`, `assembly` (including `--per-contig` and `--no-local-sketch`), `info` and the offline `render`. It adds address/token resolution (socket, TCP, URL; environment variables; retries) and a blocking `reqwest` transport (multipart, gzip, rustls with the `ring` provider so static musl builds need no cmake) around the core. The Python `sylphd` command forwards to this binary.
 * **`sylphd-wasm/`** — browser WebAssembly bindings (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`, plus the document/renderer functions below) and the push/pull multi-member gzip decoder used by the web app (`web/`, "Reads" and "Assembly" modes).
 
 Originally built as a feasibility spike (`sketch-wasm/`) to sketch FASTQ/FASTA(.gz) reads **locally in the browser**
@@ -30,7 +30,7 @@ pure-Rust `zlib-rs` backend, compiled to wasm. Details below.
 | `sylphd-core/src/sketchcheck.rs` | `.sylsp` header validation and `c`/`k` compatibility checks |
 | `sylphd-core/src/batch.rs` | per-contig greedy batch planner (`max_contigs`, `params` JSON budget, `max_upload_mb`) |
 | `sylphd-core/src/document.rs` | JSON document model of `/info`, `/messages`, `/profile`, `/query`, `/assembly` and `/contigs`; `SUPPORTED_API_VERSION` check; per-contig run merge (`merge_summaries`, `finalize_summary`, `merge_contigs_run`) |
-| `sylphd-core/src/render.rs` | renderer ported from Python: profile/query and per-contig TSV, assembly hits TSV + summary + note, the two per-contig summary lines, caveats, `/info` text and `/messages` lines |
+| `sylphd-core/src/render.rs` | renderer: profile/query and per-contig TSV, assembly hits TSV + summary + note, the two per-contig summary lines, caveats, `/info` text and `/messages` lines |
 | `sylphd-core/tests/` | native equality tests against pysylph (`pysylph_equality.rs`), renderer golden tests (`render.rs` against `tests/data/*_golden.json`), stream tests, input/sketchcheck/batch unit tests |
 | `sylphd-wasm/src/gzip.rs` | push/pull multi-member gzip decoder: own header/trailer/member loop around `flate2`'s raw inflate (`zlib-rs` backend), CRC32 inline, deferred or off |
 | `sylphd-wasm/src/lib.rs` | `wasm-bindgen` API (`WasmSketcher`, `WasmContigSketcher`, `WasmGunzip`, `WasmCrc`, and `check_api_version`, `render_*`, `merge_contigs_run`) |
@@ -132,65 +132,68 @@ caller must not accumulate the records).
 
 Everything the clients do with a server answer lives here: parse the JSON document, check its
 `api_version`, merge `/contigs` batches into a run, and render the bytes the command line and the
-web page show. There is no I/O and no networking. The Python implementation was the specification
-and is gone since step 5 of the plan (`src/sylphd/protocol.py` lost its rendering, `cli.py` its
-`info` text): **the committed goldens are the spec now**. `tests/data/*_golden.json` hold documents
-captured from the Python server and the exact strings the Python renderers produced for them;
-`scripts/regen-render-golden.py` was removed with that renderer, so regenerating them would need
-stock sylph (the `tests/test_sylph_compat.py` route) or a hand-written document. Change a golden
-only together with `render.rs`, and say why in the commit message.
+web page show. There is no I/O and no networking. **The committed goldens are the spec**:
+`tests/data/*_golden.json` hold server documents and the exact strings expected for them.
+Change a golden only together with `render.rs`, and say why in the commit message.
 
 Rust API:
 
 ```rust
-use sylphd_core::document::{check_api_version, ProfileDocument, AssemblyDocument, ContigsDocument,
-    merge_contigs_run, ContigsRunMergeOptions, InfoDocument, SUPPORTED_API_VERSION};
+use sylphd_core::batch::ContigsRequestOptions;
+use sylphd_core::document::{self, merge_contigs_run, AssemblyDocument, ContigsDocument,
+    ContigsRunMergeOptions, InfoDocument, ProfileDocument, Skipped};
 use sylphd_core::render;
 
-check_api_version(doc.api_version)?;            // "server API version N, this client supports M: update sylphd"
-let profile = ProfileDocument::from_json_str(text)?;   // checks api_version first
-let tsv = render::render_profile_tsv(&profile);        // == the old protocol.rows_to_tsv (sylph columns byte-identical)
-let caveats = render::render_profile_caveats(&profile); // "sylphd: warning: ..." lines
+// One generic parser for every server response; it checks api_version first:
+// "server API version N is newer than this client's (M): update sylphd" (or "older ...").
+let profile: ProfileDocument = document::parse(text)?;
+let tsv = render::render_tsv(&profile.table);            // sylph columns byte-identical
+let caveats = render::render_profile_caveats(&profile);  // "sylphd: warning: ..." lines
 
-let assembly = AssemblyDocument::from_json_str(text)?;
-let hits = render::render_assembly_tsv(&assembly);      // cli._write_hits_tsv's 11 columns
-let line = render::render_assembly_summary(&assembly);  // cli._assignment_summary
-let err = render::render_assembly_stderr(&assembly);    // summary line + cli._species_note warning
+let assembly: AssemblyDocument = document::parse(text)?;
+let hits = render::render_assembly_tsv(&assembly.table); // the 11 hit columns
+let line = render::render_assembly_summary(&assembly);
+let err = render::render_assembly_stderr(&assembly);     // summary line + species-threshold note
 
 let batches: Vec<ContigsDocument> = /* one per POST /contigs */;
-let run = merge_contigs_run(&batches, &ContigsRunMergeOptions {
-    skipped_short: SkippedBucket { contigs: 3, bp: 30_000 },   // client-side skip counters
-    skipped_few_kmers: SkippedBucket { contigs: 7, bp: 20_000 },
+let run = merge_contigs_run(&batches, &ContigsRequestOptions::default(), &ContigsRunMergeOptions {
+    skipped_short: Skipped { contigs: 3, bp: 30_000 },       // client-side skip counters
+    skipped_few_kmers: Skipped { contigs: 7, bp: 20_000 },
     min_contig_length: 20_000,
-    not_classified: None,                                       // browser-only 100-contig cap
+    not_classified: None,                                    // browser-only 100-contig cap
     ..Default::default()
-})?;                                                           // same shape as one /contigs response
-let tsv = render::render_contigs_tsv(&run);             // PerContigRun.write_tsv
-let summary = render::render_contigs_summary(&run);     // PerContigRun.print_summary (2 lines + caveats)
+})?;                // same shape as one /contigs response; the request options give the
+                    // `params` and table columns of a run that sent no batch
+let tsv = render::render_contigs_tsv(&run.table);
+let summary = render::render_contigs_summary(&run);      // 2 lines + caveats
 
-let info = InfoDocument::from_json_str(info_text)?;
+let info: InfoDocument = document::parse(info_text)?;
 let text = render::render_info(&info, &messages);        // sylphd info
 ```
+
+A saved document of unknown kind goes through `ResultDocument::parse` (its version error says
+"document API version ..."). Key order of objects is preserved (`serde_json` `preserve_order`,
+`IndexMap` for the per-contig map).
 
 `render_tsv(table)` renders a bare `{"columns", "data"}` table; the `Eff_lambda` cell takes its
 `HIGH`/`LOW` value from the `Lambda_status` column, which is dropped from the TSV. Null cells get
 sylph's spellings (`inf`, `NaN`, `NA-NA`, `""`); intervals print as `a-b`, `Containment_ind` as
 `a/b`. `Adjusted_ANI` is capped at 100 in the TSV; `Naive_ANI` is not. Metadata and unknown
-columns print Python's `str()` (`True`/`False`, `""` for `None`) and the three float-valued
-metadata columns keep the `.0`.
+columns print `True`/`False` and `""` for null; numbers print as the server wrote them (the web page
+passes the server's raw text, so `100.0` stays `100.0`).
 
 The wasm exports mirror these functions and take/return JSON strings:
 
 | export | |
 |---|---|
-| `supported_api_version()` | `1` |
-| `check_api_version(version)` | throws with the "update sylphd" message |
+| `check_api_version(version)` | throws with the "update sylphd" message; `loadInfo` calls it on `/info` before anything is sketched |
 | `render_tsv(docOrTableJson)` | profile/query document (or bare table) → TSV |
-| `render_profile_caveats(docJson)` | warning lines |
-| `render_assembly_tsv/summary/stderr(docJson)` | assembly hits TSV, one-line summary, summary+note |
-| `merge_contigs_run(batchesJson, optionsJson?)` | run document JSON |
-| `render_contigs_tsv/summary(docJson)` | per-contig TSV, two summary lines + caveats |
-| `render_info(infoJson, messagesJson?)` | `sylphd info` text |
+| `render_assembly_tsv(docJson)` | assembly hits TSV |
+| `merge_contigs_run(batchesJson, optionsJson?)` | run document JSON; options = merge options plus `request` |
+| `render_contigs_tsv(docJson)` | per-contig TSV |
+| `plan_contig_requests(contigsJson, limitsJson, requestJson)` | the `/contigs` requests (contig indices and exact `params`) within the server's limits |
+| `WasmContigNames.next_name(raw, index)` | unique request names for contigs |
+| `sylsp_tail_start`, `sylsp_header`, `sketch_incompatibility` | `.sylsp` header check and c/k compatibility |
 
 `web/sketching.js` exposes a main-thread instance (`SylphdSketch.loadWasm()`) that reuses the
 compiled module of the sketching workers; the web app's downloads and the per-contig run merge go

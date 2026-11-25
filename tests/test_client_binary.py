@@ -135,6 +135,21 @@ def token_server(tmp_path_factory, tiny_database: Path):
         yield socket_path
 
 
+@pytest.fixture(scope="module")
+def one_contig_server(tmp_path_factory, tiny_database: Path, tiny_metadata: Path):
+    """A server that takes one contig per ``/contigs`` request: every run is multi-batch."""
+    with _serve(
+        tmp_path_factory.mktemp("client-binary-one-contig"),
+        "--db",
+        str(tiny_database),
+        "--meta",
+        str(tiny_metadata),
+        "--max-contigs",
+        "1",
+    ) as socket_path:
+        yield socket_path
+
+
 TOKEN = "t0ken-" + "x" * 24
 
 
@@ -332,6 +347,27 @@ def test_taxprof_files(server: Path, tmp_path: Path) -> None:
     assert "clodf13" in text.splitlines()[0] or text.splitlines()[0].startswith("#SampleID")
 
 
+def test_taxprof_adds_no_columns_to_the_table(server: Path, tmp_path: Path) -> None:
+    """The server aggregates from its own columns: the table keeps the requested fields,
+    and the client sends ``fields`` and ``taxprof`` as given."""
+    out = tmp_path / "out"
+    out.mkdir()
+    common = ("profile", "--socket", server, CLODF13_FASTA, "--fields", "none", "--taxonomy", "gtdb,ncbi")
+    plain = _run(*common)
+    with_taxprof = _run(*common, "--taxprof", str(out) + "/")
+    assert plain.returncode == with_taxprof.returncode == 0, with_taxprof.stderr
+    assert with_taxprof.stdout == plain.stdout
+    assert "gtdb_taxonomy" not in plain.stdout.splitlines()[0]
+    assert sorted(path.name for path in out.glob("*.sylphmpa")) == [
+        "clodf13.gtdb.sylphmpa",
+        "clodf13.ncbi.sylphmpa",
+    ]
+    # A typo fails before anything is sketched or sent.
+    bad = _run(*common[:-1], "bogus", "--taxprof", str(out) + "/")
+    assert bad.returncode == 1
+    assert "taxonom" in bad.stderr
+
+
 # ---------------------------------------------------------------------------
 # assembly
 # ---------------------------------------------------------------------------
@@ -483,6 +519,70 @@ def test_per_contig_json_is_the_run_document(server: Path, genome: str, tmp_path
     )
     assert rendered.stdout == tsv.stdout
     assert rendered.stderr == tsv.stderr
+
+
+PER_CONTIG_KEYS = [
+    "api_version",
+    "params",
+    "table",
+    "contigs",
+    "summary",
+    "caveats",
+    "database",
+    "thresholds",
+    "elapsed_ms",
+]
+
+
+def _per_contig_json(socket_path: Path, path: Path, *options: str) -> dict:
+    result = _run("assembly", "--socket", socket_path, path, "--per-contig", "--json", *options)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def test_per_contig_batches_merge_into_the_single_request_run(
+    server: Path, one_contig_server: Path, genome: str, tmp_path: Path
+) -> None:
+    """Two contigs in two requests (``--max-contigs 1``) give the run of one request."""
+    path = _contig_fasta(tmp_path, genome)
+    options = ("--min-contig-length", "1000")
+    single = _per_contig_json(server, path, *options)
+    batched = _per_contig_json(one_contig_server, path, *options)
+    assert single["summary"]["queried_contigs"] == 2  # long and medium
+    assert list(batched) == list(single) == PER_CONTIG_KEYS
+    for document in (single, batched):
+        document.pop("elapsed_ms")
+    # The server's database summary and thresholds are the same too: one document, two ways.
+    assert batched == single
+    assert list(batched["contigs"]) == ["long", "medium"]
+
+    rendered = [
+        _run("assembly", "--socket", socket_path, path, "--per-contig", *options)
+        for socket_path in (server, one_contig_server)
+    ]
+    assert rendered[0].returncode == rendered[1].returncode == 0
+    assert rendered[0].stdout == rendered[1].stdout
+    assert rendered[0].stderr == rendered[1].stderr
+
+
+def test_per_contig_empty_run_has_the_shape_of_a_run_with_batches(
+    server: Path, genome: str, tmp_path: Path
+) -> None:
+    """No contig reaches the server: the run is built from the request and /info alone."""
+    path = _contig_fasta(tmp_path, genome)
+    full = _per_contig_json(server, path, "--min-contig-length", "1000")
+    empty = _per_contig_json(server, path, "--min-contig-length", "1000000")
+    assert empty["summary"]["queried_contigs"] == 0
+    assert empty["table"]["data"] == []
+    assert empty["contigs"] == {}
+    assert list(empty) == list(full) == PER_CONTIG_KEYS
+    assert list(empty["params"]) == list(full["params"])
+    assert empty["params"] == full["params"]
+    assert empty["database"] == full["database"]
+    assert empty["thresholds"] == full["thresholds"]
+    assert empty["table"]["columns"] == full["table"]["columns"]
+    assert list(empty["summary"]) == list(full["summary"])
+    assert empty["elapsed_ms"] == 0.0
 
 
 def test_per_contig_options(server: Path, tmp_path: Path) -> None:
@@ -675,7 +775,7 @@ def test_api_version_mismatch_fails_before_sketching() -> None:
     with _fake_server(_info_document(api_version=2), PASSTHROUGH_DOCUMENT) as url:
         result = _run("profile", "--url", url, K12_R1)
     assert result.returncode == 1
-    assert "server API version 2, this client supports 1" in result.stderr
+    assert "server API version 2 is newer than this client's (1): update sylphd" in result.stderr
     assert "update sylphd" in result.stderr
     # Nothing was sketched, so the profile response was never requested:
     assert result.stdout == ""
@@ -699,7 +799,7 @@ def test_render_golden_documents(tmp_path: Path) -> None:
     path.write_text(json.dumps(document))
     mismatch = _run("render", path)
     assert mismatch.returncode == 1
-    assert "server API version 99" in mismatch.stderr
+    assert "document API version 99 is newer" in mismatch.stderr
 
 
 # ---------------------------------------------------------------------------

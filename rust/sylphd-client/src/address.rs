@@ -1,5 +1,4 @@
-//! Server address resolution, matching `docs/commands/address.md` and
-//! `sylphd.cli._client_from_args` exactly.
+//! Server address resolution, as documented in `docs/commands/address.md`.
 //!
 //! Precedence:
 //!
@@ -10,8 +9,8 @@
 //! 5. the default socket path (`$XDG_RUNTIME_DIR/sylphd.sock`, else
 //!    `/tmp/sylphd-$UID.sock`)
 //!
-//! The address and token logic deliberately exists twice: here and in Python's
-//! `client.connect` (which `sylphd.ncbitax` still needs). Both are tested
+//! The address and token logic deliberately exists twice: here and in the Python
+//! client (`client.connect`, which `sylphd.ncbitax` still needs). Both are tested
 //! against the shared table `tests/data/address_cases.json`.
 
 use std::fmt;
@@ -61,17 +60,14 @@ impl Env for ProcessEnv {
     }
 
     fn uid(&self) -> u32 {
-        // `libc::getuid` without a libc dependency: `/proc/self/loginuid` is
-        // wrong, so ask the OS through `id`-free std when available. On Unix
-        // `std::os::unix::fs::MetadataExt::uid` only describes files.
-        uid_from_env_or_os()
+        uid_of_process()
     }
 }
 
 #[cfg(unix)]
-fn uid_from_env_or_os() -> u32 {
-    // `os.getuid()` in Python. Declared here so the crate needs no libc
-    // dependency; `uid_t` is `u32` on every supported Unix.
+fn uid_of_process() -> u32 {
+    // `getuid`, declared here so the crate needs no libc dependency;
+    // `uid_t` is `u32` on every supported Unix.
     unsafe extern "C" {
         fn getuid() -> u32;
     }
@@ -80,11 +76,11 @@ fn uid_from_env_or_os() -> u32 {
 }
 
 #[cfg(not(unix))]
-fn uid_from_env_or_os() -> u32 {
+fn uid_of_process() -> u32 {
     0
 }
 
-/// Error of address/URL validation (mirrors Python's `ValueError` messages).
+/// Error of address/URL validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddressError(pub String);
 
@@ -96,7 +92,7 @@ impl fmt::Display for AddressError {
 
 impl std::error::Error for AddressError {}
 
-/// `paths.default_socket_path()`.
+/// The default socket path.
 pub fn default_socket_path(env: &dyn Env) -> PathBuf {
     match env.var("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
         Some(runtime) => PathBuf::from(runtime).join("sylphd.sock"),
@@ -110,8 +106,8 @@ fn non_empty(value: Option<String>) -> Option<String> {
 
 /// Resolves the server address with the documented precedence.
 pub fn resolve_address(args: &AddressArgs, env: &dyn Env) -> Result<Address, AddressError> {
-    // An explicit option wins even when its value is empty: Python checks
-    // `is not None` (an empty --url is "empty server URL", not "unset").
+    // An explicit option wins even when its value is empty: an empty --url is
+    // "empty server URL", not "unset".
     if let Some(url) = &args.url {
         return Ok(Address::Url(normalize_base_url(url)?));
     }
@@ -170,10 +166,15 @@ pub fn normalize_base_url(input: &str) -> Result<String, AddressError> {
     Ok(format!("{scheme}://{authority}{path}"))
 }
 
-/// True for hosts where a bearer token may be sent over plain HTTP
-/// (`client.SylphClient.__init__`).
-pub fn is_local_host(host: &str) -> bool {
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
+/// True for hosts where a bearer token may be sent over plain HTTP:
+/// `localhost` and the IPv4/IPv6 loopback literals.
+pub fn is_local_host(url: &reqwest::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        None => false,
+    }
 }
 
 #[cfg(test)]

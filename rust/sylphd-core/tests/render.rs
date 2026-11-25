@@ -1,23 +1,28 @@
 //! Golden and unit tests for `sylphd_core::document` and `sylphd_core::render`.
 //!
-//! Fixtures under `tests/data/*_golden.json` were captured directly from the Python
-//! server (`TestClient(create_app(...))`) and Python renderers (`protocol.rows_to_tsv`,
-//! `cli._write_hits_tsv`, `cli._assignment_summary`, `per_contig_client.PerContigRun`,
-//! `cli._print_*`). Every assertion checks byte-for-byte equality.
+//! Fixtures under `tests/data/*_golden.json` are server responses with the expected
+//! rendering. Every assertion checks byte-for-byte equality.
 
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use sylphd_core::batch::ContigsRequestOptions;
 use sylphd_core::document::{
-    check_api_version, check_value_api_version, finalize_summary, merge_contigs_run,
-    merge_summaries, AssemblyDocument, ContigsDocument, ContigsRunMergeOptions, ContigsSummary,
-    DocumentError, InfoDocument, MessageItem, NotClassifiedBucket, ProfileDocument, ResultDocument,
-    SkippedBucket, Table, UsageInfo, SUPPORTED_API_VERSION,
+    check_api_version, check_str_api_version, finalize_summary, merge_contigs_run,
+    merge_summaries, parse, AssemblyDocument, ContigsDocument, ContigsRunMergeOptions,
+    ContigsSummary, DocumentError, InfoDocument, MessageItem, NotClassifiedBucket,
+    ProfileDocument, ResultDocument, Skipped, Table, UsageInfo, SUPPORTED_API_VERSION,
 };
 use sylphd_core::render::{
     assembly_species_note, format_bases, format_size, format_thousands, format_value,
     render_assembly_stderr, render_assembly_summary, render_assembly_tsv, render_contigs_summary,
-    render_contigs_tsv, render_info, render_profile_caveats, render_profile_tsv,
+    render_contigs_tsv, render_info, render_profile_caveats,
     render_stderr_messages, render_tsv, render_usage_note,
 };
+
+/// Parses a server response given as a JSON value.
+fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, DocumentError> {
+    parse(&value.to_string())
+}
 
 const PROFILE_GOLDEN: &str = include_str!("data/profile_golden.json");
 const ASSEMBLY_GOLDEN: &str = include_str!("data/assembly_golden.json");
@@ -32,9 +37,9 @@ fn golden_profile_and_query_tsv_byte_identical() {
 
     for case in cases {
         let name = case["name"].as_str().unwrap();
-        let doc = ProfileDocument::from_value(case["document"].clone())
+        let doc = from_value::<ProfileDocument>(case["document"].clone())
             .unwrap_or_else(|e| panic!("case {name}: {e}"));
-        let got_tsv = render_profile_tsv(&doc);
+        let got_tsv = render_tsv(&doc.table);
         let expected_tsv = case["expected_tsv"].as_str().unwrap();
         assert_eq!(got_tsv, expected_tsv, "TSV mismatch in case {name}");
 
@@ -63,11 +68,11 @@ fn golden_assembly_tsv_and_summaries_byte_identical() {
 
     for case in cases {
         let name = case["name"].as_str().unwrap();
-        let doc = AssemblyDocument::from_value(case["document"].clone())
+        let doc = from_value::<AssemblyDocument>(case["document"].clone())
             .unwrap_or_else(|e| panic!("case {name}: {e}"));
 
         assert_eq!(
-            render_assembly_tsv(&doc),
+            render_assembly_tsv(&doc.table),
             case["expected_tsv"].as_str().unwrap(),
             "assembly TSV mismatch in case {name}"
         );
@@ -97,16 +102,16 @@ fn golden_contigs_merge_tsv_and_summary_byte_identical() {
         .unwrap()
         .iter()
         .cloned()
-        .map(|v| ContigsDocument::from_value(v).unwrap())
+        .map(|v| from_value::<ContigsDocument>(v).unwrap())
         .collect();
     let opts: ContigsRunMergeOptions =
         serde_json::from_value(fixture["merge_options"].clone()).unwrap();
 
-    let merged = merge_contigs_run(&batches, &opts).unwrap();
+    let merged = merge_contigs_run(&batches, &ContigsRequestOptions::default(), &opts).unwrap();
 
     // TSV byte-identical to PerContigRun.write_tsv
     assert_eq!(
-        render_contigs_tsv(&merged),
+        render_contigs_tsv(&merged.table),
         fixture["expected_tsv"].as_str().unwrap()
     );
 
@@ -141,11 +146,11 @@ fn golden_contigs_merge_tsv_and_summary_byte_identical() {
         expected_summary["no_hit_contigs"].as_u64().unwrap()
     );
     assert_eq!(
-        serde_json::to_value(&merged.summary.skipped_short).unwrap(),
+        serde_json::to_value(merged.summary.skipped_short).unwrap(),
         expected_summary["skipped_short"]
     );
     assert_eq!(
-        serde_json::to_value(&merged.summary.skipped_few_kmers).unwrap(),
+        serde_json::to_value(merged.summary.skipped_few_kmers).unwrap(),
         expected_summary["skipped_few_kmers"]
     );
     assert_eq!(
@@ -159,7 +164,7 @@ fn golden_contigs_merge_tsv_and_summary_byte_identical() {
         contig_names,
         vec!["contig1", "contig2", "contig3", "contig4"]
     );
-    assert_eq!(merged.elapsed_ms, Some(15.5));
+    assert_eq!(merged.elapsed_ms, 15.5);
 
     // Multi-batch >5 taxa: merge_summaries (untruncated) + finalize_summary (top 5)
     let parts: Vec<ContigsSummary> =
@@ -265,33 +270,38 @@ fn api_version_validation_and_error_messages() {
     let err = check_api_version(2).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "server API version 2, this client supports 1: update sylphd"
+        "server API version 2 is newer than this client's (1): update sylphd"
     );
     let err0 = check_api_version(0).unwrap_err();
     assert_eq!(
         err0.to_string(),
-        "server API version 0, this client supports 1: update sylphd"
+        "server API version 0 is older than this client's (1): the server predates this sylphd"
     );
 
     // Missing api_version
-    let err_missing = check_value_api_version(&json!({"samples": []})).unwrap_err();
+    let err_missing = check_str_api_version(r#"{"samples": []}"#, "server").unwrap_err();
     assert!(matches!(err_missing, DocumentError::MissingApiVersion));
     assert!(err_missing.to_string().contains("supports API version 1"));
 
     // Future incompatible schema still reports version mismatch first, not missing field!
     let future_doc = json!({"api_version": 99, "completely_new_schema": true});
     for res in [
-        ProfileDocument::from_value(future_doc.clone()).map(|_| ()),
-        AssemblyDocument::from_value(future_doc.clone()).map(|_| ()),
-        ContigsDocument::from_value(future_doc.clone()).map(|_| ()),
-        InfoDocument::from_value(future_doc.clone()).map(|_| ()),
-        ResultDocument::from_value(future_doc).map(|_| ()),
+        from_value::<ProfileDocument>(future_doc.clone()).map(|_| ()),
+        from_value::<AssemblyDocument>(future_doc.clone()).map(|_| ()),
+        from_value::<ContigsDocument>(future_doc.clone()).map(|_| ()),
+        from_value::<InfoDocument>(future_doc.clone()).map(|_| ()),
     ] {
         assert_eq!(
             res.unwrap_err().to_string(),
-            "server API version 99, this client supports 1: update sylphd"
+            "server API version 99 is newer than this client's (1): update sylphd"
         );
     }
+    assert_eq!(
+        ResultDocument::parse(&future_doc.to_string())
+            .unwrap_err()
+            .to_string(),
+        "document API version 99 is newer than this client's (1): update sylphd"
+    );
 }
 
 #[test]
@@ -301,27 +311,31 @@ fn result_document_autodetects_all_three_kinds() {
     let c: Value = serde_json::from_str(CONTIGS_GOLDEN).unwrap();
 
     assert!(matches!(
-        ResultDocument::from_value(p["cases"][0]["document"].clone()).unwrap(),
+        ResultDocument::parse(&p["cases"][0]["document"].clone().to_string()).unwrap(),
         ResultDocument::Profile(_)
     ));
     assert!(matches!(
-        ResultDocument::from_value(a["cases"][0]["document"].clone()).unwrap(),
+        ResultDocument::parse(&a["cases"][0]["document"].clone().to_string()).unwrap(),
         ResultDocument::Assembly(_)
     ));
     assert!(matches!(
-        ResultDocument::from_value(c["batches"][0].clone()).unwrap(),
+        ResultDocument::parse(&c["batches"][0].clone().to_string()).unwrap(),
         ResultDocument::Contigs(_)
     ));
 }
 
 #[test]
 fn contigs_merge_zero_batches_and_browser_cap() {
+    let request = ContigsRequestOptions {
+        fields: vec!["gtdb_taxonomy".into()],
+        ..Default::default()
+    };
     let opts = ContigsRunMergeOptions {
-        skipped_short: SkippedBucket {
+        skipped_short: Skipped {
             contigs: 3,
             bp: 30_000,
         },
-        skipped_few_kmers: SkippedBucket {
+        skipped_few_kmers: Skipped {
             contigs: 7,
             bp: 20_000,
         },
@@ -331,11 +345,10 @@ fn contigs_merge_zero_batches_and_browser_cap() {
             bp: 3_500_000,
             limit: 100,
         }),
-        fields: vec!["gtdb_taxonomy".into()],
         database: Some(json!({"name": "db.syldb", "genomes": 1, "c": 200, "k": 31})),
         ..Default::default()
     };
-    let doc = merge_contigs_run(&[], &opts).unwrap();
+    let doc = merge_contigs_run(&[], &request, &opts).unwrap();
     assert_eq!(doc.api_version, 1);
     assert_eq!(doc.table.columns.len(), 21);
     assert!(doc.table.data.is_empty());
@@ -443,22 +456,23 @@ fn contigs_merge_preserves_non_alphabetical_order_and_combines_server_too_few_km
       },
       "caveats": [],
       "database": {"name": "db.syldb", "genomes": 1, "c": 200, "k": 31},
-      "thresholds": {"species": 95.0, "imprecise_below": 85.0}
+      "thresholds": {"species": 95.0, "imprecise_below": 85.0},
+      "elapsed_ms": 3.0
     }"#;
-    let batch = ContigsDocument::from_json_str(batch_json).unwrap();
+    let batch = parse::<ContigsDocument>(batch_json).unwrap();
     let opts = ContigsRunMergeOptions {
-        skipped_short: SkippedBucket {
+        skipped_short: Skipped {
             contigs: 2,
             bp: 5000,
         },
-        skipped_few_kmers: SkippedBucket {
+        skipped_few_kmers: Skipped {
             contigs: 3,
             bp: 60000,
         },
         min_contig_length: 20000,
         ..Default::default()
     };
-    let merged = merge_contigs_run(&[batch], &opts).unwrap();
+    let merged = merge_contigs_run(&[batch], &ContigsRequestOptions::default(), &opts).unwrap();
 
     // Order preserved: z_contig before a_contig
     let keys: Vec<&str> = merged.contigs.iter().map(|(k, _)| k.as_str()).collect();
@@ -473,7 +487,7 @@ fn contigs_merge_preserves_non_alphabetical_order_and_combines_server_too_few_km
     assert_eq!(merged.summary.bp, 46000 + 5000 + 60000);
     assert_eq!(
         merged.summary.skipped_few_kmers,
-        Some(SkippedBucket {
+        Some(Skipped {
             contigs: 4,
             bp: 81000
         })
@@ -482,7 +496,7 @@ fn contigs_merge_preserves_non_alphabetical_order_and_combines_server_too_few_km
     assert_eq!(merged.summary.too_few_kmers_bp, 81000);
 
     // n_close null defaults to "0" on hit rows, "" on non-hit rows
-    let tsv = render_contigs_tsv(&merged);
+    let tsv = render_contigs_tsv(&merged.table);
     let lines: Vec<&str> = tsv.lines().collect();
     assert_eq!(lines.len(), 3);
     let hit_cells: Vec<&str> = lines[1].split('\t').collect();
@@ -491,28 +505,4 @@ fn contigs_merge_preserves_non_alphabetical_order_and_combines_server_too_few_km
     let no_hit_cells: Vec<&str> = lines[2].split('\t').collect();
     assert_eq!(no_hit_cells[3], "too_few_kmers");
     assert!(no_hit_cells[4..].iter().all(|c| c.is_empty()));
-}
-
-#[test]
-fn table_select_projects_columns_in_order() {
-    // `--taxprof` requests the taxonomy columns for the server and then drops them
-    // from the TSV: only the requested --fields are shown (as `rows_to_tsv` did).
-    let t = Table {
-        columns: vec!["a".into(), "tax".into(), "b".into(), "c".into()],
-        data: vec![
-            vec![json!(1), json!("d__X"), json!(2), json!(3)],
-            vec![json!(4), json!("d__Y"), json!(5), json!(6)],
-        ],
-    };
-    let selected = t.select(&["c".into(), "a".into(), "missing".into()]);
-    assert_eq!(selected.columns, vec!["c", "a", "missing"]);
-    assert_eq!(
-        selected.data,
-        vec![
-            vec![json!(3), json!(1), Value::Null],
-            vec![json!(6), json!(4), Value::Null],
-        ]
-    );
-    // Selecting everything is the identity.
-    assert_eq!(t.select(&t.columns), t);
 }

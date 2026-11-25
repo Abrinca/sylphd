@@ -11,7 +11,7 @@
 //!   *first* mate's length, which [`PairedReadSketcher`] does not expose);
 //! * the deterministic writer: k-mer entries are sorted by k-mer, everything
 //!   else is exactly sylph's `SequencesSketch` bincode layout (fixint, little
-//!   endian; see `src/sylphd/sketchcheck.py`). sylph itself writes hash-map
+//!   endian; see `sketchcheck.rs`). sylph itself writes hash-map
 //!   order, which readers do not depend on.
 
 use sylph::seeding::Seeding;
@@ -179,7 +179,7 @@ impl SketchBuilder {
 
     /// Serializes to sylph's `SequencesSketch`: bincode 1.x legacy layout
     /// (fixint, little endian). The k-mer entries are written sorted by k-mer
-    /// so the output is deterministic; see `src/sylphd/sketchcheck.py`.
+    /// so the output is deterministic; see `sketchcheck.rs`.
     ///
     /// `sample_name` is always `None` (the request carries the name).
     pub fn serialize(&self, file_name: &str, paired: bool) -> Vec<u8> {

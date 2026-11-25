@@ -11,7 +11,7 @@ fn main() {
                 let _ = error.print();
                 std::process::exit(error.exit_code());
             }
-            // Usage errors are prefixed like `_print_error` in the Python CLI.
+            // Usage errors carry the same `sylphd: error:` prefix as every other failure.
             let text = error.to_string();
             let text = text.replacen("error:", "sylphd: error:", 1);
             eprint!("{text}");

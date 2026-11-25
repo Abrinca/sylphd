@@ -14,10 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from sylphd import cli
+from sylphd import cli, client as client_module
 
 CASES_FILE = Path(__file__).parent / "data" / "address_cases.json"
-CASES = json.loads(CASES_FILE.read_text())["cases"]
+_TABLE = json.loads(CASES_FILE.read_text())
+CASES = _TABLE["cases"]
+TOKEN_CASES = _TABLE["token_cases"]
 ENV_NAMES = ("SYLPHD_URL", "SYLPHD_SOCKET", "XDG_RUNTIME_DIR")
 
 
@@ -56,3 +58,12 @@ def test_address_precedence(case: dict, monkeypatch: pytest.MonkeyPatch) -> None
             assert client.base_url is None
     finally:
         client.close()
+
+
+@pytest.mark.parametrize("case", TOKEN_CASES, ids=[case["name"] for case in TOKEN_CASES])
+def test_token_policy(case: dict) -> None:
+    if not case["allowed"]:
+        with pytest.raises(ValueError, match="refusing to send a token"):
+            client_module.connect(url=case["url"], token="secret")
+        return
+    client_module.connect(url=case["url"], token="secret").close()

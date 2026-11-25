@@ -1,7 +1,6 @@
 //! Result rendering: TSV tables, assembly & per-contig summaries, caveats, and `/info` text.
 //!
-//! Ported from Python (`sylphd.protocol`, `sylphd.cli`, `sylphd.per_contig_client`,
-//! `sylphd.download`). Sylph-column TSV output is byte-identical to Python and stock `sylph`.
+//! Sylph-column TSV output is byte-identical to stock `sylph`.
 
 use std::fmt::Write;
 
@@ -10,24 +9,11 @@ use serde_json::Value;
 use crate::document::{
     AssemblyDocument, ConsensusBpEntry, ContigsDocument, InfoDocument, MessageItem, MetadataInfo,
     NcbiCounts, NcbiNearestCounts, ProfileDocument, Table, UsageInfo, ASSEMBLY_TSV_COLUMNS,
-    DEFAULT_MIN_CONTIG_LENGTH,
 };
+use crate::input::DEFAULT_MIN_CONTIG_LENGTH;
 
-/// Program prefix used in warning/note lines (matching `cli_parser.PROG`).
+/// Program prefix of warning and note lines.
 pub const PROG: &str = "sylphd";
-
-/// Metadata columns stored as SQLite `REAL` where Python's `str(float)` always
-/// includes a decimal point (e.g. `100.0`), even after a JS JSON round-trip turns
-/// `100.0` into `100`.
-const FLOAT_METADATA_COLUMNS: [&str; 3] = [
-    "checkm2_completeness",
-    "checkm2_contamination",
-    "gc_percentage",
-];
-
-fn is_float_metadata_column(column: &str) -> bool {
-    FLOAT_METADATA_COLUMNS.contains(&column)
-}
 
 fn value_as_f64(value: &Value) -> f64 {
     match value {
@@ -65,19 +51,13 @@ fn py_str(value: &Value) -> String {
 }
 
 /// Format a metadata or unknown column cell.
-fn format_metadata_value(column: &str, value: &Value) -> String {
+fn format_metadata_value(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::Bool(true) => "True".to_string(),
         Value::Bool(false) => "False".to_string(),
         Value::String(s) => s.clone(),
-        Value::Number(n) => {
-            if is_float_metadata_column(column) && (n.is_i64() || n.is_u64()) {
-                format!("{n}.0")
-            } else {
-                n.to_string()
-            }
-        }
+        Value::Number(n) => n.to_string(),
         Value::Array(_) | Value::Object(_) => value.to_string(),
     }
 }
@@ -137,7 +117,7 @@ pub fn format_size(size: u64) -> String {
     format!("{size} B")
 }
 
-/// Format a base-pair count for the per-contig skipped-record summary (`per_contig_client._format_bases`).
+/// Format a base-pair count for the per-contig skipped-record summary .
 pub fn format_bases(bp: u64) -> String {
     if bp >= 1_000_000 {
         format!("{:.1} Mb", bp as f64 / 1_000_000.0)
@@ -149,10 +129,10 @@ pub fn format_bases(bp: u64) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Profile / query TSV (protocol.format_value / format_row / rows_to_tsv)
+// Profile / query TSV 
 // ---------------------------------------------------------------------------
 
-/// Format one cell of a `/profile` or `/query` TSV, mirroring `sylphd.protocol.format_value`.
+/// Format one cell of a `/profile` or `/query` TSV.
 ///
 /// `Value::Null` maps to sylph's spellings: `NA-NA` for missing confidence intervals,
 /// `inf` for `Eff_cov`/`True_cov`, `NaN` for abundances, and `""` for metadata/other
@@ -195,7 +175,7 @@ pub fn format_value(column: &str, value: &Value) -> String {
         },
         "Taxonomic_abundance" | "Sequence_abundance" => format!("{:.4}", value_as_f64(value)),
         "kmers_reassigned" => format!("{}", value_as_i64(value)),
-        _ => format_metadata_value(column, value),
+        _ => format_metadata_value(value),
     }
 }
 
@@ -246,11 +226,6 @@ pub fn render_tsv(table: &Table) -> String {
     out
 }
 
-/// Render a `/profile` or `/query` document's table to TSV.
-pub fn render_profile_tsv(doc: &ProfileDocument) -> String {
-    render_tsv(&doc.table)
-}
-
 /// Format caveat warning lines (`sylphd: warning: <note>\n`), one per caveat.
 pub fn render_caveats(caveats: &[String]) -> String {
     let mut out = String::new();
@@ -268,22 +243,11 @@ pub fn render_profile_caveats(doc: &ProfileDocument) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Assembly hits TSV and summary (cli._write_hits_tsv / _assignment_summary)
+// Assembly hits TSV and summary
 // ---------------------------------------------------------------------------
 
-fn fallback_taxon_from_taxonomy(val: &Value) -> Option<String> {
-    let obj = val.as_object()?;
-    let (_, last) = obj.iter().next_back()?;
-    let text = py_str(last);
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
-}
-
-/// Render the 11-column assembly hits TSV from a `/assembly` `Table` (`cli._write_hits_tsv`).
-pub fn render_assembly_hits_tsv(table: &Table) -> String {
+/// Render the 11-column assembly hits TSV from a `/assembly` `Table`.
+pub fn render_assembly_tsv(table: &Table) -> String {
     let mut out = String::new();
     for (i, col) in ASSEMBLY_TSV_COLUMNS.iter().enumerate() {
         if i > 0 {
@@ -295,7 +259,6 @@ pub fn render_assembly_hits_tsv(table: &Table) -> String {
 
     let indices: [Option<usize>; 11] =
         std::array::from_fn(|i| table.column_index(ASSEMBLY_TSV_COLUMNS[i]));
-    let taxonomy_idx = table.column_index("taxonomy");
 
     for row in &table.data {
         let cell = |slot: usize| -> &Value {
@@ -337,18 +300,8 @@ pub fn render_assembly_hits_tsv(table: &Table) -> String {
         out.push_str(&py_str(cell(5)));
         out.push('\t');
 
-        // 6: taxon (server computes it; fallback to last taxonomy value if absent)
-        let taxon = cell(6);
-        let taxon_str = py_str(taxon);
-        if !taxon_str.is_empty() {
-            out.push_str(&taxon_str);
-        } else if indices[6].is_none() {
-            if let Some(tax_val) = taxonomy_idx.and_then(|i| row.get(i)) {
-                if let Some(t) = fallback_taxon_from_taxonomy(tax_val) {
-                    out.push_str(&t);
-                }
-            }
-        }
+        // 6: taxon
+        out.push_str(&py_str(cell(6)));
         out.push('\t');
 
         // 7: gtdb_species
@@ -373,16 +326,11 @@ pub fn render_assembly_hits_tsv(table: &Table) -> String {
     out
 }
 
-/// Render the 11-column assembly hits TSV from an [`AssemblyDocument`].
-pub fn render_assembly_tsv(doc: &AssemblyDocument) -> String {
-    render_assembly_hits_tsv(&doc.table)
-}
-
 fn non_empty(opt: Option<&String>) -> Option<&str> {
     opt.map(String::as_str).filter(|s| !s.is_empty())
 }
 
-/// One-line human summary of an `/assembly` result (`cli._assignment_summary`).
+/// One-line human summary of an `/assembly` result.
 pub fn render_assembly_summary(doc: &AssemblyDocument) -> String {
     if let Some(assignment) = &doc.assignment {
         let taxon = non_empty(assignment.taxon.as_ref())
@@ -390,7 +338,10 @@ pub fn render_assembly_summary(doc: &AssemblyDocument) -> String {
             .unwrap_or("the best hit");
         let ani = assignment.ani.unwrap_or(0.0);
         if non_empty(assignment.note.as_ref()).is_some() {
-            return format!("assigned to {taxon} at the 95 % species threshold ({ani:.2} % ANI)");
+            let threshold = format_g(doc.thresholds.species);
+            return format!(
+                "assigned to {taxon} at the {threshold} % species threshold ({ani:.2} % ANI)"
+            );
         }
         return format!("assigned to species {taxon} ({ani:.2} % ANI)");
     }
@@ -407,7 +358,7 @@ pub fn render_assembly_summary(doc: &AssemblyDocument) -> String {
     "no hits".to_string()
 }
 
-/// Species-threshold caveat note of the best hit, or `None` for GTDB / no lineage (`cli._species_note`).
+/// Species-threshold caveat note of the best hit, or `None` for GTDB / no lineage.
 pub fn assembly_species_note(doc: &AssemblyDocument) -> Option<&str> {
     if let Some(note) = doc
         .assignment
@@ -437,15 +388,15 @@ pub fn render_assembly_stderr(doc: &AssemblyDocument) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Per-contig TSV and summary (per_contig_client.PerContigRun)
+// Per-contig TSV and summary
 // ---------------------------------------------------------------------------
 
-/// Render a `/contigs` table to TSV (`PerContigRun.write_tsv`).
+/// Render a `/contigs` table to TSV.
 ///
 /// A contig without hits (`rank` is `null`) emits empty cells for every column after
 /// the 4-column prefix (`contig`, `contig_length`, `gc`, `status`). Hit rows format
 /// `ani_species_level` as `true`/`false` and default `null` `n_close` to `0`.
-pub fn render_contigs_table_tsv(table: &Table) -> String {
+pub fn render_contigs_tsv(table: &Table) -> String {
     let mut out = String::new();
     for (i, col) in table.columns.iter().enumerate() {
         if i > 0 {
@@ -514,19 +465,14 @@ pub fn render_contigs_table_tsv(table: &Table) -> String {
                 | "taxon" | "consensus_rank" | "consensus_taxon" => {
                     out.push_str(&py_str(cell));
                 }
-                other => {
-                    out.push_str(&format_metadata_value(other, cell));
+                _ => {
+                    out.push_str(&format_metadata_value(cell));
                 }
             }
         }
         out.push('\n');
     }
     out
-}
-
-/// Render a [`ContigsDocument`]'s table to TSV.
-pub fn render_contigs_tsv(doc: &ContigsDocument) -> String {
-    render_contigs_table_tsv(&doc.table)
 }
 
 fn format_consensus_taxon(item: &ConsensusBpEntry) -> String {
@@ -597,7 +543,7 @@ pub fn render_contigs_summary(doc: &ContigsDocument) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// /info and /messages text (cli.cmd_info, _note_messages, _note_usage)
+// /info and /messages text
 // ---------------------------------------------------------------------------
 
 fn opt_str_or_none(opt: Option<&String>) -> &str {
@@ -843,7 +789,7 @@ fn write_messages(out: &mut String, messages: &[MessageItem]) {
     }
 }
 
-/// Render human-readable `sylphd info` text from `/info` and `/messages` (`cli.cmd_info`).
+/// Render human-readable `sylphd info` text from `/info` and `/messages`.
 pub fn render_info(info: &InfoDocument, messages: &[MessageItem]) -> String {
     let mut out = String::new();
     write_database(&mut out, info);
@@ -854,7 +800,7 @@ pub fn render_info(info: &InfoDocument, messages: &[MessageItem]) -> String {
     out
 }
 
-/// Render `warning` and `danger` operator messages for CLI stderr (`cli._note_messages`).
+/// Render `warning` and `danger` operator messages for CLI stderr.
 ///
 /// `info` messages are skipped (they are for the web page and `sylphd info`).
 pub fn render_stderr_messages(messages: &[MessageItem]) -> String {
@@ -878,7 +824,7 @@ pub fn render_stderr_messages(messages: &[MessageItem]) -> String {
     out
 }
 
-/// Render the one-line usage-statistics stderr note (`cli._note_usage`), if enabled.
+/// Render the one-line usage-statistics stderr note, if enabled.
 pub fn render_usage_note(usage: &UsageInfo, base_url: Option<&str>) -> Option<String> {
     if !usage.enabled {
         return None;

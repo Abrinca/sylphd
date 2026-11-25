@@ -100,6 +100,7 @@ def _profile(scale: float = 1.0) -> dict:
 PROFILE = _profile()
 
 INFO = {
+    "api_version": 1,
     "service": "sylphd", "version": "0.0.0", "name": "Test",
     "database": {"name": "gtdb, uhgv, fungi", "genomes": 4, "c": 200, "k": 31, "two_stage": False},
     "databases": [{"name": "all", "file": "all.syldb", "kind": "plain", "genomes": 4, "c": 200, "k": 31, "gtdb": True}],
@@ -364,3 +365,44 @@ def test_reads_in_no_database_are_shown(web_origin: str, sketch_file: Path) -> N
     # the chart downloads as SVG (ECharts' SVG renderer)
     assert hidden["svg"]["name"].endswith(".treemap.svg")
     assert hidden["svg"]["start"] == "<svg" and hidden["svg"]["lactobacillus"]
+
+
+NODE_VERSION = r"""
+const pw = require('node:module').createRequire(process.env.PLAYWRIGHT_DIR + '/')('playwright-core');
+(async () => {
+  const [url, api, info] = JSON.parse(process.argv[1]);
+  const browser = await pw.chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXE });
+  const page = await browser.newPage();
+  await page.route(api + '/**', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(new URL(route.request().url()).pathname === '/info' ? info : {}),
+  }));
+  await page.goto(url);
+  await page.waitForSelector('#server-banner:not([hidden]), .sp-status', { timeout: 20000 });
+  await page.waitForFunction(() => !/Checking/.test(document.body.textContent), null, { timeout: 20000 });
+  console.log(JSON.stringify({ text: await page.evaluate(() => document.body.textContent) }));
+  await browser.close();
+})();
+"""
+
+
+@pytest.mark.parametrize(
+    ("info", "message"),
+    [
+        ({**INFO, "api_version": 2}, "server API version 2 is newer than this client's (1): update sylphd"),
+        ({k: v for k, v in INFO.items() if k != "api_version"}, "missing or invalid api_version"),
+    ],
+    ids=["unsupported", "missing"],
+)
+def test_info_of_another_api_version_is_refused_before_anything_is_sketched(
+    web_origin: str, info: dict, message: str
+) -> None:
+    env = {**os.environ, "PLAYWRIGHT_DIR": PLAYWRIGHT or "", "BROWSER_EXE": CHROMIUM or ""}
+    args = [f"{web_origin}/index.html?api={API}#reads", API, info]
+    done = subprocess.run(["node", "-e", NODE_VERSION, json.dumps(args)], check=False,
+                          capture_output=True, text=True, env=env, timeout=120)
+    assert done.returncode == 0, done.stderr
+    text = json.loads(done.stdout)["text"]
+    assert "Incompatible server" in text
+    assert message in text
+    assert "Server online" not in text

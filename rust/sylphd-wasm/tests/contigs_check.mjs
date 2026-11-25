@@ -60,7 +60,6 @@ const result = {
   sketched: sketcher.sketched(),
   skipped: sketcher.skipped(),
   bases: sketcher.bases(),
-  pending: sketcher.pending(),
 };
 sketcher.free();
 console.log(JSON.stringify(result));

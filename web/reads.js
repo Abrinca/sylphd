@@ -573,10 +573,6 @@
       if (!data || !data.table || !Array.isArray(data.table.columns) || !Array.isArray(data.table.data) || !Array.isArray(data.samples) || !data.samples.length) {
         throw new Error('Unexpected response from the server.');
       }
-      if (data.api_version != null && window.SylphdSketch) {
-        const wasm = await window.SylphdSketch.loadWasm();
-        wasm.check_api_version(data.api_version);
-      }
       run.profileMs = performance.now() - t;
       finishRun(run, data, res.text, params);
     } catch (e) {

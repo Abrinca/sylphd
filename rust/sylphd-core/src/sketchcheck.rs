@@ -11,8 +11,8 @@
 //! 6. `paired`: `bool` (`u8`: `0` / `1`)
 //! 7. `mean_read_length`: `f64`
 //!
-//! Mirrors `src/sylphd/sketchcheck.py` so the client validates pre-made `.sylsp`
-//! sketches without allocating from an untrusted length prefix.
+//! Pre-made `.sylsp` sketches are validated without allocating from an
+//! untrusted length prefix.
 
 use std::fmt;
 #[cfg(feature = "io")]
@@ -124,7 +124,7 @@ fn take_string(
         .map_err(|_| SketchFormatError(format!("sketch '{field}' is not valid UTF-8")))
 }
 
-fn parse_sketch_tail(
+pub fn parse_sketch_tail(
     tail: &[u8],
     kmer_count: u64,
     base_offset: u64,
@@ -173,15 +173,18 @@ fn parse_sketch_tail(
     })
 }
 
-/// Parses and validates the header of a `.sylsp` byte slice; trailing bytes are allowed.
-pub fn parse_sketch_header(data: &[u8]) -> Result<SketchHeader, SketchFormatError> {
-    let size = data.len() as u64;
-    if size < 8 {
+/// Locates the part after the k-mer table from the first 8 bytes and the
+/// total size of a sketch: returns `(k-mer count, offset of the tail)`.
+///
+/// The tail (everything after the table) is all [`parse_sketch_tail`] needs,
+/// so large sketches never have to be loaded whole.
+pub fn sketch_tail_start(prefix: &[u8], size: u64) -> Result<(u64, u64), SketchFormatError> {
+    if size < 8 || prefix.len() < 8 {
         return Err(SketchFormatError(format!(
             "sketch is {size} bytes, too short for a k-mer count prefix"
         )));
     }
-    let count = u64::from_le_bytes(data[..8].try_into().unwrap());
+    let count = u64::from_le_bytes(prefix[..8].try_into().unwrap());
     let kmer_bytes = count.checked_mul(ENTRY_SIZE);
     let kmer_end = kmer_bytes.and_then(|n| n.checked_add(8));
     let Some(kmer_end) = kmer_end.filter(|&end| end <= size) else {
@@ -193,13 +196,13 @@ pub fn parse_sketch_header(data: &[u8]) -> Result<SketchHeader, SketchFormatErro
             "sketch declares {count} k-mers ({needed}) but is only {size} bytes long"
         )));
     };
-    parse_sketch_tail(&data[kmer_end as usize..], count, kmer_end)
+    Ok((count, kmer_end))
 }
 
-/// Validates `.sylsp` bytes and returns `(c, k)`.
-pub fn validate_sketch_bytes(data: &[u8]) -> Result<(u64, u64), SketchFormatError> {
-    let header = parse_sketch_header(data)?;
-    Ok((header.c, header.k))
+/// Parses and validates the header of a `.sylsp` byte slice; trailing bytes are allowed.
+pub fn parse_sketch_header(data: &[u8]) -> Result<SketchHeader, SketchFormatError> {
+    let (count, kmer_end) = sketch_tail_start(data, data.len() as u64)?;
+    parse_sketch_tail(&data[kmer_end as usize..], count, kmer_end)
 }
 
 /// Reads and validates a `.sylsp` header from a file without loading the k-mer
@@ -207,43 +210,26 @@ pub fn validate_sketch_bytes(data: &[u8]) -> Result<(u64, u64), SketchFormatErro
 #[cfg(feature = "io")]
 pub fn read_sketch_header(path: impl AsRef<Path>) -> Result<SketchHeader, SketchFormatError> {
     let path = path.as_ref();
-    let mut file = File::open(path)
-        .map_err(|e| SketchFormatError(format!("cannot open {}: {e}", path.display())))?;
-    let size = file
-        .metadata()
-        .map_err(|e| SketchFormatError(format!("cannot stat {}: {e}", path.display())))?
-        .len();
-    if size < 8 {
-        return Err(SketchFormatError(format!(
-            "sketch is {size} bytes, too short for a k-mer count prefix"
-        )));
-    }
-    let mut prefix = [0u8; 8];
-    file.read_exact(&mut prefix)
-        .map_err(|e| SketchFormatError(format!("cannot read {}: {e}", path.display())))?;
-    let count = u64::from_le_bytes(prefix);
-    let kmer_bytes = count.checked_mul(ENTRY_SIZE);
-    let kmer_end = kmer_bytes.and_then(|n| n.checked_add(8));
-    let Some(kmer_end) = kmer_end.filter(|&end| end <= size) else {
-        let needed = match kmer_bytes {
-            Some(n) => format!("{n} bytes"),
-            None => "overflowing size".to_string(),
-        };
-        return Err(SketchFormatError(format!(
-            "sketch declares {count} k-mers ({needed}) but is only {size} bytes long"
-        )));
+    let io_error = |what: &str, e: std::io::Error| {
+        SketchFormatError(format!("cannot {what} {}: {e}", path.display()))
     };
+    let mut file = File::open(path).map_err(|e| io_error("open", e))?;
+    let size = file.metadata().map_err(|e| io_error("stat", e))?.len();
+    let mut prefix = [0u8; 8];
+    if size >= 8 {
+        file.read_exact(&mut prefix).map_err(|e| io_error("read", e))?;
+    }
+    let (count, kmer_end) = sketch_tail_start(&prefix, size)?;
     file.seek(SeekFrom::Start(kmer_end))
-        .map_err(|e| SketchFormatError(format!("cannot seek {}: {e}", path.display())))?;
+        .map_err(|e| io_error("seek", e))?;
     let mut tail = Vec::new();
-    file.read_to_end(&mut tail)
-        .map_err(|e| SketchFormatError(format!("cannot read {}: {e}", path.display())))?;
+    file.read_to_end(&mut tail).map_err(|e| io_error("read", e))?;
     parse_sketch_tail(&tail, count, kmer_end)
 }
 
 /// Checks that a sketch header is compatible with a database's `(c, k)`.
 ///
-/// Mirrors `sylphd.sketching.check_sketch`: `k` must match exactly, and the
+/// `k` must match exactly, and the
 /// sketch's `c` must not be sparser (`>`) than the database's `c`.
 pub fn check_sketch_compatibility(
     header: &SketchHeader,

@@ -1,16 +1,14 @@
 //! Native client for sylphd: address/token resolution, HTTP transport, and the
 //! `profile`, `query`, `assembly`, `info` and `render` commands.
 //!
-//! The binary is `sylphd-client`; the Python `sylphd` command forwards to it in
-//! step 5 of the thin-clients plan. All rendering comes from `sylphd-core`.
+//! The binary is `sylphd-client`; all rendering comes from `sylphd-core`.
 
 pub mod address;
 pub mod cli;
 pub mod commands;
 pub mod transport;
 
-/// Program prefix of error, warning and note lines (matching `cli_parser.PROG`).
-pub const PROG: &str = "sylphd";
+pub use sylphd_core::render::PROG;
 
 #[cfg(test)]
 mod version_tests {

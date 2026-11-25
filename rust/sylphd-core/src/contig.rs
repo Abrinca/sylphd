@@ -2,8 +2,7 @@
 //! own sample, plus the record's *genome-style* k-mer count.
 //!
 //! This is what `sylphd assembly FILE --per-contig` (and `POST /contigs`)
-//! needs per contig (see `src/sylphd/sketching.py` `sketch_contigs` and
-//! `scratch/per-contig-ani/FINDINGS.md`):
+//! needs per contig:
 //!
 //! * the **sample** sketch of the record, i.e. what `Sketcher.sketch_single`
 //!   produces for one sequence (`.sylsp` bytes, same as `sketch.rs`);
@@ -19,16 +18,10 @@
 //! `sketch_genome_individual`).
 
 use std::collections::VecDeque;
-#[cfg(feature = "io")]
-use std::io::Read;
-#[cfg(feature = "io")]
-use std::path::Path;
 
 use sylph::seeding::Seeding;
 use sylph::sketchers::GenomeSketcher;
 
-#[cfg(feature = "io")]
-use crate::io::{open_maybe_gzip, MaybeGzReader};
 use crate::parser::{record_name, RecordParser};
 use crate::sketch::{count_gc, default_fpr, gc_percent, SketchBuilder};
 
@@ -211,72 +204,6 @@ impl ContigSketcher {
             Some(e) => Err(e),
             None => Ok(()),
         }
-    }
-
-    /// Streams records from a `Read` source (plain or gzip, multi-member
-    /// supported), invoking `on_record` as each contig finishes so memory
-    /// stays bounded by one record.
-    #[cfg(feature = "io")]
-    pub fn push_reader<R, E>(
-        &mut self,
-        reader: R,
-        mut on_record: impl FnMut(ContigRecord) -> Result<(), E>,
-    ) -> Result<(), E>
-    where
-        R: Read,
-        E: From<String>,
-    {
-        let mut reader = MaybeGzReader::new(reader).map_err(|e| E::from(e.to_string()))?;
-        let mut buf = vec![0u8; 128 * 1024];
-        loop {
-            let n = reader.read(&mut buf).map_err(|e| E::from(e.to_string()))?;
-            if n == 0 {
-                break;
-            }
-            self.push(&buf[..n]).map_err(E::from)?;
-            while let Some(record) = self.take_next() {
-                on_record(record)?;
-            }
-        }
-        self.end_file().map_err(E::from)?;
-        while let Some(record) = self.take_next() {
-            on_record(record)?;
-        }
-        Ok(())
-    }
-
-    /// Streams records from a FASTA/FASTQ file (plain or gzip), invoking
-    /// `on_record` as each contig finishes.
-    #[cfg(feature = "io")]
-    pub fn push_file<E>(
-        &mut self,
-        path: impl AsRef<Path>,
-        mut on_record: impl FnMut(ContigRecord) -> Result<(), E>,
-    ) -> Result<(), E>
-    where
-        E: From<String>,
-    {
-        let path = path.as_ref();
-        let mut reader = open_maybe_gzip(path)
-            .map_err(|e| E::from(format!("{}: {e}", path.display())))?;
-        let mut buf = vec![0u8; 128 * 1024];
-        loop {
-            let n = reader
-                .read(&mut buf)
-                .map_err(|e| E::from(format!("{}: {e}", path.display())))?;
-            if n == 0 {
-                break;
-            }
-            self.push(&buf[..n]).map_err(E::from)?;
-            while let Some(record) = self.take_next() {
-                on_record(record)?;
-            }
-        }
-        self.end_file().map_err(E::from)?;
-        while let Some(record) = self.take_next() {
-            on_record(record)?;
-        }
-        Ok(())
     }
 
     fn add_record(&mut self, header: &[u8], seq: &[u8]) -> Result<(), String> {

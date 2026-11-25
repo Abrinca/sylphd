@@ -55,7 +55,6 @@ fn max_contigs_one_flushes_every_item() {
 
     let b0 = planner.push(spec("a", 50, 20_000, 50.0), 500, 0).unwrap();
     assert_eq!(b0.unwrap().items.len(), 1);
-    assert_eq!(planner.current_len(), 0);
 
     let b1 = planner.push(spec("b", 50, 20_000, 50.0), 500, 1).unwrap();
     assert_eq!(b1.unwrap().items.len(), 1);
@@ -77,11 +76,8 @@ fn params_bytes_is_exact_including_utf8_and_json_escapes() {
     for (idx, s) in specs.iter().enumerate() {
         assert!(planner.push(s.clone(), 0, idx).unwrap().is_none());
     }
-    assert_eq!(
-        planner.current_params_bytes(),
-        contigs_params_json(&specs, &options).len()
-    );
     let batch = planner.finish().unwrap();
+    assert_eq!(batch.params_bytes, contigs_params_json(&specs, &options).len());
     assert_eq!(batch.params_bytes, batch.params_json(&options).len());
     assert_eq!(
         contig_json_size(&specs[0]),

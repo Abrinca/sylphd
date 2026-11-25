@@ -1,5 +1,5 @@
-//! `clap` command line of `sylphd-client`, mirroring `src/sylphd/cli_parser.py`
-//! for `info`, `profile`, `query` and `assembly`, plus the offline `render`.
+//! `clap` command line of `sylphd-client`: `info`, `profile`, `query` and
+//! `assembly`, plus the offline `render`.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -72,14 +72,15 @@ pub struct ClientCli {
     #[arg(long, value_name = "PATH")]
     pub token_file: Option<String>,
 
-    /// read timeout in seconds [default: no timeout]
-    #[arg(long, value_name = "SECONDS")]
+    /// total deadline of one request in seconds (upload, server compute and
+    /// response) [default: no deadline]
+    #[arg(long, value_name = "SECONDS", value_parser = parse_non_negative_float)]
     pub timeout: Option<f64>,
 
     /// retry up to N times when the server answers 429 or 503, waiting
     /// for its Retry-After (at most 30 s)
     #[arg(long, value_name = "N", default_value_t = 0)]
-    pub retries: i64,
+    pub retries: u32,
 }
 
 #[derive(Debug, Args)]
@@ -306,12 +307,20 @@ pub struct AssemblyArgs {
     /// --no-local-sketch uploads the raw sequence instead, which only servers
     /// started with --allow-sequences accept; it cannot be combined with
     /// --per-contig
-    #[arg(long = "local-sketch", action = clap::ArgAction::SetTrue)]
-    pub local_sketch: bool,
+    #[arg(
+        long = "local-sketch",
+        id = "local_sketch",
+        overrides_with = "no_local_sketch"
+    )]
+    _local_sketch: bool,
 
     /// upload the raw sequence instead of a local sketch; requires a server
     /// started with --allow-sequences
-    #[arg(long = "no-local-sketch", action = clap::ArgAction::SetTrue)]
+    #[arg(
+        long = "no-local-sketch",
+        id = "no_local_sketch",
+        overrides_with = "local_sketch"
+    )]
     pub no_local_sketch: bool,
 
     /// with --per-contig: metadata columns to add to every hit ('all', 'none'
@@ -420,7 +429,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn profile_defaults_match_python() {
+    fn profile_defaults() {
         let cli = Cli::try_parse_from(["sylphd-client", "profile", "reads.fq.gz"]).unwrap();
         let Command::Profile(args) = cli.command else {
             panic!("expected profile");
@@ -500,6 +509,33 @@ mod tests {
             let err = Cli::try_parse_from(args).unwrap_err();
             assert_eq!(err.exit_code(), 2);
         }
+    }
+
+    #[test]
+    fn negative_timeout_is_a_usage_error() {
+        let err = Cli::try_parse_from(["sylphd-client", "info", "--timeout", "-1"]).unwrap_err();
+        assert_eq!(err.exit_code(), 2);
+        let ok = Cli::try_parse_from(["sylphd-client", "info", "--timeout", "2.5"]).unwrap();
+        let Command::Info(args) = ok.command else {
+            panic!("expected info");
+        };
+        assert_eq!(args.client.timeout, Some(2.5));
+    }
+
+    #[test]
+    fn local_sketch_flags_override_each_other() {
+        let local = |flags: &[&str]| {
+            let mut argv = vec!["sylphd-client", "assembly", "x.fa"];
+            argv.extend_from_slice(flags);
+            let Command::Assembly(args) = Cli::try_parse_from(argv).unwrap().command else {
+                panic!("expected assembly");
+            };
+            args.local()
+        };
+        assert!(local(&[]));
+        assert!(!local(&["--no-local-sketch"]));
+        assert!(local(&["--no-local-sketch", "--local-sketch"]));
+        assert!(!local(&["--local-sketch", "--no-local-sketch"]));
     }
 
     #[test]

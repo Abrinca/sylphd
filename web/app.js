@@ -183,6 +183,7 @@
   // 'none' | 'invalid' | 'offline'. A running re-check keeps the
   // previous value, so the banner never flashes during "Checking…".
   let serverProblem = null;
+  let versionProblem = null; // the api_version error of the last /info, if that was the problem
   let bannerKey = '';
   const PROBLEM_HINT = {
     none: 'Public server offline', invalid: 'Invalid API URL', offline: 'Server offline',
@@ -376,6 +377,9 @@
       title = 'Public server offline';
       body = [el('p', null, 'The public sylphd server is offline, so this page cannot search anything right now. ',
         'You can use your own server instead (see ', el('a', { href: './docs/guides/public-server/', text: 'running a public server' }), ').')];
+    } else if (problem === 'version') {
+      title = 'Incompatible server';
+      body = [el('p', null, versionProblem || 'The server speaks another API version.')];
     } else if (problem === 'invalid') {
       title = 'Invalid API URL';
       body = [el('p', null, 'The API base URL ', el('code', { text: API || '(empty)' }), ' is not a valid URL.')];
@@ -545,6 +549,15 @@
       const res = await fetch(`${API}/info`, { signal: timeoutSignal(8000), cache: 'no-store', headers: tok.headers() });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const info = await res.json();
+      // Before anything is sketched: a server of another API version (or one that does not
+      // report it) is refused, with the core's own error message.
+      try {
+        (await window.SylphdSketch.loadWasm()).check_api_version(info.api_version);
+      } catch (e) {
+        versionProblem = e.message || String(e);
+        throw e;
+      }
+      versionProblem = null;
       serverInfo = info;
       tokenRequired = !!(info.access && info.access.token_required);
       noteToken(res);
@@ -586,14 +599,14 @@
       notifyInfo();
     } catch (e) {
       serverInfo = null;
-      setStatus('offline', 'Server offline');
+      setStatus('offline', versionProblem ? 'Incompatible server' : 'Server offline');
       ui.statusDetail.replaceChildren();
       if (ui.spPrivacyUsage) ui.spPrivacyUsage.hidden = true;
       renderPanelHead();
       renderAbout();
       renderCatalog();
       if (messageView) messageView.clear();
-      setProblem('offline');
+      setProblem(versionProblem ? 'version' : 'offline');
       notifyInfo();
       const retryBtns = document.querySelectorAll('#retry-now, #sp-retry');
       retryBtns.forEach((b) => { b.disabled = false; b.textContent = 'Retry now'; });
@@ -1012,10 +1025,6 @@
       }
       if (!data || !data.table || !Array.isArray(data.table.columns) || !Array.isArray(data.table.data)) {
         throw new Error('Unexpected response from the server.');
-      }
-      if (data.api_version != null && window.SylphdSketch) {
-        const wasm = await window.SylphdSketch.loadWasm();
-        wasm.check_api_version(data.api_version);
       }
       // the server never saw the sequence: fill in what this browser counted (unknown for an uploaded sketch)
       const q = data.query = data.query || {};

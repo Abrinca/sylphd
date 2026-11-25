@@ -18,7 +18,7 @@ use sylphd_core::input::{
     SampleCliInputs, SampleFiles, SampleInput, Skipped, DEFAULT_MIN_NUMBER_KMERS,
     MAX_SAMPLE_NAME_CHARS,
 };
-use sylphd_core::io::open_maybe_gzip;
+use sylphd_core::io::{for_each_chunk, open_maybe_gzip};
 use sylphd_core::sketchcheck::{check_sketch_compatibility, parse_sketch_header};
 use sylphd_core::stream::StreamSketcher;
 use sylphd_core::Seeding;
@@ -293,7 +293,7 @@ fn sketch_sample_single_paired_interleaved_and_premade() {
     let l1: Vec<&str> = d1.lines().collect();
     let l2: Vec<&str> = d2.lines().collect();
     let mut inter_bytes = Vec::new();
-    for (r1, r2) in l1.chunks_exact(4).zip(l2.chunks_exact(4)) {
+    for (r1, r2) in l1.as_chunks::<4>().0.iter().zip(l2.as_chunks::<4>().0.iter()) {
         for line in r1.iter().chain(r2.iter()) {
             inter_bytes.extend_from_slice(line.as_bytes());
             inter_bytes.push(b'\n');
@@ -436,7 +436,7 @@ fn contig_filter_counts_short_and_few_kmers_and_deduplicates_names() {
         DEFAULT_MIN_NUMBER_KMERS,
         |c| {
             prepared.push(c);
-            Ok(())
+            Ok::<(), sylphd_core::input::InputError>(())
         },
     )
     .unwrap();
@@ -472,7 +472,7 @@ fn contig_filter_counts_short_and_few_kmers_and_deduplicates_names() {
         DEFAULT_MIN_NUMBER_KMERS,
         |c| {
             kept.push(c);
-            Ok(())
+            Ok::<(), sylphd_core::input::InputError>(())
         },
     )
     .unwrap();
@@ -481,7 +481,7 @@ fn contig_filter_counts_short_and_few_kmers_and_deduplicates_names() {
     assert_eq!(counters.skipped_few_kmers.bp, 4800);
 
     // Empty input is an InputError
-    let err = sketch_contigs_reader(&b""[..], "empty.fa", 200, 31, 1000, 10, |_| Ok(()))
+    let err = sketch_contigs_reader(&b""[..], "empty.fa", 200, 31, 1000, 10, |_| Ok::<(), sylphd_core::input::InputError>(()))
         .unwrap_err();
     assert!(err.0.contains("contains no sequences"), "{err}");
 
@@ -510,7 +510,7 @@ fn contig_filter_counts_short_and_few_kmers_and_deduplicates_names() {
         10,
         |c| {
             from_file.push(c);
-            Ok(())
+            Ok::<(), sylphd_core::input::InputError>(())
         },
     )
     .unwrap();
@@ -519,17 +519,24 @@ fn contig_filter_counts_short_and_few_kmers_and_deduplicates_names() {
     assert!(from_file[0].contig_kmers > 0);
     assert!(from_file[0].sketch_kmers >= 10);
 
-    // ContigSketcher::push_reader streams multi-member gzip directly
+    // The raw ContigSketcher fed through `for_each_chunk` (multi-member gzip)
     let mut sketcher =
         ContigSketcher::with_limits(200, 31, 1000, DEFAULT_MIN_SPACING, Seeding::Avx2Compat, 0, 0)
             .unwrap();
     let mut raw_records = Vec::new();
-    sketcher
-        .push_file::<String>(data_dir().join("clodf13.fna.gz"), |r| {
-            raw_records.push(r);
+    for_each_chunk(
+        std::fs::File::open(data_dir().join("clodf13.fna.gz")).unwrap(),
+        |chunk| -> Result<(), String> {
+            sketcher.push(chunk)?;
+            while let Some(record) = sketcher.take_next() {
+                raw_records.push(record);
+            }
             Ok(())
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
+    sketcher.end_file().unwrap();
+    raw_records.extend(std::iter::from_fn(|| sketcher.take_next()));
     assert_eq!(raw_records.len(), 1);
     assert_eq!(raw_records[0].sketch_kmers(), Some(from_file[0].sketch_kmers));
 }

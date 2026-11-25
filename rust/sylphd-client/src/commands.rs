@@ -1,19 +1,20 @@
 //! The `info`, `profile`, `query`, `assembly` and `render` commands.
 //!
-//! Behaviour is the Python CLI's (`src/sylphd/cli.py`, `client.py`,
-//! `per_contig_client.py`); all rendering and document merging come from
-//! `sylphd-core`.
+//! All rendering and document merging come from `sylphd-core`; the server
+//! validates everything that depends on its own database.
 
 use std::io::Write;
 use std::path::Path;
 
+use bytes::Bytes;
 use serde_json::{json, Value};
 use sylphd_core::batch::{
-    BatchLimits, ContigBatchPlanner, ContigSpec, ContigsRequestOptions, DEFAULT_TOP,
+    BatchItem, BatchLimits, ContigBatchPlanner, ContigSpec, ContigsRequestOptions,
+    DEFAULT_ASSEMBLY_TOP, DEFAULT_CONSENSUS_RATIO, DEFAULT_CONSENSUS_Z, DEFAULT_TOP,
 };
 use sylphd_core::document::{
-    merge_contigs_run, AssemblyDocument, ContigsDocument, ContigsRunMergeOptions, DocumentError,
-    InfoDocument, MetadataInfo, ProfileDocument, ResultDocument, SkippedBucket,
+    self, merge_contigs_run, AssemblyDocument, ContigsDocument, ContigsRunMergeOptions,
+    DocumentError, InfoDocument, MetadataInfo, ProfileDocument, ResultDocument,
 };
 use sylphd_core::input::{
     build_sample_inputs, sample_name_from_path, sketch_assembly_file, sketch_contigs_file,
@@ -22,7 +23,7 @@ use sylphd_core::input::{
 };
 use sylphd_core::render::{
     format_size, render_assembly_stderr, render_assembly_tsv, render_contigs_summary,
-    render_contigs_tsv, render_info, render_profile_caveats, render_profile_tsv,
+    render_contigs_tsv, render_info, render_profile_caveats, render_tsv,
     render_stderr_messages, render_usage_note,
 };
 
@@ -124,7 +125,7 @@ fn connect(args: &ClientCli) -> Result<Client, Failure> {
     .map_err(Failure::from)
 }
 
-/// `_client_token`: `--token-file`, else `$SYLPHD_TOKEN`.
+/// `--token-file`, else `$SYLPHD_TOKEN`.
 fn resolve_token(path: Option<&str>, env: &dyn Env) -> Result<Option<String>, Failure> {
     if let Some(path) = path {
         let text = std::fs::read_to_string(path)
@@ -179,7 +180,7 @@ fn metadata_column_names(metadata: Option<&MetadataInfo>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `_resolve_fields`: `--fields` -> the metadata columns to request.
+/// `--fields` -> the metadata columns to request.
 fn resolve_fields(
     text: Option<&str>,
     metadata: Option<&MetadataInfo>,
@@ -250,7 +251,7 @@ fn check_writable_directory(directory: &Path, original: &Path) -> Result<(), Fai
     Ok(())
 }
 
-/// `_check_output_file`: fail on an unwritable `-o` before the expensive work.
+/// Fails on an unwritable `-o` before the expensive work.
 fn check_output_file(path: Option<&str>) -> Result<(), Failure> {
     let Some(path) = path.filter(|p| !p.is_empty() && *p != "-") else {
         return Ok(());
@@ -269,7 +270,7 @@ fn check_output_file(path: Option<&str>) -> Result<(), Failure> {
     check_writable_directory(parent, parent)
 }
 
-/// Same for a `--taxprof` prefix (`cli._check_output_prefix`).
+/// Same for a `--taxprof` prefix.
 fn check_output_prefix(prefix: &str) -> Result<(), Failure> {
     let path = Path::new(prefix);
     let (directory, original) = if path.is_dir() {
@@ -323,24 +324,18 @@ fn cmd_info(args: InfoArgs) -> Outcome {
     let (raw, info) = client.get_info()?;
     let messages = client.messages();
     if args.json {
-        let messages_json = serde_json::to_string(&messages)
-            .map_err(|e| Failure::client(format!("cannot encode messages: {e}")))?;
-        let merged = insert_json_member(&raw, "messages", &messages_json)?;
-        return write_output(None, &with_newline(merged));
+        let mut object: serde_json::Map<String, Value> = serde_json::from_str(&raw)
+            .map_err(|_| Failure::client("unexpected /info response (not a JSON object)"))?;
+        object.insert(
+            "messages".into(),
+            serde_json::to_value(&messages)
+                .map_err(|e| Failure::client(format!("cannot encode messages: {e}")))?,
+        );
+        let text = serde_json::to_string_pretty(&object)
+            .map_err(|e| Failure::client(format!("cannot encode /info: {e}")))?;
+        return write_output(None, &with_newline(text));
     }
     write_output(None, &render_info(&info, &messages))
-}
-
-/// Appends a JSON member before the final `}` (the `/info` document is an object).
-fn insert_json_member(raw: &str, name: &str, value_json: &str) -> Result<String, Failure> {
-    let text = raw.trim_end();
-    let Some(position) = text.rfind('}') else {
-        return Err(Failure::client(
-            "unexpected /info response (not a JSON object)",
-        ));
-    };
-    let head = text[..position].trim_end().trim_end_matches(',');
-    Ok(format!("{head},\n  \"{name}\": {value_json}\n}}\n"))
 }
 
 // ---------------------------------------------------------------------------
@@ -359,112 +354,153 @@ struct ProfileParamsOut {
 }
 
 fn cmd_profile(args: ProfileArgs) -> Outcome {
-    cmd_contain(
-        &args.sample,
-        &args.output,
-        &args.sylph,
-        &args.tax,
-        args.verbose,
-        &args.client,
-        Mode::Profile,
-    )
+    let common = ContainArgs {
+        sample: &args.sample,
+        output: &args.output,
+        sylph: &args.sylph,
+        verbose: args.verbose,
+        client: &args.client,
+    };
+    cmd_contain(&common, Mode::Profile, Some(&args.tax))
 }
 
 fn cmd_query(args: QueryArgs) -> Outcome {
-    let taxonomy = crate::cli::ProfileTaxCli {
-        estimate_read_counts: false,
-        taxonomy: None,
-        tax_source: Vec::new(),
-        taxprof: None,
+    let common = ContainArgs {
+        sample: &args.sample,
+        output: &args.output,
+        sylph: &args.sylph,
+        verbose: args.verbose,
+        client: &args.client,
     };
-    cmd_contain(
-        &args.sample,
-        &args.output,
-        &args.sylph,
-        &taxonomy,
-        args.verbose,
-        &args.client,
-        Mode::Query,
-    )
+    cmd_contain(&common, Mode::Query, None)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn cmd_contain(
-    sample_args: &crate::cli::SampleCli,
-    output: &crate::cli::OutputCli,
-    sylph: &crate::cli::SylphCli,
-    tax: &crate::cli::ProfileTaxCli,
+/// The options `profile` and `query` share.
+struct ContainArgs<'a> {
+    sample: &'a crate::cli::SampleCli,
+    output: &'a crate::cli::OutputCli,
+    sylph: &'a crate::cli::SylphCli,
     verbose: bool,
-    client_args: &ClientCli,
-    mode: Mode,
-) -> Outcome {
-    let samples = build_sample_inputs(&sample_args.inputs())
+    client: &'a ClientCli,
+}
+
+/// A `--taxonomy` list checked for syntax only (`gtdb`, `ncbi`, `tax` or
+/// `tax:<source>`; the server checks them against its metadata), so a typo
+/// fails before anything is sketched.
+fn parse_taxonomy_list(text: &str) -> Result<Vec<String>, Failure> {
+    let mut names: Vec<String> = Vec::new();
+    for name in text.split(',').map(str::trim).filter(|name| !name.is_empty()) {
+        let lower = name.to_ascii_lowercase();
+        if let Some(source) = lower.strip_prefix("tax:") {
+            if source.trim().is_empty() {
+                return Err(Failure::client(format!(
+                    "'{name}' names no taxonomy source (tax:<source>)"
+                )));
+            }
+        } else if !matches!(lower.as_str(), "gtdb" | "ncbi" | "tax") {
+            return Err(Failure::client(format!(
+                "unknown taxonomy '{name}' (choose from: gtdb, ncbi, tax, or tax:<source>)"
+            )));
+        }
+        names.push(name.to_string());
+    }
+    if names.is_empty() {
+        return Err(Failure::client(
+            "--taxonomy needs at least one of: gtdb, ncbi, tax, tax:<source>",
+        ));
+    }
+    Ok(names)
+}
+
+fn default_taxonomies(metadata: Option<&MetadataInfo>) -> Vec<String> {
+    let mut names = vec!["gtdb".to_string(), "ncbi".to_string()];
+    if metadata.is_some_and(|meta| !meta.taxonomy_sources.is_empty()) {
+        names.push("tax".into());
+    }
+    names
+}
+
+/// The server's upload limit in bytes (`None` = unlimited).
+fn upload_limit(info: &InfoDocument) -> Option<u64> {
+    info.limits
+        .max_upload_mb
+        .filter(|mb| *mb > 0)
+        .map(|mb| mb * 1024 * 1024)
+}
+
+fn check_upload_size(info: &InfoDocument, size: u64, what: &str) -> Result<(), Failure> {
+    match upload_limit(info) {
+        Some(limit) if size > limit => Err(Failure::client(format!(
+            "{what} {}, above the server's {} upload limit",
+            format_size(size),
+            format_size(limit)
+        ))),
+        _ => Ok(()),
+    }
+}
+
+fn cmd_contain(args: &ContainArgs, mode: Mode, tax: Option<&crate::cli::ProfileTaxCli>) -> Outcome {
+    let samples = build_sample_inputs(&args.sample.inputs())
         .map_err(|error| Failure::usage(error.to_string()))?;
+    let (output, sylph) = (args.output, args.sylph);
 
     let params = ProfileParamsOut {
         minimum_ani: sylph.minimum_ani,
         seq_id: sylph.seq_id,
         estimate_unknown: sylph.estimate_unknown,
-        estimate_read_counts: mode == Mode::Profile && tax.estimate_read_counts,
+        estimate_read_counts: tax.is_some_and(|tax| tax.estimate_read_counts),
         min_number_kmers: sylph.min_number_kmers,
         min_contain: sylph.min_contain,
         screen_ani: sylph.screen_ani,
         no_adjust: sylph.no_adjust,
     };
 
-    let write_taxonomy = mode == Mode::Profile && tax.taxprof.is_some();
-    if !tax.tax_source.is_empty() && !write_taxonomy {
+    if tax.is_some_and(|tax| tax.taxprof.is_none() && !tax.tax_source.is_empty()) {
         return Err(Failure::client(
             "--tax-source needs --taxprof: it restricts the sources of the \
              aggregated 'tax' profile",
         ));
     }
+    let tax = tax.filter(|tax| tax.taxprof.is_some());
     check_output_file(output.output.as_deref())?;
-
-    // A bad --taxonomy must fail before the server is contacted; only the
-    // default depends on what the server has.
-    let requested_taxonomies = if write_taxonomy {
-        match tax.taxonomy.as_deref() {
-            Some(text) => Some(parse_taxonomies(Some(text))?),
-            None => None,
+    let requested_taxonomies = match tax {
+        Some(tax) => {
+            check_output_prefix(tax.taxprof.as_deref().unwrap_or_default())?;
+            tax.taxonomy.as_deref().map(parse_taxonomy_list).transpose()?
         }
-    } else {
-        None
+        None => None,
     };
-    if write_taxonomy {
-        if let Some(prefix) = &tax.taxprof {
-            check_output_prefix(prefix)?;
-        }
-    }
 
-    let mut client = connect(client_args)?;
+    let mut client = connect(args.client)?;
     let (_, info) = client.get_info()?;
     note_messages(&client, false);
-    note_usage(&info, client.base_url(), false);
+    note_usage(&info, client.base_url(), output.wants_json());
 
     let metadata = info.metadata.as_ref();
     let fields = resolve_fields(Some(output.fields.as_str()), metadata)?;
 
-    let (taxonomies, tax_sources, request_fields, extra_fields) = if write_taxonomy {
-        let taxonomies = match requested_taxonomies {
-            Some(taxonomies) => taxonomies,
-            None => default_taxonomies(metadata),
-        };
-        let tax_sources = select_tax_sources(&tax.tax_source, &taxonomies, metadata)?;
-        let extra = resolve_taxonomy_columns(&taxonomies, metadata)?;
-        let mut request_fields = fields.clone();
-        for column in &extra {
-            if !request_fields.contains(column) {
-                request_fields.push(column.clone());
-            }
-        }
-        (taxonomies, tax_sources, request_fields, extra)
-    } else {
-        (Vec::new(), Vec::new(), fields.clone(), Vec::new())
+    // The server validates the taxonomies and sources against its metadata and
+    // adds the columns the aggregation needs; the table keeps `fields`.
+    let taxonomies = match (tax, requested_taxonomies) {
+        (None, _) => None,
+        (Some(_), Some(requested)) => Some(requested),
+        (Some(_), None) => Some(default_taxonomies(metadata)),
     };
+    let tax_sources = tax.map(|tax| tax.tax_source.as_slice()).unwrap_or_default();
+    if !tax_sources.is_empty()
+        && !taxonomies
+            .iter()
+            .flatten()
+            .any(|name| name.eq_ignore_ascii_case("tax"))
+    {
+        return Err(Failure::client(
+            "--tax-source only applies to '--taxonomy tax' (it restricts \
+             which sources the merged profile uses)",
+        ));
+    }
 
     let (c, k) = sketch_parameters(&info)?;
-    if verbose {
+    if args.verbose {
         eprintln!(
             "{PROG}: database {} (c={c}, k={k}); sketching {} sample(s) with {} thread(s)",
             info.database.name.as_deref().unwrap_or("None"),
@@ -474,7 +510,7 @@ fn cmd_contain(
     }
     let sketched: Vec<SketchedSample> =
         sketch_samples_parallel(&samples, c, k, Some(sylph.threads))?;
-    if verbose {
+    if args.verbose {
         for sketch in &sketched {
             eprintln!(
                 "{PROG}: {}: sketch c={} k={} ({})",
@@ -486,17 +522,9 @@ fn cmd_contain(
         }
     }
 
-    let limit = info.limits.max_upload_mb.unwrap_or(0) * 1024 * 1024;
     let total: u64 = sketched.iter().map(|s| s.bytes.len() as u64).sum();
-    if limit > 0 && total > limit {
-        return Err(Failure::client(format!(
-            "sketches total {}, above the server's {} upload limit; send fewer \
-             samples per request",
-            format_size(total),
-            format_size(limit)
-        )));
-    }
-    if verbose {
+    check_upload_size(&info, total, "sketches total")?;
+    if args.verbose {
         eprintln!(
             "{PROG}: sending {} sketch(es), {}",
             sketched.len(),
@@ -509,47 +537,31 @@ fn cmd_contain(
         mode,
         &params,
         &names,
-        &request_fields,
-        (!tax_sources.is_empty()).then_some(tax_sources.as_slice()),
-        write_taxonomy.then_some(taxonomies.as_slice()),
+        &fields,
+        (!tax_sources.is_empty()).then_some(tax_sources),
+        taxonomies.as_deref(),
     );
-    let parts: Vec<(String, Vec<u8>)> = sketched
-        .iter()
-        .map(|sketch| (sketch.name.clone(), sketch.bytes.clone()))
+    let parts: Vec<(String, Bytes)> = sketched
+        .into_iter()
+        .map(|sketch| (sketch.name, Bytes::from(sketch.bytes)))
         .collect();
     let raw = client.post_sketches(mode.endpoint(), &params_json, &parts)?;
-    let mut document =
-        ProfileDocument::from_json_str(&raw).map_err(|error| Failure::client(error.to_string()))?;
-    if request_fields.len() != fields.len() {
-        // The extra taxonomy columns were requested for the taxprof only: they do
-        // not show up in the TSV (`rows_to_tsv(fields=...)` printed `fields`, which
-        // for `--fields none` is "no metadata columns", not "no columns"). The
-        // `--json` document keeps them, because it is the server's answer.
-        let hidden: Vec<&String> = extra_fields.iter().filter(|c| !fields.contains(c)).collect();
-        let display: Vec<String> = document
-            .table
-            .columns
-            .iter()
-            .filter(|column| !hidden.contains(column))
-            .cloned()
-            .collect();
-        let table = document.table.select(&display);
-        document.table = table;
-    }
+    let document: ProfileDocument =
+        document::parse(&raw).map_err(|error| Failure::client(error.to_string()))?;
 
     if output.wants_json() {
         write_output(output.output.as_deref(), &with_newline(raw))?;
     } else {
-        write_output(output.output.as_deref(), &render_profile_tsv(&document))?;
+        write_output(output.output.as_deref(), &render_tsv(&document.table))?;
     }
 
-    if write_taxonomy {
+    if let Some(tax) = tax {
         let prefix = tax.taxprof.as_deref().unwrap_or_default();
-        let written = write_taxprof(&document, prefix, &taxonomies, &tax_sources)?;
-        for path in written {
+        let written = write_taxprof(&document, prefix)?;
+        for path in &written.paths {
             eprintln!("{PROG}: wrote {path}");
         }
-        if taxonomies.iter().any(|name| is_sylphtax(name)) {
+        if written.has_sylphtax {
             let caveats = render_profile_caveats(&document);
             if !caveats.is_empty() {
                 eprint!("{caveats}");
@@ -604,209 +616,6 @@ fn profile_params_json(
     Value::Object(object).to_string()
 }
 
-const TAXONOMIES: [&str; 3] = ["gtdb", "ncbi", "tax"];
-const SYLPHTAX_PROFILE_COLUMNS: [&str; 3] = ["tax_source", "tax_key", "tax_lineage"];
-const NEAREST_PROFILE_COLUMNS: [&str; 8] = [
-    "ncbi_nearest_lineage",
-    "ncbi_nearest_taxid",
-    "ncbi_nearest_rank",
-    "ncbi_nearest_name",
-    "ncbi_nearest_clade",
-    "ncbi_nearest_formal_taxid",
-    "ncbi_nearest_formal_rank",
-    "ncbi_nearest_formal_name",
-];
-
-fn is_sylphtax(taxonomy: &str) -> bool {
-    taxonomy == "tax" || taxonomy.starts_with("tax:")
-}
-
-fn source_of(taxonomy: &str) -> Option<&str> {
-    taxonomy
-        .strip_prefix("tax:")
-        .filter(|source| !source.is_empty())
-}
-
-/// `taxonomy.parse_taxonomies`.
-fn parse_taxonomies(text: Option<&str>) -> Result<Vec<String>, Failure> {
-    let Some(text) = text else {
-        return Ok(vec!["gtdb".into(), "ncbi".into()]);
-    };
-    let mut selected: Vec<String> = Vec::new();
-    for part in text.split(',') {
-        let name = part.trim();
-        if name.is_empty() {
-            continue;
-        }
-        let name = if name.to_ascii_lowercase().starts_with("tax:") {
-            let source = name["tax:".len()..].trim();
-            if source.is_empty() {
-                return Err(Failure::client(format!(
-                    "'{}' names no taxonomy source (tax:<source>)",
-                    part.trim()
-                )));
-            }
-            format!("tax:{source}")
-        } else {
-            name.to_ascii_lowercase()
-        };
-        if source_of(&name).is_none() && !TAXONOMIES.contains(&name.as_str()) {
-            return Err(Failure::client(format!(
-                "unknown taxonomy '{}' (choose from: {}, or tax:<source>)",
-                part.trim(),
-                TAXONOMIES.join(", ")
-            )));
-        }
-        if !selected.contains(&name) {
-            selected.push(name);
-        }
-    }
-    if selected.is_empty() {
-        return Err(Failure::client(format!(
-            "--taxonomy needs at least one of: {}",
-            TAXONOMIES.join(", ")
-        )));
-    }
-    Ok(selected)
-}
-
-fn source_names(metadata: Option<&MetadataInfo>) -> Vec<String> {
-    metadata
-        .map(|meta| {
-            meta.taxonomy_sources
-                .iter()
-                .filter_map(|source| source.name.clone())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn default_taxonomies(metadata: Option<&MetadataInfo>) -> Vec<String> {
-    let mut names = vec!["gtdb".to_string(), "ncbi".to_string()];
-    if metadata.is_some_and(|meta| !meta.taxonomy_sources.is_empty()) {
-        names.push("tax".into());
-    }
-    names
-}
-
-/// `taxonomy.resolve_taxonomy_columns`.
-fn resolve_taxonomy_columns(
-    taxonomies: &[String],
-    metadata: Option<&MetadataInfo>,
-) -> Result<Vec<String>, Failure> {
-    let Some(metadata) = metadata else {
-        return Err(Failure::client(
-            "the server has no metadata database; --taxprof needs \
-             'gtdb_taxonomy'/'ncbi_taxonomy' (start it with 'sylphd serve --meta')",
-        ));
-    };
-    if taxonomies.iter().any(|name| is_sylphtax(name)) && metadata.taxonomy_sources.is_empty() {
-        return Err(Failure::client(
-            "the server has no sylph-tax taxonomy sources, so there is nothing \
-             for '--taxonomy tax' to aggregate; add sources with \
-             'sylphd setup --taxonomy' and restart the server",
-        ));
-    }
-    let known = source_names(Some(metadata));
-    for taxonomy in taxonomies {
-        if let Some(source) = source_of(taxonomy) {
-            if !known.iter().any(|name| name == source) {
-                return Err(Failure::client(format!(
-                    "the server has no taxonomy source {source:?} (it has: {})",
-                    if known.is_empty() {
-                        "none".to_string()
-                    } else {
-                        known.join(", ")
-                    }
-                )));
-            }
-        }
-    }
-    let available = &metadata.columns;
-    let mut columns: Vec<String> = Vec::new();
-    let mut missing: Vec<String> = Vec::new();
-    for taxonomy in taxonomies {
-        let needed: Vec<&str> = if is_sylphtax(taxonomy) {
-            SYLPHTAX_PROFILE_COLUMNS.to_vec()
-        } else {
-            vec![match taxonomy.as_str() {
-                "gtdb" => "gtdb_taxonomy",
-                "ncbi" => "ncbi_taxonomy",
-                _ => unreachable!("validated taxonomy"),
-            }]
-        };
-        for column in needed {
-            if !available.iter().any(|name| name == column) {
-                missing.push(format!("{column} ({taxonomy})"));
-            } else if !columns.iter().any(|name| name == column) {
-                columns.push(column.to_string());
-            }
-        }
-        if taxonomy == "ncbi" {
-            for column in NEAREST_PROFILE_COLUMNS {
-                if available.iter().any(|name| name == column)
-                    && !columns.iter().any(|name| name == column)
-                {
-                    columns.push(column.to_string());
-                }
-            }
-        }
-    }
-    if !missing.is_empty() {
-        return Err(Failure::client(format!(
-            "the server metadata has no {}; available columns: {}",
-            missing.join(", "),
-            if available.is_empty() {
-                "(none)".to_string()
-            } else {
-                available.join(", ")
-            }
-        )));
-    }
-    Ok(columns)
-}
-
-/// `cli._select_tax_sources`.
-fn select_tax_sources(
-    values: &[String],
-    taxonomies: &[String],
-    metadata: Option<&MetadataInfo>,
-) -> Result<Vec<String>, Failure> {
-    if !taxonomies.iter().any(|name| name == "tax") {
-        if !values.is_empty() {
-            return Err(Failure::client(
-                "--tax-source only applies to '--taxonomy tax' (it restricts \
-                 which sources the merged profile uses)",
-            ));
-        }
-        return Ok(Vec::new());
-    }
-    let available = source_names(metadata);
-    if values.is_empty() {
-        return Ok(available);
-    }
-    let unknown: Vec<&str> = values
-        .iter()
-        .filter(|name| !available.iter().any(|known| known == *name))
-        .map(String::as_str)
-        .collect();
-    if !unknown.is_empty() {
-        return Err(Failure::client(format!(
-            "unknown taxonomy source(s): {} (available: {})",
-            unknown.join(", "),
-            if available.is_empty() {
-                "none".to_string()
-            } else {
-                available.join(", ")
-            }
-        )));
-    }
-    Ok(available
-        .into_iter()
-        .filter(|name| values.iter().any(|value| value == name))
-        .collect())
-}
-
 fn safe_name(name: &str) -> String {
     let replaced = name.replace(['/', '\\'], "_");
     if replaced.is_empty() {
@@ -817,24 +626,21 @@ fn safe_name(name: &str) -> String {
 }
 
 fn taxonomy_file_label(taxonomy: &str) -> String {
-    match source_of(taxonomy) {
-        None => taxonomy.to_string(),
+    match taxonomy.strip_prefix("tax:") {
         Some(source) => format!("tax.{}", safe_name(source)),
+        None => taxonomy.to_string(),
     }
 }
 
-fn write_taxprof(
-    document: &ProfileDocument,
-    prefix: &str,
-    taxonomies: &[String],
-    tax_sources: &[String],
-) -> Result<Vec<String>, Failure> {
-    if taxonomies.iter().any(|name| name == "tax") && tax_sources.is_empty() {
-        return Err(Failure::client(
-            "the 'tax' profile needs the names of the taxonomy sources it was \
-             resolved against",
-        ));
-    }
+struct TaxprofWritten {
+    paths: Vec<String>,
+    /// A sylph-tax (`tax`, `tax:<source>`) profile was written.
+    has_sylphtax: bool,
+}
+
+/// Writes one `.sylphmpa` per sample and taxonomy of the response, in the
+/// server's order.
+fn write_taxprof(document: &ProfileDocument, prefix: &str) -> Result<TaxprofWritten, Failure> {
     let prefix = if Path::new(prefix).is_dir() && !prefix.ends_with('/') {
         format!("{prefix}/")
     } else {
@@ -845,13 +651,23 @@ fn write_taxprof(
         .as_ref()
         .and_then(Value::as_object)
         .ok_or_else(|| Failure::client("the server returned no taxonomic profiles"))?;
-    let mut written = Vec::new();
-    for taxonomy in taxonomies {
-        for sample in &document.samples {
-            let text = taxprof
-                .get(&sample.name)
-                .and_then(|profiles| profiles.get(taxonomy))
-                .and_then(|profile| profile.get("sylphmpa"))
+    let mut written = TaxprofWritten {
+        paths: Vec::new(),
+        has_sylphtax: false,
+    };
+    for sample in &document.samples {
+        let profiles = taxprof
+            .get(&sample.name)
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                Failure::client(format!(
+                    "the server returned no taxonomic profile for {:?}",
+                    sample.name
+                ))
+            })?;
+        for (taxonomy, profile) in profiles {
+            let text = profile
+                .get("sylphmpa")
                 .and_then(Value::as_str)
                 .ok_or_else(|| {
                     Failure::client(format!(
@@ -866,7 +682,8 @@ fn write_taxprof(
             );
             std::fs::write(&path, text)
                 .map_err(|error| Failure::client(format!("cannot write {path}: {error}")))?;
-            written.push(path);
+            written.has_sylphtax |= taxonomy == "tax" || taxonomy.starts_with("tax:");
+            written.paths.push(path);
         }
     }
     Ok(written)
@@ -898,7 +715,7 @@ fn cmd_assembly(args: AssemblyArgs) -> Outcome {
         .name
         .clone()
         .unwrap_or_else(|| sample_name_from_path(&args.file, false));
-    let top = args.top.unwrap_or(10);
+    let top = args.top.map_or(DEFAULT_ASSEMBLY_TOP, usize::from);
     check_output_file(args.output.as_deref())?;
 
     let mut client = connect(&args.client)?;
@@ -909,14 +726,7 @@ fn cmd_assembly(args: AssemblyArgs) -> Outcome {
     let raw = if args.local() {
         let (c, k) = sketch_parameters(&info)?;
         let (sketch, stats) = sketch_assembly_file(path, &name, c, k)?;
-        let limit = info.limits.max_upload_mb.unwrap_or(0) * 1024 * 1024;
-        if limit > 0 && sketch.len() as u64 > limit {
-            return Err(Failure::client(format!(
-                "the sketch is {} bytes, over the server's {} MB upload limit",
-                sketch.len(),
-                limit / (1024 * 1024)
-            )));
-        }
+        check_upload_size(&info, sketch.len() as u64, "the sketch is")?;
         let query = vec![
             ("top".to_string(), top.to_string()),
             ("min_ani".to_string(), args.min_ani.to_string()),
@@ -925,7 +735,7 @@ fn cmd_assembly(args: AssemblyArgs) -> Outcome {
             ("length".to_string(), stats.length.to_string()),
             ("gc".to_string(), stats.gc.to_string()),
         ];
-        client.post_assembly(&query, sketch, SKETCH_CONTENT_TYPE)?
+        client.post_assembly(&query, Bytes::from(sketch), SKETCH_CONTENT_TYPE)?
     } else {
         let payload = std::fs::read(path)
             .map_err(|error| Failure::client(format!("cannot read {}: {error}", path.display())))?;
@@ -939,15 +749,15 @@ fn cmd_assembly(args: AssemblyArgs) -> Outcome {
             ("min_ani".to_string(), args.min_ani.to_string()),
             ("name".to_string(), name.clone()),
         ];
-        client.post_assembly(&query, payload, content_type)?
+        client.post_assembly(&query, Bytes::from(payload), content_type)?
     };
 
-    let document = AssemblyDocument::from_json_str(&raw)
-        .map_err(|error| Failure::client(error.to_string()))?;
+    let document: AssemblyDocument =
+        document::parse(&raw).map_err(|error| Failure::client(error.to_string()))?;
     if args.json {
         write_output(args.output.as_deref(), &with_newline(raw))?;
     } else {
-        write_output(args.output.as_deref(), &render_assembly_tsv(&document))?;
+        write_output(args.output.as_deref(), &render_assembly_tsv(&document.table))?;
         if !args.quiet {
             eprint!("{}", render_assembly_stderr(&document));
         }
@@ -978,10 +788,10 @@ fn cmd_assembly_per_contig(args: &AssemblyArgs) -> Outcome {
     let metadata = info.metadata.as_ref();
     let fields = resolve_fields(args.fields.as_deref(), metadata)?;
     let options = ContigsRequestOptions {
-        top: args.top.unwrap_or(DEFAULT_TOP as u8) as usize,
+        top: args.top.map_or(DEFAULT_TOP, usize::from),
         min_ani: args.min_ani,
-        consensus_ratio: args.consensus_ratio.unwrap_or(1.5),
-        consensus_z: args.consensus_z.unwrap_or(2.0),
+        consensus_ratio: args.consensus_ratio.unwrap_or(DEFAULT_CONSENSUS_RATIO),
+        consensus_z: args.consensus_z.unwrap_or(DEFAULT_CONSENSUS_Z),
         fields: fields.clone(),
         tax_sources: None,
     };
@@ -995,47 +805,34 @@ fn cmd_assembly_per_contig(args: &AssemblyArgs) -> Outcome {
     let mut planner = ContigBatchPlanner::new(limits, &options);
     let mut batches: Vec<ContigsDocument> = Vec::new();
     let path = Path::new(&args.file);
-    let counters =
-        sketch_contigs_file(path, c, k, min_length, DEFAULT_MIN_NUMBER_KMERS, |contig| {
-            let spec = ContigSpec::from(&contig);
-            let payload_len = contig.sketch.len();
-            let planned = planner
-                .push(spec, payload_len, contig)
-                .map_err(|error| InputError(error.to_string()))?;
-            if let Some(batch) = planned {
-                let document = send_contigs_batch(&mut client, &batch, &options)
-                    .map_err(|error| InputError(error.0))?;
-                batches.push(document);
-            }
-            Ok(())
-        })?;
+    let counters = sketch_contigs_file(path, c, k, min_length, DEFAULT_MIN_NUMBER_KMERS, |contig| {
+        let spec = ContigSpec::from(&contig);
+        let payload_len = contig.sketch.len();
+        let planned = planner
+            .push(spec, payload_len, contig)
+            .map_err(|error| Failure::client(error.to_string()))?;
+        if let Some(batch) = planned {
+            batches.push(send_contigs_batch(&mut client, batch, &options)?);
+        }
+        Ok::<(), Failure>(())
+    })?;
     if let Some(batch) = planner.finish() {
-        let document = send_contigs_batch(&mut client, &batch, &options).map_err(Failure::from)?;
-        batches.push(document);
+        batches.push(send_contigs_batch(&mut client, batch, &options)?);
     }
 
     let merge_options = ContigsRunMergeOptions {
-        skipped_short: SkippedBucket {
-            contigs: counters.skipped_short.contigs,
-            bp: counters.skipped_short.bp,
-        },
-        skipped_few_kmers: SkippedBucket {
-            contigs: counters.skipped_few_kmers.contigs,
-            bp: counters.skipped_few_kmers.bp,
-        },
+        skipped_short: counters.skipped_short,
+        skipped_few_kmers: counters.skipped_few_kmers,
         min_contig_length: min_length,
-        fields: fields.clone(),
-        params: Some(contig_params_fallback(args.min_ani, min_length, &options)),
         database: Some(json!({
             "name": info.database.name,
             "genomes": info.database.genomes,
             "c": info.database.c,
             "k": info.database.k,
         })),
-        thresholds: None,
         ..Default::default()
     };
-    let run = merge_contigs_run(&batches, &merge_options)
+    let run = merge_contigs_run(&batches, &options, &merge_options)
         .map_err(|error| Failure::client(error.to_string()))?;
 
     if args.json {
@@ -1043,7 +840,7 @@ fn cmd_assembly_per_contig(args: &AssemblyArgs) -> Outcome {
             .map_err(|error| Failure::client(format!("cannot encode the run: {error}")))?;
         write_output(args.output.as_deref(), &with_newline(text))?;
     } else {
-        write_output(args.output.as_deref(), &render_contigs_tsv(&run))?;
+        write_output(args.output.as_deref(), &render_contigs_tsv(&run.table))?;
         if !args.quiet {
             eprint!("{}", render_contigs_summary(&run));
         }
@@ -1053,32 +850,17 @@ fn cmd_assembly_per_contig(args: &AssemblyArgs) -> Outcome {
 
 fn send_contigs_batch(
     client: &mut Client,
-    batch: &sylphd_core::batch::PlannedBatch<sylphd_core::input::PreparedContig>,
+    batch: sylphd_core::batch::PlannedBatch<sylphd_core::input::PreparedContig>,
     options: &ContigsRequestOptions,
-) -> Result<ContigsDocument, ClientError> {
+) -> Result<ContigsDocument, Failure> {
     let params = batch.params_json(options);
-    let parts: Vec<(String, Vec<u8>)> = batch
+    let parts: Vec<(String, Bytes)> = batch
         .items
-        .iter()
-        .map(|item| (item.spec.name.clone(), item.item.sketch.clone()))
+        .into_iter()
+        .map(|BatchItem { spec, item, .. }| (spec.name, Bytes::from(item.sketch)))
         .collect();
     let raw = client.post_sketches("contigs", &params, &parts)?;
-    ContigsDocument::from_json_str(&raw).map_err(|error| ClientError(error.to_string()))
-}
-
-fn contig_params_fallback(min_ani: f64, min_length: u64, options: &ContigsRequestOptions) -> Value {
-    json!({
-        "top": options.top,
-        "min_ani": min_ani,
-        "min_contig_length": min_length,
-        "consensus_ratio": options.consensus_ratio,
-        "consensus_z": options.consensus_z,
-        "no_adjust": true,
-        "minimum_ani": 0.0,
-        "screen_ani": 0.0,
-        "min_contain": 3,
-        "min_number_kmers": 10,
-    })
+    document::parse(&raw).map_err(|error| Failure::client(error.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -1097,7 +879,7 @@ fn cmd_render(args: RenderArgs) -> Outcome {
         std::fs::read_to_string(&args.file)
             .map_err(|error| Failure::usage(format!("cannot read {}: {error}", args.file)))?
     };
-    let document = match ResultDocument::from_json_str(&text) {
+    let document = match ResultDocument::parse(&text) {
         Ok(document) => document,
         Err(
             error
@@ -1111,7 +893,7 @@ fn cmd_render(args: RenderArgs) -> Outcome {
     };
     match document {
         ResultDocument::Profile(document) => {
-            write_output(args.output.as_deref(), &render_profile_tsv(&document))?;
+            write_output(args.output.as_deref(), &render_tsv(&document.table))?;
             if !args.quiet {
                 let caveats = render_profile_caveats(&document);
                 if !caveats.is_empty() {
@@ -1120,13 +902,13 @@ fn cmd_render(args: RenderArgs) -> Outcome {
             }
         }
         ResultDocument::Assembly(document) => {
-            write_output(args.output.as_deref(), &render_assembly_tsv(&document))?;
+            write_output(args.output.as_deref(), &render_assembly_tsv(&document.table))?;
             if !args.quiet {
                 eprint!("{}", render_assembly_stderr(&document));
             }
         }
         ResultDocument::Contigs(document) => {
-            write_output(args.output.as_deref(), &render_contigs_tsv(&document))?;
+            write_output(args.output.as_deref(), &render_contigs_tsv(&document.table))?;
             if !args.quiet {
                 eprint!("{}", render_contigs_summary(&document));
             }

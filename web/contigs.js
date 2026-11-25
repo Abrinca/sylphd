@@ -10,8 +10,7 @@
   'use strict';
 
   /* ---------------------------------------------------------------- limits */
-  // Client constants and server-limit helpers. Also exported through module.exports
-  // for node tests.
+  // Client constants. Also exported through module.exports for node tests.
   const Format = (() => {
     // The query settings sent with every /contigs request (per_contig.QUERY_PARAMS).
     const QUERY_PARAMS = {
@@ -22,7 +21,6 @@
     const DEFAULT_MIN_ANI = 80.0;
     const DEFAULT_CONSENSUS_RATIO = 1.5;
     const DEFAULT_CONSENSUS_Z = 2.0;
-    const DEFAULT_PARAMS_BUDGET = 900 * 1024;
     //: Most contigs the browser classifies per run (the 100 longest sendable ones).
     const MAX_CLASSIFIED = 100;
 
@@ -30,25 +28,9 @@
     const isQueried = (record) => (record.status === 'ok' || record.status === 'no_hit')
       && !Object.prototype.hasOwnProperty.call(record, 'reason');
 
-    // How many contig sketches to send per POST /contigs (chunk_size_for).
-    function chunkSizeFor(info) {
-      const limits = (info && info.limits) || {};
-      // A /contigs request is one job on the server, so only the per-request bound applies.
-      const size = Number(limits.max_contigs || 4096);
-      return Math.max(1, size);
-    }
-
-    // How large the JSON params part may grow (params_budget).
-    function paramsBudget(info) {
-      const limits = (info && info.limits) || {};
-      const limit = Number(limits.max_params_bytes || 1024 * 1024);
-      return Math.min(DEFAULT_PARAMS_BUDGET, Math.max(1024, Math.floor(limit * 0.9)));
-    }
-
     return {
       QUERY_PARAMS, DEFAULT_MIN_LENGTH, DEFAULT_TOP, DEFAULT_MIN_ANI,
-      DEFAULT_CONSENSUS_RATIO, DEFAULT_CONSENSUS_Z, DEFAULT_PARAMS_BUDGET, MAX_CLASSIFIED,
-      isQueried, chunkSizeFor, paramsBudget,
+      DEFAULT_CONSENSUS_RATIO, DEFAULT_CONSENSUS_Z, MAX_CLASSIFIED, isQueried,
     };
   })();
 
@@ -736,39 +718,10 @@
     };
   }
 
-  const encoder = new TextEncoder();
-  const jsonBytes = (value) => encoder.encode(JSON.stringify(value)).length;
-
-  // Splits the kept contigs into requests that fit the server's limits, one request after
-  // the other (the CLI's batching, now over the kept longest).
-  function* batches(candidates, { base, chunkSize, budget, uploadLimit }) {
-    let index = 0;
-    while (index < candidates.length) {
-      const items = [];
-      let paramsBytes = jsonBytes({ ...base, contigs: [] });
-      let payloadBytes = 0;
-      while (index < candidates.length && items.length < chunkSize) {
-        const item = candidates[index];
-        const entryBytes = jsonBytes(item.spec) + (items.length ? 1 : 0);
-        const projected = paramsBytes + entryBytes + payloadBytes + item.payload.byteLength
-          + (items.length + 1) * (512 + encoder.encode(String(item.spec.name)).length) + 512;
-        if (items.length && (paramsBytes + entryBytes > budget || (uploadLimit && projected > uploadLimit))) break;
-        if (!items.length && uploadLimit && projected > uploadLimit) {
-          throw new Error(`the sketch of contig '${item.record.id}' needs a request larger than the server's ${Math.floor(uploadLimit / 1048576)} MB upload limit`);
-        }
-        items.push(item);
-        paramsBytes += entryBytes;
-        payloadBytes += item.payload.byteLength;
-        index += 1;
-      }
-      yield items;
-    }
-  }
-
-  // POST /contigs for one batch; resolves { raw, data } for the raw JSON document.
+  // POST /contigs for one batch (`params` is the planned JSON text); resolves { raw, data } for the raw JSON document.
   async function postContigs(params, items, signal) {
     const body = new FormData();
-    body.append('params', JSON.stringify(params));
+    body.append('params', params);
     for (const item of items) {
       body.append('sketch', new Blob([item.payload], { type: 'application/octet-stream' }), `${item.record.id}.sylsp`);
     }
@@ -861,16 +814,9 @@
     const db = info.database;
     const fields = info.metadata && Array.isArray(info.metadata.columns) ? info.metadata.columns.slice() : [];
     // POST /contigs takes only its own keys; QUERY_PARAMS is the server's, not the client's.
-    const paramsBase = {
+    const request = {
       top: options.top, min_ani: options.min_ani,
-      consensus_ratio: options.consensus_ratio, consensus_z: options.consensus_z,
-      fields, tax_sources: null,
-    };
-    const limits = {
-      base: paramsBase,
-      chunkSize: Format.chunkSizeFor(info),
-      budget: Format.paramsBudget(info),
-      uploadLimit: Number((info.limits && info.limits.max_upload_mb) || 0) * 1024 * 1024,
+      consensus_ratio: options.consensus_ratio, consensus_z: options.consensus_z, fields,
     };
     const minKmers = Format.QUERY_PARAMS.min_number_kmers;
 
@@ -954,10 +900,10 @@
       // Request names must be unique, but only the kept contigs are ever sent:
       // suffix repeated header ids now (counts/used cover <= 100 records, not
       // the whole file) instead of doing it per streamed record.
-      const counts = new Map();
-      const used = new Set();
+      const wasm = await window.SylphdSketch.loadWasm();
+      const names = new wasm.WasmContigNames();
       for (const item of candidates) {
-        const name = window.SylphdSketch.uniqueContigName(item.record.id, counts, used, item.record.index);
+        const name = names.next_name(item.record.id, item.record.index);
         item.record.id = name;
         item.spec.name = name;
       }
@@ -967,27 +913,25 @@
       notClassified.contigs = Math.max(0, poolTotals.contigs - candidates.length);
       notClassified.bp = Math.max(0, poolTotals.bp - keptBp);
       progressSend();
-      for (const items of batches(candidates, limits)) {
-        const { raw, data: response } = await postContigs({ ...paramsBase, contigs: items.map((item) => item.spec) }, items, signal);
+      const planned = JSON.parse(wasm.plan_contig_requests(
+        JSON.stringify(candidates.map((item) => ({ ...item.spec, payload_bytes: item.payload.byteLength }))),
+        JSON.stringify(info.limits || {}),
+        JSON.stringify(request),
+      ));
+      for (const { indices, params } of planned) {
+        const items = indices.map((index) => candidates[index]);
+        const { raw, data: response } = await postContigs(params, items, signal);
         batchJsons.push(raw);
         if (S.isNum(response.elapsed_ms)) serverMs += Number(response.elapsed_ms);
         classified += items.length;
         progressSend();
       }
-      const wasm = await window.SylphdSketch.loadWasm();
       const mergeOpts = {
         skipped_short: skippedShort,
         skipped_few_kmers: skippedFewKmers,
         min_contig_length: options.minLength,
         not_classified: notClassified.contigs > 0 ? notClassified : null,
-        fields,
-        params: {
-          top: options.top,
-          min_ani: options.min_ani,
-          consensus_ratio: options.consensus_ratio,
-          consensus_z: options.consensus_z,
-          fields,
-        },
+        request,
         database: {
           name: db.name == null ? null : db.name,
           genomes: db.genomes == null ? null : db.genomes,
