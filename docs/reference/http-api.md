@@ -64,7 +64,7 @@ job, however many contigs it carries.
 
 Reports:
 
-- `service`, `version`, `api_version` (integer, currently `2`: bumped on any change to the response
+- `service`, `version`, `api_version` (integer, currently `1`: bumped on any change to the response
   shape; distinct from the server software `version` and from `metadata.format_version`),
   `pysylph_version`, `python_version`;
 - `database`: `name`, `size`, `sha256` (`null` unless `--hash`), `genomes`, `c`, `k`,
@@ -261,7 +261,7 @@ pysylph's message, not a generic 500. `POST /query` and `POST /profile` run agai
 The response is a single JSON document covering all samples in request order:
 
 ```json
-{"api_version": 2,
+{"api_version": 1,
  "params": {"minimum_ani": null, "seq_id": null, "estimate_unknown": false,
             "estimate_read_counts": false, "min_number_kmers": 10,
             "min_contain": 7, "screen_ani": 85.0, "no_adjust": false},
@@ -436,7 +436,7 @@ carries `tax_lineage`/`tax_source` and is classified from that lineage: `taxonom
 [hit relations](#hit-relations)). A hit without any lineage stays `unknown lineage`.
 
 ```json
-{"api_version": 2,
+{"api_version": 1,
  "query": {"name": "assembly", "records": 1, "length": 6013491,
            "gc": 50.76, "sketch_kmers": 200, "input": "sequence"},
  "database": {"name": "gtdb-r232-c200-dbv2.syl2db", "genomes": 199937,
@@ -616,7 +616,7 @@ The response is a JSON document holding a flat per-hit `table`, per-contig metad
 keyed by contig name in `contigs` (in request order), and a per-request `summary`:
 
 ```json
-{"api_version": 2,
+{"api_version": 1,
  "params": {"top": 1, "min_ani": 80.0, "consensus_ratio": 1.5, "consensus_z": 2.0, "fields": []},
  "table": {
    "columns": ["contig", "contig_length", "gc", "status", "rank", "ani",

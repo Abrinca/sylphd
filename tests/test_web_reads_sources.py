@@ -88,7 +88,7 @@ def _profile(scale: float = 1.0) -> dict:
     # The one-source profiles come from the server's own code, as /profile returns them.
     taxprof.update(build_taxprof("sample", [f"tax:{name}" for name in SOURCES], rows))
     return {
-        "api_version": 2,
+        "api_version": 1,
         "params": {"estimate_unknown": scale != 1.0, "estimate_read_counts": False, "min_number_kmers": 10},
         "samples": [{"name": "sample"}],
         "table": {"columns": columns, "data": [[row[col] for col in columns] for row in rows]},
@@ -100,7 +100,7 @@ def _profile(scale: float = 1.0) -> dict:
 PROFILE = _profile()
 
 INFO = {
-    "api_version": 2,
+    "api_version": 1,
     "service": "sylphd", "version": "0.0.0", "name": "Test",
     "database": {"name": "gtdb, uhgv, fungi", "genomes": 4, "c": 200, "k": 31, "two_stage": False},
     "databases": [{"name": "all", "file": "all.syldb", "kind": "plain", "genomes": 4, "c": 200, "k": 31, "gtdb": True}],
@@ -389,7 +389,7 @@ const pw = require('node:module').createRequire(process.env.PLAYWRIGHT_DIR + '/'
 @pytest.mark.parametrize(
     ("info", "message"),
     [
-        ({**INFO, "api_version": 3}, "server API version 3 is newer than this client's (2): update sylphd"),
+        ({**INFO, "api_version": 2}, "server API version 2 is newer than this client's (1): update sylphd"),
         ({k: v for k, v in INFO.items() if k != "api_version"}, "missing or invalid api_version"),
     ],
     ids=["unsupported", "missing"],

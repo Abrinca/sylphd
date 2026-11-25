@@ -27,7 +27,7 @@ it:
 
 Exit codes: `0` on success, `2` for a usage error (unreadable or unparsable file), `1` when the
 document has no `api_version` or one this client does not support: a newer one says
-`document API version 3 is newer than this client's (1): update sylphd`; an older one says the
+`document API version 2 is newer than this client's (1): update sylphd`; an older one says the
 document predates this sylphd.
 
 The document format is the one in the [HTTP API](../reference/http-api.md): `table` is pandas'

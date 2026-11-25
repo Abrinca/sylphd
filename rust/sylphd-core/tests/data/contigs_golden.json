@@ -1,7 +1,7 @@
 {
   "batches": [
     {
-      "api_version": 2,
+      "api_version": 1,
       "params": {
         "top": 2,
         "min_ani": 80.0,
@@ -216,7 +216,7 @@
       "elapsed_ms": 10.3
     },
     {
-      "api_version": 2,
+      "api_version": 1,
       "params": {
         "top": 2,
         "min_ani": 80.0,

@@ -96,7 +96,7 @@ class TestAssemblyUpload:
             "elapsed_ms",
             "table",
         }
-        assert payload["api_version"] == 2
+        assert payload["api_version"] == 1
         assert payload["query"]["name"] == "assembly"
         assert payload["query"]["records"] == 1
         assert payload["query"]["length"] == 9957

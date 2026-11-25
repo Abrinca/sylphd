@@ -8,37 +8,23 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Changed (breaking)
 
-- **`api_version` is `2`.** `/profile` and `/query` result documents change shape, so a client of
-  version 1 (and a 0.8.0 client against a newer server) refuses the other with the usual
-  "update sylphd" message. `sylphd taxmatrix` accepts version 2 documents only.
-  - The table has a **`genome_id`** column right after `accession` (the stable identifier of the
-    database genome, as `/assembly` and `/contigs` already had it). It is part of the TSV too,
-    after sylph's columns, so `sylphd diff` against a sylph TSV is unchanged.
-  - Every entry of `samples` is now `{"name", "kmers", "mean_read_length", "paired", "reads",
-    "bases"}`: the first three come from the uploaded sketch, `reads` and `bases` from the client.
-
-### Added
-
-- **`params.samples`** on `/profile` and `/query`: optional `[{"name", "reads", "bases"}]`, one per
-  sketch, validated by the server (`null`/omitted when unknown). The native client and the web
-  page's Reads mode send what they counted while sketching; a `.sylsp` upload sends `null`.
-- `sylphd profile`/`query` print one stderr line per sample without any hit
-  (`sylphd: no hits for R1 (12,345 k-mers, 8,000 reads)`), which explains an empty result such as
-  a read file whose mate is missing.
-
-## [0.8.0] - 2026-11-25
-
-### Added
-
-- **`sylphd taxmatrix [--value relative|sequence|ani|coverage] [--taxonomy NAME] [-o FILE] FILES...`**:
-  offline command that merges `.sylphmpa` files (as written by `sylph-tax taxprof` or
-  `sylphd profile --taxprof`) and saved `/profile` JSON documents into one wide clade × sample TSV
-  table, matching `sylph-tax merge`. Standard library only (dispatched directly in `entry.py`, like
-  `sylphd diff`), so it works in the base install without `pysylph` and can merge samples across
-  separate profiling runs.
-
-### Changed (breaking)
-
+- **The HTTP API returns JSON documents** (`api_version` `1`, also in `GET /info`; a client
+  refuses a server or saved document of another version with "update sylphd" or "the server
+  predates this sylphd"). `/profile`, `/query`, `/assembly` and `/contigs` answer with
+  `{"api_version", "params", "table": {"columns", "data"}, ...}`: one table per response in pandas'
+  `orient="split"` layout (`pandas.DataFrame(**doc["table"])`), every row with its `Sample_file`.
+  - `/profile` and `/query`: `samples` lists every sample sent, with `kmers`, `mean_read_length`
+    and `paired` from its sketch and `reads`/`bases` as counted by the client (`null` when
+    unknown, e.g. a `.sylsp` upload), so a sample without hits is still visible; the client sends
+    its counts as `params.samples`. Rows carry **`genome_id`** after `accession` (as `/assembly`
+    and `/contigs` rows always did; also in the TSV, after sylph's columns), `True_cov` replaces
+    `Eff_cov` under `--estimate-unknown`, and `Lambda_status` is its own column (the TSV still
+    prints `HIGH`/`LOW` in `Eff_lambda`). The species caveats come from the server (`caveats`).
+  - `/assembly` keeps `query`, `assignment`, `closest` and `thresholds`; its hits are the table,
+    with `taxon` and `gtdb_species` now computed by the server. `/contigs` returns the flat
+    per-hit table, `contigs` (assignment, closest and consensus per contig) and `summary`.
+  - `/messages` items have a `plain` (markdown-free) text; a requested field that collides with a
+    fixed column of the table is a 400.
 - **The query commands are a native binary now.** `sylphd info`, `profile`, `query`, `assembly` and
   the new `render` run in `sylphd-client`, which ships as the platform wheel `sylphd-bin`
   (`py3-none-<platform>`, like ruff and uv). The `sylphd` command stays: it runs `serve`, `setup`,
@@ -69,6 +55,12 @@ All notable changes to `sylphd` are documented here. The format follows
 
 ### Added
 
+- **`sylphd taxmatrix [--value relative|sequence|ani|coverage] [--taxonomy NAME] [-o FILE] FILES...`**:
+  offline command that merges `.sylphmpa` files (as written by `sylph-tax taxprof` or
+  `sylphd profile --taxprof`) and saved `/profile` JSON documents into one wide clade × sample TSV
+  table, matching `sylph-tax merge`. Standard library only (dispatched directly in `entry.py`, like
+  `sylphd diff`), so it works in the base install without `pysylph` and can merge samples across
+  separate profiling runs.
 - **`sylphd render [FILE]`**: renders a document saved with `--json` as the table the command
   line would have printed, offline (no server, no sketching). It recognises profile/query
   documents, assembly documents and per-contig run documents.
@@ -81,6 +73,11 @@ All notable changes to `sylphd` are documented here. The format follows
   `SYLPHD_REQUIRE_CLIENT_BIN=1` turns the tests' "binary missing" skips into failures (CI sets it).
 - **CI** (`.github/workflows/ci.yml`): `cargo test --workspace` including the pysylph equality
   tests, `cargo clippy -D warnings`, and the Python suite with the binary built by `uv sync`.
+- **`sylphd profile`/`query` name every sample without hits** on stderr, with its k-mer and read
+  counts (`sylphd: no hits for R1 (12,345 k-mers, 8,000 reads)`).
+- **The web page renders through the same code as the command line** (`sylphd-core` compiled to
+  WebAssembly: TSV downloads, per-contig batching and merging, `.sylsp` checks) and checks the
+  server's `api_version` before sketching.
 
 ### Removed
 
@@ -1066,7 +1063,6 @@ server with a sketching client: the database is loaded once and shared, clients 
   for Linux x86_64 and aarch64, CPython 3.14, so a production server can install without a Rust
   toolchain.
 
-[0.8.0]: https://github.com/Abrinca/sylphd/releases/tag/v0.8.0
 [0.6.1]: https://github.com/Abrinca/sylphd/releases/tag/v0.6.1
 [0.6.0]: https://github.com/Abrinca/sylphd/releases/tag/v0.6.0
 [0.5.1]: https://github.com/Abrinca/sylphd/releases/tag/v0.5.1

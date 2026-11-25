@@ -178,7 +178,7 @@ def test_info_json(server: Path) -> None:
     result = _run("info", "--json", "--socket", server)
     assert result.returncode == 0, result.stderr
     document = json.loads(result.stdout)
-    assert document["api_version"] == 2
+    assert document["api_version"] == 1
     assert document["database"]["c"] == 200
     assert document["database"]["k"] == 31
     assert document["messages"] == []
@@ -232,7 +232,7 @@ def test_profile_json_is_a_document_and_renders_identically(server: Path, tmp_pa
     # --json writes only the document: no summary, no notes on stdout.
     assert saved.stderr == ""
     document = json.loads(output.read_text())
-    assert document["api_version"] == 2
+    assert document["api_version"] == 1
     assert isinstance(document["table"]["data"], list)
     assert [sample["name"] for sample in document["samples"]] == ["clodf13"]
     assert document["table"]["columns"][:3] == [
@@ -305,7 +305,7 @@ def test_fastq_without_hits_reports_kmers_and_reads_on_stderr(server: Path) -> N
 def test_json_passthrough_stdout(server: Path) -> None:
     """``--json`` without ``-o`` prints the server's document, unchanged."""
     document = json.loads(_run("profile", "--socket", server, CLODF13_FASTA, "--json").stdout)
-    assert document["api_version"] == 2
+    assert document["api_version"] == 1
     assert set(document) >= {"api_version", "params", "samples", "table", "caveats"}
 
 
@@ -472,7 +472,7 @@ def test_assembly_json_and_render(server: Path, tmp_path: Path) -> None:
     assert saved.returncode == 0, saved.stderr
     assert saved.stderr == ""
     document = json.loads(output.read_text())
-    assert document["api_version"] == 2
+    assert document["api_version"] == 1
     assert document["query"]["input"] == "sketch"
     assert (document["query"]["records"], document["query"]["length"]) == (1, 9957)
     hits = [dict(zip(document["table"]["columns"], values)) for values in document["table"]["data"]]
@@ -556,7 +556,7 @@ def test_per_contig_json_is_the_run_document(server: Path, genome: str, tmp_path
     )
     assert saved.returncode == 0, saved.stderr
     document = json.loads(output.read_text())
-    assert document["api_version"] == 2
+    assert document["api_version"] == 1
     assert document["summary"]["queried_contigs"] == 1
     assert document["summary"]["contigs"] == 4
     assert document["summary"]["skipped_short"] == {"contigs": 2, "bp": 3_500}
@@ -735,7 +735,7 @@ PASSTHROUGH_DOCUMENT = json.dumps(
 )
 
 
-def _info_document(api_version: int = 2) -> dict:
+def _info_document(api_version: int = 1) -> dict:
     return {
         "api_version": api_version,
         "service": "sylphd",
@@ -830,10 +830,10 @@ def test_a_broken_messages_endpoint_is_silent(messages: tuple[int, str]) -> None
 
 
 def test_api_version_mismatch_fails_before_sketching() -> None:
-    with _fake_server(_info_document(api_version=3), PASSTHROUGH_DOCUMENT) as url:
+    with _fake_server(_info_document(api_version=2), PASSTHROUGH_DOCUMENT) as url:
         result = _run("profile", "--url", url, K12_R1)
     assert result.returncode == 1
-    assert "server API version 3 is newer than this client's (2): update sylphd" in result.stderr
+    assert "server API version 2 is newer than this client's (1): update sylphd" in result.stderr
     assert "update sylphd" in result.stderr
     # Nothing was sketched, so the profile response was never requested:
     assert result.stdout == ""
@@ -924,7 +924,7 @@ def test_run_returns_the_document(server: Path) -> None:
     from sylphd import run
 
     document = run("profile", CLODF13_FASTA, "--socket", server)
-    assert document["api_version"] == 2
+    assert document["api_version"] == 1
     assert [sample["name"] for sample in document["samples"]] == ["clodf13"]
     assert document["table"]["columns"][:2] == ["Sample_file", "Genome_file"]
 

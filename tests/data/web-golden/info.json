@@ -1,7 +1,7 @@
 {
   "service": "sylphd",
   "version": "<version>",
-  "api_version": 2,
+  "api_version": 1,
   "pysylph_version": "<version>",
   "python_version": "<version>",
   "database": {

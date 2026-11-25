@@ -3,7 +3,7 @@
     {
       "name": "profile_k12_paired",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -84,7 +84,7 @@
     {
       "name": "query_k12_paired",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -211,7 +211,7 @@
     {
       "name": "profile_k12_estimate_unknown",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -292,7 +292,7 @@
     {
       "name": "profile_k12_read_counts",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -373,7 +373,7 @@
     {
       "name": "profile_empty_hits",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -424,7 +424,7 @@
     {
       "name": "query_empty_hits",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -472,7 +472,7 @@
     {
       "name": "profile_high_low_inf_nan_metadata",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "params": {
           "minimum_ani": null,
           "seq_id": null,
@@ -665,7 +665,7 @@
     {
       "name": "profile_synthetic_edge_cases",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "params": {
           "minimum_ani": null,
           "seq_id": null,

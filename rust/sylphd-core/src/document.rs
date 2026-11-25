@@ -17,7 +17,7 @@ pub use crate::input::Skipped;
 use crate::input::DEFAULT_MIN_CONTIG_LENGTH;
 
 /// Wire-protocol `api_version` supported by this client.
-pub const SUPPORTED_API_VERSION: u64 = 2;
+pub const SUPPORTED_API_VERSION: u64 = 1;
 
 /// Default species ANI threshold (percent), (the server's `INTERPRETATION_THRESHOLDS`).
 pub const DEFAULT_SPECIES_THRESHOLD: f64 = 95.0;

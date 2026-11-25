@@ -360,7 +360,7 @@ class TestUnixSocketRoundTrip:
             "--json",
         )
         document = json.loads(result.stdout)
-        assert document["api_version"] == 2
+        assert document["api_version"] == 1
         assert [sample["name"] for sample in document["samples"]] == ["o157"]
         rows = [
             dict(zip(document["table"]["columns"], values))

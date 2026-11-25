@@ -31,7 +31,7 @@ from .taxonomy import (
 )
 
 #: Wire-protocol version of ``/profile`` JSON documents supported here.
-SUPPORTED_API_VERSION: int = 2
+SUPPORTED_API_VERSION: int = 1
 
 
 def _pick_taxonomy(entry: Mapping[str, Any], requested: str) -> str | None:

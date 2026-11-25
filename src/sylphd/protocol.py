@@ -17,7 +17,7 @@ A JSON document with ``api_version``, effective ``params``, ``samples``,
 ``orient="split"`` without an index), ``caveats``, and (on ``/profile`` with
 ``taxprof``) ``taxprof``::
 
-    {"api_version": 2, "params": {...},
+    {"api_version": 1, "params": {...},
      "samples": [{"name": "sample-a", "kmers": 1234, "mean_read_length": 150.0,
                   "paired": false, "reads": 1000, "bases": 150000}],
      "table": {"columns": ["Sample_file", ..., "Lambda_status", "accession", ...],
@@ -48,7 +48,7 @@ from .metadata import METADATA_COLUMNS, accession_from_genome_name
 
 #: Wire-protocol version reported by ``GET /info`` and every result document.
 #: Bump on any breaking change to the response shape.
-API_VERSION: int = 2
+API_VERSION: int = 1
 
 #: Columns of ``sylph query`` output, in sylph's order.
 QUERY_COLUMNS: tuple[str, ...] = (

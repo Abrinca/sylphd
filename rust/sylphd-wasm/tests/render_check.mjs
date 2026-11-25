@@ -28,8 +28,8 @@ const attempt = (f) => {
 };
 
 const out = {
-  api_version_current: attempt(() => check_api_version(2) ?? "ok"),
-  api_version_newer: attempt(() => check_api_version(3)),
+  api_version_current: attempt(() => check_api_version(1) ?? "ok"),
+  api_version_newer: attempt(() => check_api_version(2)),
 };
 
 if (payload.batches !== undefined) {

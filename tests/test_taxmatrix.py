@@ -90,7 +90,7 @@ def _profile_doc(
     tax_sources: tuple[str, ...] = ("UHGV",),
 ) -> dict:
     return {
-        "api_version": 2,
+        "api_version": 1,
         "params": {"minimum_ani": None, "estimate_unknown": False},
         "samples": [{"name": name} for name, _ in samples],
         "table": {"columns": ["Sample_file"], "data": []},
@@ -442,7 +442,7 @@ class TestCommand:
         bad_json = tmp_path / "bad.json"
         bad_json.write_text("{not valid json")
         no_taxprof = tmp_path / "no-taxprof.json"
-        no_taxprof.write_text(json.dumps({"api_version": 2, "samples": [{"name": "a"}]}))
+        no_taxprof.write_text(json.dumps({"api_version": 1, "samples": [{"name": "a"}]}))
         wrong_ver = tmp_path / "v99.json"
         wrong_ver.write_text(json.dumps({"api_version": 99, "taxprof": {"a": {"gtdb": {}}}}))
 

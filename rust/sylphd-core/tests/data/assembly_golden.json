@@ -3,7 +3,7 @@
     {
       "name": "assembly_gtdb_assigned",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "query": {
           "name": "clodf13",
           "records": 1,
@@ -175,7 +175,7 @@
     {
       "name": "assembly_no_hits",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "query": {
           "name": "empty",
           "records": 1,
@@ -258,7 +258,7 @@
     {
       "name": "assembly_non_gtdb_assigned_with_note",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "query": {
           "name": "phage",
           "records": 1,
@@ -363,7 +363,7 @@
     {
       "name": "assembly_closest_relative_with_note",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "query": {
           "name": "novel",
           "records": 1,
@@ -456,7 +456,7 @@
     {
       "name": "assembly_fallback_the_best_hit",
       "document": {
-        "api_version": 2,
+        "api_version": 1,
         "query": {},
         "database": {},
         "params": {},
