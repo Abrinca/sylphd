@@ -35,7 +35,7 @@ from sylphd.metadata import MetadataDB
 from sylphd.metadata_build import build_metadata_db
 from sylphd.taxonomy_sources import TaxonomySource
 from conftest import aggregate_samples
-from sylphd.taxonomy import (
+from sylphd.taxprofile import (
     aggregate_sylphtax_rows,
     build_taxprof,
     clade_matrix_lines,

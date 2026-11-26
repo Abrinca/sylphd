@@ -27,7 +27,7 @@ import pytest
 from conftest import aggregate_samples
 
 from sylphd import taxmatrix
-from sylphd.taxonomy import (
+from sylphd.taxprofile import (
     MATRIX_VALUES,
     build_taxprof,
     clade_matrix_lines,

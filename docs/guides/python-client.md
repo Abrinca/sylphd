@@ -50,8 +50,13 @@ is what turns them into sylph's spellings.
 
 ## Taxonomy lookups
 
-sylphd has no Python taxonomy classes of its own: `omnitax.connect(url="https://.../taxonomy")` gives taxon
-objects from a sylphd server (see [NCBI taxonomy](ncbi-taxonomy.md)).
+`sylphd.taxonomy()` gives an [omnitax](https://abrinca.github.io/omnitax/) taxonomy served by a sylphd
+server (needs `sylphd[client]`; see [NCBI taxonomy](ncbi-taxonomy.md)):
+
+```python
+ncbi = sylphd.taxonomy("ncbi", url="https://sylphd.abrinca.com")
+ncbi["562"].lineage_string()
+```
 
 ## Tokens and server addresses
 

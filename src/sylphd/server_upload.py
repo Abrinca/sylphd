@@ -19,7 +19,7 @@ from .metadata import MetadataDB
 from .protocol import ProfileParams, ProtocolError, sample_stats, table_columns
 from .samples import InputError, check_sample_name, sample_name_from_path
 from .server_errors import RequestError, check_queue
-from .taxonomy import TaxonomyError, parse_taxonomies, resolve_taxonomy_columns
+from .taxprofile import TaxonomyError, parse_taxonomies, resolve_taxonomy_columns
 
 log = logging.getLogger("uvicorn.error")
 
@@ -293,7 +293,7 @@ def _validate_taxprof(
 
     The server is the only place that knows which metadata columns and
     sylph-tax sources its file has, so the request is checked against them
-    (:func:`sylphd.taxonomy.resolve_taxonomy_columns`): a taxonomy the file
+    (:func:`sylphd.taxprofile.resolve_taxonomy_columns`): a taxonomy the file
     cannot produce is a 400, not a silently empty table.
     """
     if value is None:

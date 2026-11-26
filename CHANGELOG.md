@@ -38,6 +38,16 @@ All notable changes to `sylphd` are documented here. The format follows
   which is what `serve`, `setup` and `download` need (the base `sylphd` says so when one is missing).
   Until omnitax is on PyPI, development resolves it from `../omnitax` (`[tool.uv.sources]`), so a release waits for it.
 
+### Added
+
+- **`sylphd.taxonomy(name=None, *, url, socket, token, token_file, timeout, retries)`** returns an
+  `omnitax.Taxonomy` of a sylphd server's `/taxonomy`: `sylphd.taxonomy("ncbi")`. The server and the token are
+  found as the command line finds them (`$SYLPHD_URL`, `$SYLPHD_SOCKET`, the default socket; `$SYLPHD_TOKEN`).
+  `omnitax` is now in the `client` extra. The module `sylphd.taxonomy` (profile aggregation) is renamed
+  `sylphd.taxprofile` to make room for the function.
+- `sylphd`'s `api_version` covers the result documents and the `/info` fields clients read; the `/info`
+  `taxonomy` section is informational (omnitax's own `api_version` covers `/taxonomy`).
+
 ## [0.8.0] - 2026-11-25
 
 ### Changed (breaking)
@@ -548,7 +558,7 @@ All notable changes to `sylphd` are documented here. The format follows
   carries `taxprof[taxonomy] = {columns, taxonomies_used, clades, sylphmpa}`: the aggregated clade
   table (`clade_name`, `relative_abundance`, `sequence_abundance`, `ani`/`coverage` on strain
   rows) **and** the exact `.sylphmpa` text, so neither the CLI nor the web page formats or
-  aggregates anything. The logic exists once, in `sylphd/taxonomy.py`; `sylphd profile
+  aggregates anything. The logic exists once, in `sylphd/taxprofile.py`; `sylphd profile
   --taxprof/--taxmatrix` writes the server's text/clades (the matrix remains a trivial
   clades-by-sample rendering), and the web Reads tab charts the server's clades, including the
   `tax` profile of UHGV/fungi hits. `web/taxonomy.js` and its JavaScript parity tests are gone.

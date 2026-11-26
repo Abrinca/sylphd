@@ -45,7 +45,7 @@ from .catalog import DATABASES
 from .metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
 from .protocol import ProfileParams, result_row
 from .sketchcheck import SketchFormatError, SketchHeader, parse_sketch_header
-from .taxonomy import (
+from .taxprofile import (
     NEAREST_PROFILE_COLUMNS,
     SYLPHTAX_PROFILE_COLUMNS,
     TAXONOMY_COLUMNS,

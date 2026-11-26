@@ -642,7 +642,7 @@ class TestTaxonomyOutputs:
         def boom(*args: object, **kwargs: object) -> None:
             raise AssertionError("the CLI aggregated taxonomy rows itself")
 
-        monkeypatch.setattr("sylphd.taxonomy.aggregate_rows", boom)
+        monkeypatch.setattr("sylphd.taxprofile.aggregate_rows", boom)
         result = self._profile(
             taxonomy_server,
             "--taxonomy",

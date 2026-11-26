@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from sylphd.taxonomy import (
+from sylphd.taxprofile import (
     aggregate_rows,
     aggregate_sylphtax_rows,
     build_taxprof,

@@ -260,6 +260,7 @@ source = { editable = "." }
 
 [package.optional-dependencies]
 client = [
+    { name = "omnitax" },
     { name = "sylphd-bin" },
 ]
 server = [
@@ -283,6 +284,7 @@ dev = [
 requires-dist = [
     { name = "dnaio", marker = "extra == 'server'" },
     { name = "httpx", marker = "extra == 'server'" },
+    { name = "omnitax", marker = "extra == 'client'", editable = "../omnitax" },
     { name = "omnitax", extras = ["server"], marker = "extra == 'server'", editable = "../omnitax" },
     { name = "pysylph", marker = "extra == 'server'", git = "https://github.com/MrTomRod/pysylph?branch=multi-db" },
     { name = "python-multipart", marker = "extra == 'server'" },

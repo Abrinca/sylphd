@@ -1,11 +1,11 @@
-"""Unit tests for the client-side taxonomy aggregation (``sylphd/taxonomy.py``)."""
+"""Unit tests for the client-side taxonomy aggregation (``sylphd/taxprofile.py``)."""
 
 from __future__ import annotations
 
 import pytest
 from conftest import aggregate_samples
 
-from sylphd.taxonomy import (
+from sylphd.taxprofile import (
     TAXONOMIES,
     TAXPROF_COLUMNS,
     TaxonomyError,
@@ -639,7 +639,7 @@ class TestOneSource:
             resolve_taxonomy_columns(["tax:Fungi"], metadata)
 
     def test_available_taxonomies(self) -> None:
-        from sylphd.taxonomy import available_taxonomies
+        from sylphd.taxprofile import available_taxonomies
 
         metadata = {
             "columns": ["gtdb_taxonomy", "tax_source", "tax_key", "tax_lineage"],
@@ -649,7 +649,7 @@ class TestOneSource:
         assert available_taxonomies(None) == []
 
     def test_token_ranks(self) -> None:
-        from sylphd.taxonomy import token_rank
+        from sylphd.taxprofile import token_rank
 
         assert token_rank("s__Pyricularia oryzae") == "s"
         assert token_rank("vOTU-052719") == "vOTU"

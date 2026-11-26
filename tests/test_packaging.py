@@ -32,7 +32,7 @@ CARGO = _toml("rust", "Cargo.toml")
 class TestVersions:
     def test_the_binary_wheel_is_pinned_to_this_version(self) -> None:
         extras = PYPROJECT["project"]["optional-dependencies"]
-        assert extras["client"] == [f"sylphd-bin=={__version__}"]
+        assert extras["client"] == [f"sylphd-bin=={__version__}", "omnitax"]
         assert f"sylphd-bin=={__version__}" in extras["server"]
 
     def test_the_rust_workspace_has_the_same_version(self) -> None:

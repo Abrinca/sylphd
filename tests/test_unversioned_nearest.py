@@ -22,7 +22,7 @@ from sylphd import cli
 from sylphd.metadata import METADATA_COLUMNS, MetadataDB, accession_from_genome_name
 from sylphd.metadata_build import build_metadata_db, update_metadata_db
 from sylphd.profiling import _taxprof_fields, result_rows
-from sylphd.taxonomy import aggregate_rows, clade_dict, resolve_taxonomy_columns
+from sylphd.taxprofile import aggregate_rows, clade_dict, resolve_taxonomy_columns
 from sylphd.taxonomy_nearest import lineage_clades
 from sylphd.taxonomy_sources import TaxonomySource, assembly_accession
 

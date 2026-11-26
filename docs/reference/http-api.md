@@ -65,7 +65,8 @@ job, however many contigs it carries.
 Reports:
 
 - `service`, `version`, `api_version` (integer, currently `1`: bumped on any change to the response
-  shape; distinct from the server software `version` and from `metadata.format_version`),
+  shape of the result documents and of the `/info` fields clients read; the `taxonomy` section below is
+  informational and not covered; distinct from the server software `version` and from `metadata.format_version`),
   `pysylph_version`, `python_version`;
 - `database`: `name`, `size`, `sha256` (`null` unless `--hash`), `genomes`, `c`, `k`,
   `screen_c` (`null` for a plain `.syldb`) and `two_stage`. **No filesystem paths** are exposed:
@@ -129,7 +130,8 @@ Reports:
 - `taxonomy`: `{"enabled": false}`, or with `--taxonomy-db` `{"enabled": true, "mount": "/taxonomy",
   "api_version", "taxonomies", "rate_limit"}`: `api_version` is omnitax's, and `taxonomies` lists what the
   file holds, one object per taxonomy with `label` (`ncbi:2026-11-26`, `gtdb:232`), `kind`, `version`,
-  `nodes`, `genomes`, `built` (when it was added to the file) and `fuzzy`; see [`/taxonomy`](#taxonomy). The
+  `nodes`, `genomes`, `built` (when it was added to the file) and `fuzzy`; see [`/taxonomy`](#taxonomy). This section is informational: sylphd's `api_version` does not
+  cover it (omnitax's own covers `/taxonomy`). The
   list of `endpoints` has `/taxonomy/...` then;
 - `access`: `{"token_required": bool}` (`--require-token`), plus `"token_valid": bool` when the request
   carried `Authorization: Bearer ...`; see [Access tokens](#access-tokens);

@@ -113,7 +113,7 @@ The details of the limits, client identity and CORS are in
 | Option | Default | Meaning |
 |---|---|---|
 | `--usage-db FILE` | off | SQLite file for opt-in usage statistics, created if missing (its directory must exist and be writable). Without it **nothing is recorded**, `GET /usage` is a `404` and `/info` reports `"usage": {"enabled": false}` |
-| `--taxonomy-db FILE` | off | taxonomy file from [`omnitax build`](../guides/ncbi-taxonomy.md#build-the-file): mounts omnitax's API at [`/taxonomy`](../reference/http-api.md#taxonomy). A file that is replaced is picked up on the next request, no restart needed |
+| `--taxonomy-db FILE` | off | taxonomy file from [`omnitax build`](../guides/ncbi-taxonomy.md#serving-it): mounts omnitax's API at [`/taxonomy`](../reference/http-api.md#taxonomy). A file that is replaced is picked up on the next request, no restart needed |
 | `--taxonomy-rate-limit N/min` | off | per-client rate limit of everything under `/taxonomy` alone (`N/min` or `N/s`), counted apart from `--rate-limit` |
 | `--privileged-token-file FILE` | off | bearer tokens, one per line, whose holders skip `--rate-limit` and `--taxonomy-rate-limit`; see [privileged access](../guides/public-server.md#privileged-access). A token the server does not know is reported (`X-Token-Valid: false`), not refused |
 | `--require-token` | off | with `--privileged-token-file`: refuse every request except `/`, `/health` and `/info` (`401`) unless it carries a valid token, a private server. Without the token file the server does not start |

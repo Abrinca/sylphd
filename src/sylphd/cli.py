@@ -43,6 +43,7 @@ from .messages import Messages
 from .metadata_build import build_metadata_db, update_metadata_db
 from .paths import check_socket_path, default_socket_path, parse_tcp
 from .protocol import ProfileParams
+from .taxonomy_file import check_taxonomy_file
 from .taxonomy_sources import TaxonomySource
 from .usage import Usage
 
@@ -97,6 +98,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     about = About(Path(args.about) if args.about else None)
     try:
         messages = Messages(Path(args.messages) if args.messages else None)
+        if args.taxonomy_db:
+            check_taxonomy_file(args.taxonomy_db)  # before the databases load
         specs = parse_db_specs(args.db)
         usage = Usage(Path(args.usage_db)) if args.usage_db else None
         tokens = (
@@ -385,6 +388,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
     update = getattr(args, "update", False)
     cache_directory = _cache_directory(args)
     try:
+        if args.taxonomy_db:
+            check_taxonomy_file(args.taxonomy_db)  # before any download or build
         if update:
             if args.reps_only:
                 raise ValueError("--reps-only cannot be used with --update")

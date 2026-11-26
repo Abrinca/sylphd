@@ -279,7 +279,7 @@ class TestProfileQuery:
 
     def test_taxprof_returns_clades_and_sylphmpa(self, tiny_database, tiny_metadata) -> None:
         """`taxprof` aggregates on the server: structured clades + exact text."""
-        from sylphd.taxonomy import aggregate_rows, taxprof_lines
+        from sylphd.taxprofile import aggregate_rows, taxprof_lines
 
         app = create_app(
             ServerConfig(db_path=tiny_database, meta_path=tiny_metadata)

@@ -113,7 +113,7 @@ def require_client_binary() -> Path:
 
 def aggregate_samples(samples, taxonomy: str = "gtdb"):
     """The oracle the parity tests compare against: the server's aggregation of each sample."""
-    from sylphd.taxonomy import aggregate_rows
+    from sylphd.taxprofile import aggregate_rows
 
     return [
         (str(sample.get("name") or "sample"), aggregate_rows(sample.get("rows") or (), taxonomy))

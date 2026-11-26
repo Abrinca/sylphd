@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from sylphd import entry, taxmatrix
-from sylphd.taxonomy import (
+from sylphd.taxprofile import (
     CladeAbundance,
     TaxonomyError,
     aggregate_rows,

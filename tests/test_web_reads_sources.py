@@ -27,7 +27,7 @@ import dnaio
 import pysylph
 import pytest
 from conftest import CLODF13_FASTA
-from sylphd.taxonomy import build_taxprof
+from sylphd.taxprofile import build_taxprof
 from test_web_reads_taxprof import CHROMIUM, MISSING, PLAYWRIGHT, WEB, _free_port
 
 API = "http://127.0.0.1:9"  # never contacted: every request to it is routed

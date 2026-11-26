@@ -3,9 +3,9 @@
 Reads ``.sylphmpa`` files (as written by ``sylph-tax taxprof`` or
 ``sylphd profile --taxprof``) and saved ``POST /profile`` JSON documents (with
 ``taxprof``), and renders the wide tab-separated matrix of ``sylph-tax merge``
-via :func:`sylphd.taxonomy.clade_matrix_lines`.
+via :func:`sylphd.taxprofile.clade_matrix_lines`.
 
-Only the standard library and :mod:`sylphd.taxonomy` are used, so the command
+Only the standard library and :mod:`sylphd.taxprofile` are used, so the command
 works in the base install without ``pysylph`` or any extra.
 """
 
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .entry import PYTHON_COMMANDS
-from .taxonomy import (
+from .taxprofile import (
     MATRIX_VALUES,
     CladeAbundance,
     TaxonomyError,

@@ -41,7 +41,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import IO, Self
 
-from .taxonomy import available_taxonomies
+from .taxprofile import available_taxonomies
 
 #: SQL: ``{c}`` is an unversioned assembly accession (``GCF_003697165``).
 _UNVERSIONED_SQL = "{c} GLOB 'GC[AF]_[0-9]*' AND {c} NOT GLOB 'GC[AF]_*[^0-9]*'"

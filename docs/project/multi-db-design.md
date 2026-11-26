@@ -170,9 +170,9 @@ Updated in phase 1: the first four rows describe the code *before* it.
 | `profiling.py: _decode_sketch` | sketch `c` compared with that one database (**now** `DatabaseSet.check_sketch`, naming the limiting database) |
 | `server.py: _info` | `database` is one object (**now** the pooled view plus `databases`; the web app reads `database.{name,genomes,c,k}`, lists `databases` and `metadata.taxonomy_sources`, and shows `GTDB r<release>` only when `databases[].gtdb` says a GTDB database is served — `web/app.js`, `loadInfo`, `renderCatalog`, `sketchLocally`) |
 | `metadata.py: accession_from_genome_name` | only `GC[AF]_\d+(\.\d+)?`; **every hit from IMG/VR, UHGV, OceanDNA, SoilSMAG, Tara and GlobDB r226 gets no accession and no metadata** |
-| `taxonomy.py: parse_lineage`, `TAXONOMY_COLUMNS` | ranks `d,p,c,o,f,g,s` only; other tokens are dropped; empty ranks filled with `unclassified X`; `t__` forced last |
+| `taxprofile.py: parse_lineage`, `TAXONOMY_COLUMNS` | ranks `d,p,c,o,f,g,s` only; other tokens are dropped; empty ranks filled with `unclassified X`; `t__` forced last |
 | `assembly.py: classify_hits` | GTDB lineage only; no lineage on the best hit means ANI-only labels, on another hit `unknown lineage` |
-| `taxonomy.py: clade_matrix_lines`, `docs/guides/taxonomic-profiles.md` | claim first-seen order equals `sylph-tax merge`; it does not (sorted) |
+| `taxprofile.py: clade_matrix_lines`, `docs/guides/taxonomic-profiles.md` | claim first-seen order equals `sylph-tax merge`; it does not (sorted) |
 
 ## A. Several databases per server
 
@@ -516,7 +516,7 @@ sees a collision without re-running `setup`. `--tax-source` stays the per-reques
 - `tax` is **exact sylph-tax**: opaque tokens, empty token to `UNKNOWN`, `NO_TAXONOMY`, ordering
   by number of levels then abundance (stable), `t__<tax_key>`, header
   `Taxonomies_used:['GTDB_r232', 'UHGV_default']` (source names, list repr), full float
-  precision as `taxonomy.py: _cell` already does.
+  precision as `taxprofile.py: _cell` already does.
 - The client aggregates the `tax_lineage` column; the server does no aggregation. The client
   requests `tax_source,tax_key,tax_lineage` through the existing `_request_fields` and
   `resolve_taxonomy_columns` machinery.
@@ -536,7 +536,7 @@ sees a collision without re-running `setup`. `--tax-source` stays the per-reques
   - Header `clade_name<TAB><sample>...` and tab separators, as `to_csv(sep="\t")` writes them.
   The existing `CladeAbundance.ani`/`.coverage` fields already carry the values; only
   `clade_matrix_lines` needs to sort and to handle the two extra columns.
-- ~~`web/taxonomy.js` is a port of `taxonomy.py`; leave it GTDB/NCBI-only.~~ Superseded (owner
+- ~~`web/taxonomy.js` is a port of `taxprofile.py`; leave it GTDB/NCBI-only.~~ Superseded (owner
   decision, 2026-10-29): the logic exists once, on the server. `/profile` `taxprof` returns the
   clades and the `.sylphmpa` text, the CLI writes them, and the web page charts the server's
   clades — including `tax` — so `web/taxonomy.js` and its JS parity test are gone.

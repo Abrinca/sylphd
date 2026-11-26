@@ -1,7 +1,7 @@
 # Taxonomic profiles
 
 `sylphd profile` writes per-rank taxonomic profiles that the **server** aggregates. The server is
-the only place the logic lives (`sylphd/taxonomy.py`): it folds its ANI hits into the clade tables
+the only place the logic lives (`sylphd/taxprofile.py`): it folds its ANI hits into the clade tables
 and returns both the structured clades and the rendered `.sylphmpa` text in the `/profile`
 response (`params.taxprof`). The CLI writes that text directly; to merge profiles across samples
 (including across separate runs), use [`sylphd taxmatrix`](../commands/taxmatrix.md). The result
