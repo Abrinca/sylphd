@@ -16,7 +16,7 @@ The server is found as for the command line ([server address](../commands/addres
 with the omnitax command line:
 
 ```bash
-omnitax --url https://sylphd.abrinca.com/taxonomy -t ncbi lineage 562
+omnitax lineage --url https://sylphd.abrinca.com/taxonomy -t ncbi 562
 ```
 
 A [privileged token](public-server.md#privileged-access) lifts the rate limit: `token_file=...` (or
