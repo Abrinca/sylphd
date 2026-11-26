@@ -38,7 +38,8 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator, Sequence
 
-from omnitax import STANDARD_RANKS, Taxon, Taxonomy
+from omnitax import GTDB_RANKS as OMNITAX_RANKS
+from omnitax import Taxon, Taxonomy
 
 from .taxonomy_sources import assembly_accession, match_accessions
 
@@ -47,7 +48,7 @@ GTDB_RANKS: tuple[str, ...] = ("d", "p", "c", "o", "f", "g", "s")
 
 #: The ranks a nearest taxon may have, shallowest first: GTDB's seven plus NCBI's kingdom, the level
 #: (Bacillati, Pseudomonadati, Nanobdellati, ...) where clades that NCBI splits across phyla still agree.
-NEAREST_RANKS: tuple[str, ...] = (STANDARD_RANKS[0], "kingdom", *STANDARD_RANKS[1:])
+NEAREST_RANKS: tuple[str, ...] = (OMNITAX_RANKS[0], "kingdom", *OMNITAX_RANKS[1:])
 
 _RANK_ORDER = {rank: index for index, rank in enumerate(NEAREST_RANKS)}
 

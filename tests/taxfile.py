@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import omnitax
-from omnitax.store import Rec, Rows
+from omnitax.store import Link, Rec, Rows
 
 #: What the NCBI nodes of the fixtures carry: ``specified_species`` 0 marks an informal species.
 INFORMAL = {"specified_species": 0}
@@ -28,13 +28,13 @@ def write_taxonomy_file(
         Rec(str(taxid), None if taxid == parent else str(parent), "domain" if rank == "superkingdom" else rank, name, {"specified_species": specified})
         for taxid, parent, rank, name, specified in nodes
     ]
-    genomes = [(accession, str(taxid), organism, "ncbi-assemblies") for accession, taxid, organism in assemblies]
-    genomes += [(accession, str(taxid), None, f"gtdb:{release}") for accession, taxid in links]
+    linked = [Link(accession, str(taxid), organism, "ncbi-assemblies") for accession, taxid, organism in assemblies]
+    linked += [Link(accession, str(taxid), None, f"gtdb:{release}") for accession, taxid in links]
     aliases = [(str(old), str(new)) for old, new in (merged or {}).items()]
-    omnitax.Taxonomy.from_rows(Rows(recs, aliases=aliases, genomes=genomes), "ncbi", "2026-01-01").save(str(path), fuzzy=False)
+    omnitax.Taxonomy.build(Rows(recs, aliases=aliases, links=linked), "ncbi", "2026-01-01", path=path, fuzzy=False).close()
     lines = path.with_suffix(".gtdb.tsv")
     lines.write_text("".join(f"{accession}\t{lineage}\n" for accession, lineage in gtdb))
-    omnitax.load("gtdb", release, files=[lines]).save(str(path), fuzzy=False)
+    omnitax.load("gtdb", release, files=[lines], path=path, fuzzy=False).close()
     return path
 
 

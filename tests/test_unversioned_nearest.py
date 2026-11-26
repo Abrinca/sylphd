@@ -186,15 +186,15 @@ def test_unversioned_genomes_resolve_as_omnitax_resolves_them(tmp_path: Path) ->
 
     path = write_taxonomy_file(tmp_path / "t.sqlite", FUNGI, assemblies=ASSEMBLIES, gtdb=[], links=[])
     with omnitax.open(path, "ncbi") as ncbi:
-        found = ncbi.genomes(["GCA_000002495", "GCF_000002515", "GCF_000002515.2", "GCF_999999999"])
+        found = ncbi.links(["GCA_000002495", "GCF_000002515", "GCF_000002515.2", "GCF_999999999"])
     # the file lists one version per base; the answer is keyed by the request
-    assert found["GCA_000002495"].accession == "GCA_000002495.2" and found["GCA_000002495"].taxon.id == "5141"
-    assert found["GCF_000002515"].accession == "GCF_000002515.1"
-    assert found["GCF_000002515.2"].accession == "GCF_000002515.1"  # the only version of that number
+    assert found["GCA_000002495"].key == "GCA_000002495.2" and found["GCA_000002495"].taxon.id == "5141"
+    assert found["GCF_000002515"].key == "GCF_000002515.1"
+    assert found["GCF_000002515.2"].key == "GCF_000002515.1"  # the only version of that number
     assert "GCF_999999999" not in found
     # GCA_ and GCF_ are different genomes
     with omnitax.open(path, "ncbi") as ncbi:
-        assert ncbi.genomes(["GCF_000002495", "GCA_000002515"]) == {}
+        assert ncbi.links(["GCF_000002495", "GCA_000002515"]) == {}
     assert assembly_accession("GCF_003697165") == "GCF_003697165"
 
 

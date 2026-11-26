@@ -130,7 +130,7 @@ Reports:
 - `taxonomy`: `{"enabled": false}`, or with `--taxonomy-db` `{"enabled": true, "mount": "/taxonomy",
   "api_version", "taxonomies", "rate_limit"}`: `api_version` is omnitax's, and `taxonomies` lists what the
   file holds, one object per taxonomy with `label` (`ncbi:2026-11-26`, `gtdb:232`), `kind`, `version`,
-  `nodes`, `genomes`, `built` (when it was added to the file) and `fuzzy`; see [`/taxonomy`](#taxonomy). This section is informational: sylphd's `api_version` does not
+  `nodes`, `links`, `built` (when it was added to the file) and `fuzzy`; see [`/taxonomy`](#taxonomy). This section is informational: sylphd's `api_version` does not
   cover it (omnitax's own covers `/taxonomy`). The
   list of `endpoints` has `/taxonomy/...` then;
 - `access`: `{"token_required": bool}` (`--require-token`), plus `"token_valid": bool` when the request
@@ -715,8 +715,8 @@ paths:
 | Path | |
 |---|---|
 | `GET /taxonomy/taxonomies` | the taxonomies of the file (the same objects as `/info`, with names, aliases, genome sources and provenance), the `api_version` and `max_batch` |
-| `POST /taxonomy/{taxonomy}/nodes`, `ancestors`, `children`, `names`, `search`, `by_name`, `genomes`, `genomes_under` | batched lookups; `{taxonomy}` is `ncbi`, `gtdb:232`, ... |
-| `GET /taxonomy/{taxonomy}/meta`, `rank/{rank}`, `subtree`, `rows/{part}` | the taxonomy's tables, and its nodes, names and genomes streamed |
+| `POST /taxonomy/{taxonomy}/nodes`, `ancestors`, `children`, `names`, `search`, `by_name`, `links`, `links_under` | batched lookups; `{taxonomy}` is `ncbi`, `gtdb:232`, ... |
+| `GET /taxonomy/{taxonomy}/meta`, `rank/{rank}`, `subtree`, `rows/{part}` | the taxonomy's tables, and its nodes, names, aliases and links streamed |
 
 The calls are index lookups: they never wait for a job slot and are covered by `--taxonomy-rate-limit`
 (every request under `/taxonomy`, `GET` and `POST`), not by `--rate-limit`. A token ([privileged access](../guides/public-server.md#privileged-access))

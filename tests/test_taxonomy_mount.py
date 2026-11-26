@@ -76,8 +76,8 @@ def test_info_names_what_the_catalog_lists(taxonomy_db: Path) -> None:
     assert taxonomy["api_version"] == API_VERSION
     assert taxonomy["rate_limit"] == {"count": 30, "window_seconds": 60.0}
     ncbi = next(e for e in taxonomy["taxonomies"] if e["kind"] == "ncbi")
-    assert ncbi["version"] == "2026-01-01" and ncbi["nodes"] == len(FUNGI_NODES) and ncbi["genomes"] == len(FUNGI_ASSEMBLIES) + 1  # and the GTDB link
-    assert set(ncbi) == {"label", "kind", "version", "nodes", "genomes", "built", "fuzzy"}
+    assert ncbi["version"] == "2026-01-01" and ncbi["nodes"] == len(FUNGI_NODES) and ncbi["links"] == len(FUNGI_ASSEMBLIES) + 1  # and the GTDB link
+    assert set(ncbi) == {"label", "kind", "version", "nodes", "links", "built", "fuzzy"}
     assert "/taxonomy/..." in info["endpoints"]
 
 
@@ -154,11 +154,11 @@ def test_an_omnitax_only_client_works_against_sylphd(live: str, tokens: Path) ->
         taxon = ncbi["4932"]
         assert (taxon.name, taxon.rank) == ("Saccharomyces cerevisiae", "species")
         assert taxon.lineage_string() == SACCHAROMYCES
-        assert [t.name for t in ncbi["559292"].lineage(ranks=omnitax.STANDARD_RANKS) if t][-2:] == ["Saccharomyces", "Saccharomyces cerevisiae"]
+        assert [t.name for t in ncbi["559292"].lineage(ranks=omnitax.GTDB_RANKS) if t][-2:] == ["Saccharomyces", "Saccharomyces cerevisiae"]
         assert ncbi.get("77777").id == "4932"  # merged
         assert ncbi.consensus(["4932", "5141"]).name == "Ascomycota"
         assert [t.id for t in ncbi.search("neurospora")] == ["5141"]
-        assert ncbi.genome("GCF_000002515").taxon.id == "4932"
+        assert ncbi.link("GCF_000002515").taxon.id == "4932"
         with omnitax.connect(url=live, taxonomy="gtdb:232", headers=headers) as gtdb:
             assert gtdb.translate("s__Saccharomyces cerevisiae", ncbi).id == "4932"  # through the genomes
         for _ in range(20):  # far over the 8 a minute an anonymous client gets

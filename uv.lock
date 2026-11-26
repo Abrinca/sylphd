@@ -176,12 +176,13 @@ requires-dist = [
     { name = "httpx" },
     { name = "starlette", marker = "extra == 'server'" },
     { name = "uvicorn", marker = "extra == 'server'" },
+    { name = "xxhash", marker = "extra == 'taxdump'" },
 ]
-provides-extras = ["server"]
+provides-extras = ["server", "taxdump"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "omnitax", extras = ["server"] },
+    { name = "omnitax", extras = ["server", "taxdump"] },
     { name = "pytest" },
 ]
 

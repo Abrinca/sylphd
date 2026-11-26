@@ -434,7 +434,7 @@ def _enrich_ncbi(
         )
     ]
     wanted = {accession for _, accession, _key in entries if accession is not None and accession not in covered}
-    found = ncbi.genomes(sorted(wanted), sources=list(sources))
+    found = ncbi.links(sorted(wanted), sources=list(sources))
     counts: dict[str, dict[str, int]] = {}
     for name, accession, key in entries:
         count = counts.setdefault(
@@ -455,8 +455,8 @@ def _enrich_ncbi(
     for accession, genome in found.items():
         if isinstance(genome, list):
             continue
-        stored = accession if "." in accession else genome.accession
-        rows[stored] = (int(genome.taxon.id), genome.taxon.lineage_string(), genome.organism)
+        stored = accession if "." in accession else genome.key
+        rows[stored] = (int(genome.taxon.id), genome.taxon.lineage_string(), genome.name)
     if rows:
         taxonomies = _load_dictionary(connection, "dict_ncbi_taxonomy")
         organisms = _load_dictionary(connection, "dict_ncbi_organism_name")
@@ -492,10 +492,10 @@ def _enrich_and_find_nearest(
         closing(omnitax.open(taxonomy_db, "ncbi")) as ncbi,
         closing(omnitax.open(taxonomy_db, f"gtdb:{release}" if release else "gtdb")) as gtdb,
     ):
-        sources = [source for source in (f"gtdb:{gtdb.version}", "ncbi-assemblies") if source in ncbi.genome_sources]
+        sources = [source for source in (f"gtdb:{gtdb.version}", "ncbi-assemblies") if source in ncbi.link_sources]
         if not sources:
             raise ValueError(
-                f"{taxonomy_db}: NCBI has no genome links ({', '.join(ncbi.genome_sources) or 'none'}); build the file with "
+                f"{taxonomy_db}: NCBI has no genome links ({', '.join(ncbi.link_sources) or 'none'}); build the file with "
                 f"`omnitax build -o FILE ncbi+assemblies+gtdb:{gtdb.version} gtdb:{gtdb.version}`"
             )
         counts = _enrich_ncbi(connection, ncbi, sources)

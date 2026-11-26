@@ -280,7 +280,7 @@ def _taxonomy_info(state: Any) -> dict[str, Any]:
         "mount": TAXONOMY_MOUNT,
         "api_version": TAXONOMY_API_VERSION,
         "taxonomies": [
-            {key: entry[key] for key in ("label", "kind", "version", "nodes", "genomes", "built", "fuzzy")}
+            {key: entry[key] for key in ("label", "kind", "version", "nodes", "links", "built", "fuzzy")}
             for entry in entries
         ],
         "rate_limit": _rate_limit_dict(state.taxonomy_rate_limit),
