@@ -69,17 +69,6 @@ def taxonomy(
     if secret and kind == "url":
         check_token_transport(where)
     headers = {"Authorization": f"Bearer {secret}"} if secret else None
-    if kind == "url":
-        return omnitax.connect(url=f"{where}/{MOUNT}", taxonomy=name, timeout=timeout, retries=retries, headers=headers)
-    # omnitax has no path prefix for a socket: point its client at the mount.
-    from omnitax.api import _wrap
-    from omnitax.client import Client
-    from omnitax.remote import RemoteStore
-
-    client = Client(socket=where, timeout=timeout, retries=retries, headers=headers)
-    client._client.base_url = f"http://omnitax.local/{MOUNT}/"
-    try:
-        return _wrap(RemoteStore(client, name))
-    except BaseException:
-        client.close()
-        raise
+    return omnitax.connect(
+        **{kind: where}, prefix=f"/{MOUNT}", taxonomy=name, timeout=timeout, retries=retries, headers=headers
+    )
