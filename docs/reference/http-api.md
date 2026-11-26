@@ -96,7 +96,7 @@ Reports:
   `built`, `format_version`, `reps_only` and `sources`, or `null` without `--meta`. It also carries `taxonomy_sources` — one object per
   source with `name`, `kind` (`metadata` for the virtual GTDB source, else `sylphtax`), `origin`
   (the catalogue URL it was downloaded from, or the **base name** of a local file — never a
-  local path), `md5`, `keys`, `has_host`, and the `ncbi` counts of a `--ncbi-taxonomy` build and
+  local path), `md5`, `keys`, `has_host`, and the `ncbi` counts of a `--taxonomy-db` build and
   its `ncbi_nearest` counts (`keys` without an NCBI record, `assigned` nearest taxa, `informal`
   of those that are an informally named species, `ranks` per raw rank) — `taxonomy_overlaps` — the
   pairs of sources that share keys, each
@@ -106,7 +106,7 @@ Reports:
   taxonomy `/profile` `taxprof` accepts with this file: `gtdb`/`ncbi` when their column exists,
   then `tax` and one `tax:<source>` per taxonomy source (see [`taxprof`](#taxprof)).
   Its `columns` also list the four `tax_*` columns, which `fields` can then select, and on a file
-  built with `--ncbi-taxonomy` the eight `ncbi_nearest_*` columns: the nearest NCBI taxon and,
+  built with `--taxonomy-db` the eight `ncbi_nearest_*` columns: the nearest NCBI taxon and,
   where it is only informally named, the nearest ancestor NCBI names formally;
 - `name` and `about`, **only when the operator set them** (the keys are absent otherwise):
   `name` is the string of `--name` (at most 80 characters, one line); `about` is
@@ -126,8 +126,11 @@ Reports:
   `{"enabled": true, "policy": 1, "window_minutes": 10}`. `policy` is an integer that is raised
   whenever what the statistics track changes; the web page asks its visitor to agree again when it
   rises. See [`GET /usage`](#get-usage);
-- `taxonomy`: `{"enabled": false}`, or with `--taxonomy-db` `{"enabled": true, "source", "source_date",
-  "taxa", "fuzzy", "rate_limit"}`; see [`/taxonomy/*`](#taxonomy);
+- `taxonomy`: `{"enabled": false}`, or with `--taxonomy-db` `{"enabled": true, "mount": "/taxonomy",
+  "api_version", "taxonomies", "rate_limit"}`: `api_version` is omnitax's, and `taxonomies` lists what the
+  file holds, one object per taxonomy with `label` (`ncbi:2026-11-26`, `gtdb:232`), `kind`, `version`,
+  `nodes`, `genomes`, `built` (when it was added to the file) and `fuzzy`; see [`/taxonomy`](#taxonomy). The
+  list of `endpoints` has `/taxonomy/...` then;
 - `access`: `{"token_required": bool}` (`--require-token`), plus `"token_valid": bool` when the request
   carried `Authorization: Bearer ...`; see [Access tokens](#access-tokens);
 - `endpoints`: the endpoint paths this server serves (`/usage` only when it is on; `/messages` is listed by servers that have it);
@@ -698,37 +701,27 @@ keyed by contig name in `contigs` (in request order), and a per-request `summary
 - `summary`, `caveats` and `database` are per request, so a client that splits a large assembly into
   several requests adds the counters and merges `consensus_bp` by `(rank, taxon)`.
 
-## `/taxonomy/*` { #taxonomy }
+## `/taxonomy` { #taxonomy }
 
-Only on a server started with [`--taxonomy-db`](../commands/taxdb.md) (`/info` says
-`taxonomy.enabled`). The calls are index lookups: they never wait for a job slot and are covered by
-`--taxonomy-rate-limit`, not by `--rate-limit`. Bodies are JSON (at most 1 MiB), at most 1000 taxids
-or names per request. A merged taxid answers with its replacement (`merged_from`); an unknown or
-deleted one answers `null`. The [Python objects](../guides/ncbi-taxonomy.md) wrap these calls.
+Only on a server started with [`--taxonomy-db`](../commands/serve.md) (`/info` says `taxonomy.enabled`).
+The whole API of [omnitax](https://abrinca.github.io/omnitax/) is mounted under `/taxonomy`: sylphd
+adds nothing and takes nothing away, so any omnitax client works with the URL `https://HOST/taxonomy`
+(`omnitax --url`, `omnitax.connect(url=...)`; see [NCBI taxonomy](../guides/ncbi-taxonomy.md)) and omnitax's
+[HTTP API reference](https://abrinca.github.io/omnitax/reference/http-api/) describes the endpoints, with these
+paths:
 
-| Endpoint | Request | Answer |
-|---|---|---|
-| `GET /taxonomy/info` | | `source`, `source_date`, `taxa`, `names`, `fuzzy`, `divisions`, `genetic_codes` |
-| `POST /taxonomy/nodes` | `{"taxids": [562, ...]}` | `{"nodes": [record or null, ...]}` in order |
-| `POST /taxonomy/lineage` | `{"taxids": [...]}` | `{"lineages": [[{taxid, name, rank}, ...root first] or null]}` |
-| `POST /taxonomy/names` | `{"taxids": [...]}` | `{"names": [[{name, name_class, unique_name}, ...] or null]}` |
-| `POST /taxonomy/children` | `{"taxid": 561, "descendants": false, "rank": null, "limit": 100000}` | `{"taxid", "taxa": [{taxid, name, rank, parent}] or null, "truncated"}` |
-| `POST /taxonomy/lookup` | `{"names": ["E. coli", ...]}` | `{"results": [{"query", "matches": [{taxid, name, name_class, scientific_name, rank}]}]}` |
-| `POST /taxonomy/search` | `{"query": "escherichia c", "fuzzy": false, "rank": null, "limit": 20}` | `{"hits": [{taxid, name, name_class, scientific_name, rank, score}]}`; `limit` at most 100 |
+| Path | |
+|---|---|
+| `GET /taxonomy/taxonomies` | the taxonomies of the file (the same objects as `/info`, with names, aliases, genome sources and provenance), the `api_version` and `max_batch` |
+| `POST /taxonomy/{taxonomy}/nodes`, `ancestors`, `children`, `names`, `search`, `by_name`, `genomes`, `genomes_under` | batched lookups; `{taxonomy}` is `ncbi`, `gtdb:232`, ... |
+| `GET /taxonomy/{taxonomy}/meta`, `rank/{rank}`, `subtree`, `rows/{part}` | the taxonomy's tables, and its nodes, names and genomes streamed |
 
-`/taxonomy/search` is the autocomplete. A `query` of letters completes names (`name` is the matched name,
-`name_class` its class, `scientific_name` the taxon's own name, `score` 1.0 for an exact match;
-`fuzzy` tolerates typos). A `query` of **digits only** completes the taxid instead: the exact
-taxid first, then those that start with the digits, shorter ids first (`"56"` gives 56, 561, 562,
-563, ...), with `name_class` `"taxid"` and `fuzzy` ignored. An old taxid that was merged answers
-with its replacement (`name_class` `"merged taxid"`, `name` the id you typed). Each hit is one taxon;
-fetch the full record with `/taxonomy/nodes`.
-
-A node record has `taxid`, `parent`, `rank`, `name`, `unique_name`, `embl_code`, `division_id`,
-`genetic_code_id`, `mito_genetic_code_id`, `plastid_genetic_code_id`,
-`hydrogenosome_genetic_code_id`, `hidden`, `hidden_subtree_root`, `specified_species`, `comments`
-(and `merged_from` when it was merged). Bad input is a `400`, a body over 1 MiB a `413`, and over
-the rate limit a `429` with `Retry-After`.
+The calls are index lookups: they never wait for a job slot and are covered by `--taxonomy-rate-limit`
+(every request under `/taxonomy`, `GET` and `POST`), not by `--rate-limit`. A token ([privileged access](../guides/public-server.md#privileged-access))
+skips the limit, and `--require-token` also covers `/taxonomy`. Errors are `{"error": "..."}` as everywhere:
+`400` for bad input, `404` for an unknown taxonomy or path, `413` over 1 MiB, `429` with `Retry-After`. An omnitax
+client sends the token as a header (`--header "Authorization: Bearer ..."`, `headers=`). Omnitax's own
+`api_version` is the one in `/info` `taxonomy.api_version` and `/taxonomy/taxonomies`; its client refuses another.
 
 ## Errors
 
@@ -741,7 +734,7 @@ Errors are JSON objects `{"error": "..."}` with a 4xx or 5xx status.
 | `404` | `POST /assembly` with raw sequences without `--allow-sequences` (sketches are always accepted); `GET /usage` without `--usage-db` |
 | `413` | the body exceeds `--max-upload-mb`, or for raw `/assembly` sequence the body exceeds `--max-sequence-mb` or its decompressed size exceeds five times that |
 | `415` | `/query`, `/profile` and `/contigs` without a `multipart/form-data` body, or `/assembly` with an unsupported `Content-Type` |
-| `429` | rate limited (`--rate-limit`, also for `GET /usage`; `--taxonomy-rate-limit` for `/taxonomy/*`); with `Retry-After` in seconds; a valid token skips it |
+| `429` | rate limited (`--rate-limit`, also for `GET /usage`; `--taxonomy-rate-limit` for `/taxonomy`); with `Retry-After` in seconds; a valid token skips it |
 | `503` | the job queue is full (`--max-queue`), or the request has more samples than fit in it; nothing was run; with `Retry-After: 1` |
 | `500` | profiling failed inside the server |
 

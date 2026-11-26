@@ -11,7 +11,7 @@ import pytest
 from conftest import ECOLI_TWO_STAGE, MIX_SKETCH
 from starlette.testclient import TestClient
 
-from sylphd import __version__, cli
+from sylphd import cli
 from sylphd.limits import JobTimes
 from sylphd.server import ServerConfig, create_app
 from sylphd.usage import BUCKET_BOUNDS, POLICY, Usage, classify, quantile
@@ -73,14 +73,6 @@ class TestClassify:
     )
     def test_kind_and_version(self, headers, expected) -> None:
         assert classify(headers) == expected
-
-    def test_the_client_identifies_itself(self) -> None:
-        from sylphd.client import SylphClient
-
-        with SylphClient(base_url="http://localhost:1") as client:
-            agent = client._client.headers["user-agent"]
-        assert agent == f"sylphd/{__version__}"
-        assert classify({"user-agent": agent}) == ("cli", __version__)
 
 
 class TestDisabled:

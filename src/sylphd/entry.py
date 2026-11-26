@@ -1,12 +1,12 @@
 """The ``sylphd`` command.
 
 Python owns the command but only runs what is Python: the server and admin commands
-(``serve``, ``setup``, ``download``, ``taxdb``, ``taxonomy``, ``taxmatrix``, ``diff``).
+(``serve``, ``setup``, ``download``, ``taxmatrix``, ``diff``).
 Every other invocation is handed, argv unchanged, to the native ``sylphd-client`` binary
 (``profile``, ``query``, ``assembly``, ``info``, ``render``; ``os.execv`` on Unix, so exit
 codes, signals, stdin and stdout pass straight through).
 
-The base install holds only what :mod:`sylphd.ncbitax` needs; the binary comes with the
+The base install holds nothing but the standard library; the binary comes with the
 ``client`` extra and the server needs ``serve``'s packages, so a missing one gets a
 friendly message and exit code 2 instead of a traceback.
 """
@@ -25,15 +25,22 @@ PYTHON_COMMANDS: dict[str, str] = {
     "serve": "run the server (one process, one worker)",
     "setup": "build the SQLite metadata database from GTDB TSV and sylph-tax files",
     "download": "download GTDB metadata, a sylph database or a taxonomy file",
-    "taxdb": "build the NCBI taxonomy file (see `sylphd serve --taxonomy-db`)",
-    "taxonomy": "look up NCBI taxa by taxid or name, on a server or in a taxonomy file",
     "taxmatrix": "merge .sylphmpa files or /profile JSON documents into a clade x sample TSV",
     "diff": "check that two sylph / sylph-tax outputs are equivalent",
 }
 
 #: Top-level modules that only an extra installs.
 OPTIONAL_MODULES = frozenset(
-    {"pysylph", "dnaio", "starlette", "uvicorn", "multipart", "python_multipart"}
+    {
+        "pysylph",
+        "dnaio",
+        "httpx",
+        "omnitax",
+        "starlette",
+        "uvicorn",
+        "multipart",
+        "python_multipart",
+    }
 )
 
 _HELP_FLAGS = ("-h", "--help", "help")
@@ -91,7 +98,7 @@ def _run_python(command: str, args: list[str]) -> int:
             raise
         print(
             f"sylphd: `sylphd {command}` needs a package that is not installed ({error.name}).\n"
-            "  to run a server:  pip install 'sylphd[server]'",
+            "  to run a server or build files:  pip install 'sylphd[server]'",
             file=sys.stderr,
         )
         return 2

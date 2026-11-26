@@ -675,7 +675,7 @@ pub struct DatabaseEntry {
     pub gtdb: bool,
 }
 
-/// Per-source NCBI mapping counts from `setup --ncbi-taxonomy`.
+/// Per-source NCBI mapping counts from `setup --taxonomy-db`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NcbiCounts {
     #[serde(default)]
@@ -689,7 +689,7 @@ pub struct NcbiCounts {
     pub gtdb: Option<u64>,
 }
 
-/// Per-source nearest NCBI taxon counts from `setup --ncbi-taxonomy`.
+/// Per-source nearest NCBI taxon counts from `setup --taxonomy-db`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NcbiNearestCounts {
     #[serde(default)]

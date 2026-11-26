@@ -157,6 +157,35 @@ wheels = [
 ]
 
 [[package]]
+name = "omnitax"
+source = { editable = "../omnitax" }
+dependencies = [
+    { name = "httpx" },
+]
+
+[package.optional-dependencies]
+server = [
+    { name = "anyio" },
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyio", marker = "extra == 'server'" },
+    { name = "httpx" },
+    { name = "starlette", marker = "extra == 'server'" },
+    { name = "uvicorn", marker = "extra == 'server'" },
+]
+provides-extras = ["server"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "omnitax", extras = ["server"] },
+    { name = "pytest" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.3"
 source = { registry = "https://pypi.org/simple" }
@@ -228,9 +257,6 @@ wheels = [
 [[package]]
 name = "sylphd"
 source = { editable = "." }
-dependencies = [
-    { name = "httpx" },
-]
 
 [package.optional-dependencies]
 client = [
@@ -238,6 +264,8 @@ client = [
 ]
 server = [
     { name = "dnaio" },
+    { name = "httpx" },
+    { name = "omnitax", extra = ["server"] },
     { name = "pysylph" },
     { name = "python-multipart" },
     { name = "starlette" },
@@ -254,7 +282,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dnaio", marker = "extra == 'server'" },
-    { name = "httpx" },
+    { name = "httpx", marker = "extra == 'server'" },
+    { name = "omnitax", extras = ["server"], marker = "extra == 'server'", editable = "../omnitax" },
     { name = "pysylph", marker = "extra == 'server'", git = "https://github.com/MrTomRod/pysylph?branch=multi-db" },
     { name = "python-multipart", marker = "extra == 'server'" },
     { name = "starlette", marker = "extra == 'server'" },
@@ -262,7 +291,7 @@ requires-dist = [
     { name = "sylphd-bin", marker = "extra == 'server'", directory = "rust/sylphd-client" },
     { name = "uvicorn", marker = "extra == 'server'" },
 ]
-provides-extras = ["client", "server", "taxonomy"]
+provides-extras = ["client", "server"]
 
 [package.metadata.requires-dev]
 dev = [

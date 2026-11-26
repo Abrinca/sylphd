@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -32,6 +33,28 @@ logger.addHandler(logging.NullHandler())
 #: Prefix of the CLI's messages (``sylphd: error: ...``), reused for warnings
 #: that must reach the terminal even when no logging is configured.
 _PROG = "sylphd"
+
+
+#: ``GCF_000002515.2`` in a key such as ``GCF_000002495.2_MG8``; the version is
+#: optional (GlobDB keys are ``GCF_003697165``), see :func:`assembly_accession`.
+ACCESSION_RE = re.compile(r"GC[AF]_\d+(?:\.\d+)?", re.IGNORECASE)
+
+
+def assembly_accession(key: str) -> str | None:
+    """The assembly accession in ``key``, or ``None`` when it has none.
+
+    The version is optional: an unversioned accession (``GCF_003697165``) is
+    returned as it is and later resolves to the single version a taxonomy lists.
+
+    >>> assembly_accession("GCF_000002495.2_MG8")
+    'GCF_000002495.2'
+    >>> assembly_accession("GCF_003697165")
+    'GCF_003697165'
+    >>> assembly_accession("UHGV-0405173") is None
+    True
+    """
+    match = ACCESSION_RE.search(key)
+    return None if match is None else match.group(0).upper()
 
 
 @dataclass(frozen=True)

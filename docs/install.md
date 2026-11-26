@@ -16,11 +16,11 @@ client side needs a Rust toolchain, a C compiler or `cmake`; the binary arrives 
 | Extra | For | Brings |
 |---|---|---|
 | `sylphd[client]` | machines that profile against a server: `profile`, `query`, `assembly`, `info` | `sylphd-bin` (the native client), and with it Python 3.14 |
-| `sylphd[server]` | the machine that runs `sylphd serve` | everything `client` has, plus `pysylph`, `dnaio`, `starlette`, `uvicorn`, `python-multipart` |
-| `sylphd[taxonomy]` | Python code that only looks up NCBI taxa, from a server or a file: [NCBI taxonomy](guides/ncbi-taxonomy.md) | nothing but `httpx` |
+| `sylphd[server]` | the machine that runs `sylphd serve`, `setup` and `download` | everything `client` has, plus `pysylph`, `dnaio`, `httpx`, `starlette`, `uvicorn`, `python-multipart` and [`omnitax`](guides/ncbi-taxonomy.md) (the taxonomies the server serves, and that `setup` reads) |
 
-The base install (`pip install sylphd`) is `httpx` only: it holds `sylphd.ncbitax` and
-`sylphd.taxdb`.
+The base install (`pip install sylphd`) has no dependencies: it runs `sylphd diff` and `sylphd taxmatrix`, and
+says what to install for the rest. To look taxa up on a server you need no sylphd at all: install
+[`omnitax`](guides/ncbi-taxonomy.md).
 
 ## Requirements
 
@@ -109,7 +109,7 @@ tar -xzf sylphd-client.tar.gz
 ```
 
 It is the same program as `sylphd-bin`'s `sylphd-client`, with the same commands and exit codes,
-except that the Python commands (`serve`, `setup`, `download`, `taxdb`, `taxonomy`, `taxmatrix`,
+except that the Python commands (`serve`, `setup`, `download`, `taxmatrix`,
 `diff`) do not exist there: it carries the query commands and `render` only. On Windows use the
 `.zip`; on macOS the archive matching `uname -m`.
 
@@ -141,7 +141,6 @@ A clone is the only case that needs Rust: `uv sync` compiles `sylphd-client` fro
 ## Into another project
 
 ```bash
-uv add "sylphd[taxonomy]"                      # NCBI lookups only
 uv add "sylphd[client]"                        # + the native client
 ```
 

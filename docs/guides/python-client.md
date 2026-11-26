@@ -50,8 +50,8 @@ is what turns them into sylph's spellings.
 
 ## Taxonomy lookups
 
-`sylphd.ncbitax` and `sylphd.taxdb` are unchanged and need no binary: see
-[NCBI taxonomy](ncbi-taxonomy.md).
+sylphd has no Python taxonomy classes of its own: `omnitax.connect(url="https://.../taxonomy")` gives taxon
+objects from a sylphd server (see [NCBI taxonomy](ncbi-taxonomy.md)).
 
 ## Tokens and server addresses
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "Shared address-precedence cases for docs/commands/address.md. Run by the Rust tests in rust/sylphd-client/src/address.rs and by tests/test_address_cases.py.",
+  "_comment": "Shared address-precedence cases for docs/commands/address.md. Run by the Rust tests in rust/sylphd-client/src/address.rs.",
   "cases": [
     {
       "name": "explicit_url_wins_over_environment",

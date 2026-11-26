@@ -2,7 +2,7 @@
 
 ```text
 sylphd setup [-m FILE...] [--taxonomy SPEC...] -o PATH [--release N] [--reps-only]
-             [--update] [--cache-dir DIR] [--ncbi-taxonomy] [--force] [-q]
+             [--update] [--cache-dir DIR] [--taxonomy-db FILE] [--force] [-q]
 
 SPEC := NAME | NAME=PATH | PATH
 ```
@@ -21,7 +21,7 @@ stores and reports them. The layout and columns are in the
 | `-o, --output PATH` | required | SQLite file to write |
 | `--update` | off | add the sources to an existing file instead of building one |
 | `--cache-dir DIR` | `<output dir>/taxonomy` | where downloaded taxonomy files are kept |
-| `--ncbi-taxonomy` | off | give the sylph-tax genomes that GTDB does not cover an NCBI lineage, and those without an assembly a nearest NCBI taxon |
+| `--taxonomy-db FILE` | off | an [omnitax](../guides/ncbi-taxonomy.md) file (NCBI with its genomes, and GTDB): gives the sylph-tax genomes that GTDB does not cover an NCBI lineage, and those without an assembly a nearest NCBI taxon |
 | `--release N` | none | GTDB release to record in the file (and the name of the virtual source) |
 | `--reps-only` | off | store only species representatives (`gtdb_representative` true), `-m` only |
 | `--force` | off | replace the output file (only once the new one is built; a failure keeps the old one) |
@@ -48,7 +48,7 @@ sylphd setup -m data/bac120_metadata_r232.tsv.gz data/ar53_metadata_r232.tsv.gz 
 # and the ones with no NCBI record get a nearest NCBI taxon (see deploy/README.md)
 sylphd setup -m data/bac120_metadata_r232.tsv.gz data/ar53_metadata_r232.tsv.gz \
              --taxonomy GlobDB_r232 --taxonomy UHGV_default --taxonomy FungiRefSeq-latest \
-             --ncbi-taxonomy -o data/meta-globdb.sqlite --release 232
+             --taxonomy-db data/taxonomies.sqlite -o data/meta-globdb.sqlite --release 232
 
 # a local file under a chosen name
 sylphd setup -m data/*.tsv.gz --taxonomy UHGV=./my_uhgv.tsv.gz -o data/meta.sqlite
@@ -87,44 +87,50 @@ it only on success, so an interrupted or failed update leaves the old file untou
 
 GTDB's metadata has no row for a genome of another source (a `FungiRefSeq-latest` key
 `GCF_000002495.2_MG8`, say), so its NCBI taxonomy view, NCBI Taxonomy links and `ncbi_*` columns
-would be empty. `--ncbi-taxonomy` fills them, for a build and for `--update`:
+would be empty. `--taxonomy-db` fills them, for a build and for `--update`. It names a taxonomy file
+that [omnitax](../guides/ncbi-taxonomy.md) built, with NCBI and its genomes and the GTDB release of your
+metadata:
 
 ```bash
+omnitax build -o data/taxonomies.sqlite ncbi+assemblies+gtdb:232 gtdb:232
 sylphd setup -m data/bac120_metadata_r232.tsv.gz \
-             --taxonomy FungiRefSeq-latest --ncbi-taxonomy \
-             -o data/meta.sqlite --release 232 --cache-dir data/cache
+             --taxonomy FungiRefSeq-latest --taxonomy-db data/taxonomies.sqlite \
+             -o data/meta.sqlite --release 232
 ```
 
-Each run downloads NCBI's `new_taxdump.tar.gz` and streams the assembly summary that can hold the
-needed accessions (`ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/` and `/genomes/ASSEMBLY_REPORTS/`):
-RefSeq for `GCF_` accessions, GenBank for `GCA_` ones. The taxdump's `rankedlineage.dmp`, `nodes.dmp`
-and `merged.dmp` are extracted into a temporary directory under `--cache-dir` and deleted with the
-tarball when the run ends, so nothing NCBI is kept (and nothing is stale); the summary is streamed
-and only the requested accessions are kept, so the (about 1.8 GB) GenBank summary is never stored
-and is not fetched when only RefSeq accessions are needed. The sizes are checked against the
-servers' `Content-Length`.
+`setup` downloads nothing for this: the taxdump and the assembly summaries are in the file, which is built
+once and also serves [`/taxonomy`](../reference/http-api.md#taxonomy). The release picks the GTDB taxonomy in
+the file (`gtdb:232`; the newest one when `--release` is not given), and the genomes are looked up through
+GTDB's own NCBI taxids (`ncbi+gtdb:232`) and then NCBI's assembly summaries (`ncbi+assemblies`), whichever of the two
+the file has.
 
 For every key of every sylph-tax source whose assembly accession has no GTDB metadata row (a GTDB
-row is never replaced), the assembly accession in the key (`GC[AF]_\d+(?:\.\d+)?`) is matched against the summaries; an
-unversioned key (GlobDB's `GCF_003697165`) takes the single version of its base that a summary lists,
-a versioned one is matched exactly, and if its version is missing there, the same accession base is
-used only when the source requests a single version of it, else the key is skipped. The taxid then comes from the summary and the lineage from
-`rankedlineage.dmp` (a merged taxid is followed through `merged.dmp`), with `nodes.dmp` filling the node's own rank (a species node's species
-column in `rankedlineage.dmp` holds its ancestors and is empty) — never from an organism name. `ncbi_taxonomy` keeps GTDB's
-`d__…;p__…;c__…;o__…;f__…;g__…;s__…` shape, with NCBI's superkingdom (or domain) as `d__`; NCBI's
+row is never replaced), the assembly accession in the key (`GC[AF]_\d+(?:\.\d+)?`) is looked up as omnitax looks
+genomes up: the same accession, else its version, else the only stored version of its number (GlobDB's
+unversioned `GCF_003697165` finds the one version the file has; two versions are ambiguous and skipped), and
+`GCA_` and `GCF_` accessions of one number are different genomes. The genome's taxon is the taxid and its lineage
+the lineage (merged taxids are followed by omnitax) — never from an organism name. `ncbi_taxonomy` keeps GTDB's
+`d__…;p__…;c__…;o__…;f__…;g__…;s__…` shape, with NCBI's superkingdom as `d__`; NCBI's
 kingdom is not one of the seven ranks and is left out. The rows are stored like GTDB metadata rows
-(accession key, GTDB columns `NULL`), so every reader finds them without a change; GTDB rows keep
-their own NCBI data. Every `--ncbi-taxonomy` run deletes and rebuilds these rows, so running
-`--update --ncbi-taxonomy` again is idempotent. `--update` without the flag keeps them, deletes the
-ones no source key refers to any more and drops the counts of the sources it replaced.
+(accession key, GTDB columns `NULL`), under the accession the file holds the genome by (or the key's own when
+it has a version), so every reader finds them without a change; GTDB rows keep
+their own NCBI data. Every `--taxonomy-db` run deletes and rebuilds these rows, so running
+`--update --taxonomy-db` again is idempotent. `--update` without the flag keeps them, deletes the
+ones no source key refers to any more and drops the counts of the sources it replaced. The counts per source
+are `gtdb` (covered by GTDB's metadata), `mapped`, `no_accession`, `not_in_summary` (the file has no such genome)
+and `ambiguous`.
 
 A key with a GTDB-Tk lineage but no assembly in NCBI at all — a GlobDB MAG (`MOTU40_002958`) — still
-gets a place in the NCBI view: the **nearest NCBI taxon** of its deepest GTDB clade that has one. The
-clade's GTDB members' NCBI taxids vote, and the deepest NCBI node that strictly more than half of
-them have as ancestor-or-self wins (a documented majority rule, not a strict LCA: one misclassified
-genome cannot drag a genus to the root). That node is reported as it is, even when it is a species
+gets a place in the NCBI view: the **nearest NCBI taxon** of its deepest GTDB clade that has one. Each clade is
+translated into NCBI through the genomes the two taxonomies share (omnitax's `translate`): every GTDB leaf
+below the clade votes once, with the NCBI nodes of its genomes (the leaf's vote is split between them, so a
+species of many genomes does not outvote one of few), under NCBI's *unclassified sequences*, *other
+sequences* and *environmental samples* nothing votes, and the deepest NCBI node that **more than 90 %** of the
+votes have as ancestor-or-self wins, lifted to a standard rank (a strict LCA would be dragged up by one
+misclassified genome; a bare majority put a genus's MAGs at a species the data barely supports: on a
+benchmark of known genomes 0.5 gave 68 % precision, 0.9 gives 91 %). That node is reported as it is, even when it is a species
 NCBI only names informally (*Clostridia bacterium*, *uncultured Collinsella sp.*). Alongside it, the
-server stores the nearest ancestor NCBI names *formally* — from `nodes.dmp`'s `specified_species`
+server stores the nearest ancestor NCBI names *formally* — from NCBI's `specified_species`
 flag, so not a pattern on names — as `ncbi_nearest_formal_taxid`, `_formal_rank` and `_formal_name`:
 the class *Clostridia* for *Clostridia bacterium*, the genus *Collinsella* for *uncultured
 Collinsella sp.*, and the raw taxon itself when it is formally named. All of it is stored as

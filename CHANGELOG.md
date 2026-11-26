@@ -4,6 +4,40 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed (breaking)
+
+- **Taxonomies come from [omnitax](https://abrinca.github.io/omnitax/).** sylphd no longer has a taxonomy
+  surface of its own. Removed: the commands `sylphd taxdb` and `sylphd taxonomy`, the modules `sylphd.ncbitax`,
+  `sylphd.taxdb`, `sylphd.client` (the Python transport, which only they used), `sylphd.ncbi_taxonomy` and
+  `sylphd.ncbi_nearest`, and the `taxonomy` extra. Build the file with `omnitax build -o taxonomies.sqlite
+  ncbi+assemblies+gtdb:232 gtdb:232` (old taxdb files do not load: rebuild) and look taxa up with `omnitax --url
+  https://HOST/taxonomy ...` or `omnitax.connect(url="https://HOST/taxonomy")`.
+- **`sylphd serve --taxonomy-db FILE` mounts omnitax's API at `/taxonomy`** (`/taxonomy/taxonomies`,
+  `/taxonomy/ncbi/nodes`, ...; no more `/taxonomy/info`, `/lineage`, `/lookup` with taxids as integers).
+  `--taxonomy-rate-limit` counts every request under `/taxonomy`, a privileged token skips it, `--require-token`
+  covers it. `/info` `taxonomy` is `{"enabled", "mount", "api_version", "taxonomies": [{label, kind, version,
+  nodes, genomes, built, fuzzy}], "rate_limit"}` (it used to hold `source`, `source_date`, `taxa`, `fuzzy`).
+  omnitax's own log goes to the `omnitax` logger, shown at `--log-level`.
+- **`sylphd setup --ncbi-taxonomy` is `--taxonomy-db FILE`**: it reads the same omnitax file instead of
+  downloading NCBI's taxdump and assembly summaries on every run. The assembly lookup is omnitax's (the
+  accession, else its version, else the only stored version of its number; `GCA_` and `GCF_` stay different
+  genomes), so a versioned key whose version is missing is found as long as the file has one version of its
+  number. The per-source `ncbi` counts have `ambiguous` (several genomes) where they had `no_lineage`.
+  The metadata format is unchanged (still 3).
+- **The nearest NCBI taxon is placed by omnitax's `translate`: more cautious, more precise.** A GTDB clade is
+  translated into NCBI through the shared genomes with the default threshold **0.9** (the deepest node that more
+  than 90 % of the weight has as ancestor-or-self; it was a bare majority, 0.5) and every GTDB **leaf** votes once
+  (its vote split among its genomes; it was one vote per genome, so a species of many genomes decided its genus).
+  On a benchmark of genomes with a known NCBI taxon, 0.5 gave 68 % precision and 0.9 gives 91 %; a MAG is
+  now more often placed at its family or genus than at a species the data barely supports. `members` is the number
+  of voting leaves, and the nearest ranks are the standard ranks (no kingdom). Rebuild a metadata file with
+  `sylphd setup --update --taxonomy-db FILE` to get the new placements.
+- **The base install has no dependencies** (it was `httpx`); `httpx` and `omnitax[server]` are in `sylphd[server]`,
+  which is what `serve`, `setup` and `download` need (the base `sylphd` says so when one is missing).
+  Until omnitax is on PyPI, development resolves it from `../omnitax` (`[tool.uv.sources]`), so a release waits for it.
+
 ## [0.8.0] - 2026-11-25
 
 ### Changed (breaking)

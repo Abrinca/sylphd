@@ -269,7 +269,7 @@ class TokenMiddleware:
 
 
 class RateLimitMiddleware:
-    """Answer 429 for requests to ``paths`` that exceed the limiter, before reading the body.
+    """Answer 429 for requests to ``paths`` (or to anything under ``prefix``) that exceed the limiter, before reading the body.
 
     A request with a valid privileged bearer token (``privileged``: token
     digests) skips the limiter and is not counted.  The job queue limits still
@@ -281,7 +281,8 @@ class RateLimitMiddleware:
         app: Any,
         *,
         limiter: RateLimiter,
-        paths: frozenset[str] | set[str],
+        paths: frozenset[str] | set[str] = frozenset(),
+        prefix: str | None = None,
         trusted: frozenset[str] | set[str] = frozenset(),
         privileged: tuple[bytes, ...] = (),
     ) -> None:
@@ -289,13 +290,17 @@ class RateLimitMiddleware:
         self.privileged = tuple(privileged)
         self.limiter = limiter
         self.paths = frozenset(paths)
+        self.prefix = prefix
         self.trusted = frozenset(trusted)
+
+    def _limited(self, path: str) -> bool:
+        return path in self.paths or (self.prefix is not None and path.startswith(self.prefix))
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         if (
             scope["type"] != "http"
             or scope.get("method") not in LIMITED_METHODS
-            or scope.get("path") not in self.paths
+            or not self._limited(scope.get("path", ""))
         ):
             await self.app(scope, receive, send)
             return

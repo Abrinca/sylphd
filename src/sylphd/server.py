@@ -29,13 +29,15 @@ from typing import Any
 
 import anyio
 import pysylph
+from omnitax.server import Catalog, taxonomy_routes
+from omnitax.store import API_VERSION as TAXONOMY_API_VERSION
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 from . import __version__, per_contig
 from .about import About
@@ -63,7 +65,6 @@ from .profiling import (
 from .protocol import API_VERSION, PROFILE_PARAM_KEYS, ProfileParams, result_document
 from .server_errors import RequestError, answers_errors, check_queue, job_errors
 from .server_middleware import AccessLogMiddleware, BodyLimitMiddleware
-from .server_taxonomy import TAXONOMY_PATHS, taxonomy_routes
 from .server_upload import (
     MAX_PARAMS_BYTES,
     MAX_SKETCHES,
@@ -71,10 +72,13 @@ from .server_upload import (
     read_upload,
     require_multipart,
 )
-from .taxdb import TaxDb
 from .usage import POLICY, WINDOW_MINUTES, Usage
 
 log = logging.getLogger("uvicorn.error")
+
+#: Where omnitax's endpoints are mounted (``--taxonomy-db``): ``/taxonomy/taxonomies``,
+#: ``/taxonomy/<taxonomy>/nodes``, ...
+TAXONOMY_MOUNT = "/taxonomy"
 
 #: Default of ``--max-contigs``: the maximum number of contigs accepted in one
 #: ``/contigs`` request.  The whole request is one job (its contigs run
@@ -169,8 +173,8 @@ class ServerConfig:
     #: Usage statistics (``--usage-db``); the caller opens the file, so a bad
     #: path fails before the database is loaded.  ``None`` records nothing.
     usage: Usage | None = None
-    #: A taxonomy file built by ``sylphd taxdb build`` (``--taxonomy-db``);
-    #: switches on the ``/taxonomy/*`` endpoints.
+    #: A taxonomy file built by ``omnitax build`` (``--taxonomy-db``);
+    #: mounts omnitax's endpoints at ``/taxonomy``.
     taxonomy_db: Path | None = None
     #: ``(count, window_seconds)`` per client for the ``/taxonomy/*``
     #: endpoints (``--taxonomy-rate-limit``), counted apart from ``rate_limit``.
@@ -268,15 +272,17 @@ def _access_info(request: Request, state: Any) -> dict[str, Any]:
 
 
 def _taxonomy_info(state: Any) -> dict[str, Any]:
-    if state.taxdb is None:
+    if state.taxonomy is None:
         return {"enabled": False}
-    info = state.taxdb.info()
+    entries = state.taxonomy.list()
     return {
         "enabled": True,
-        "source": info.get("source"),
-        "source_date": info.get("source_date"),
-        "taxa": info.get("taxa"),
-        "fuzzy": bool(info.get("fuzzy")),
+        "mount": TAXONOMY_MOUNT,
+        "api_version": TAXONOMY_API_VERSION,
+        "taxonomies": [
+            {key: entry[key] for key in ("label", "kind", "version", "nodes", "genomes", "built", "fuzzy")}
+            for entry in entries
+        ],
         "rate_limit": _rate_limit_dict(state.taxonomy_rate_limit),
     }
 
@@ -285,8 +291,8 @@ def _endpoints(state: Any) -> list[str]:
     endpoints = ["/health", "/info", "/messages", "/profile", "/query", "/assembly", "/contigs"]
     if state.usage is not None:
         endpoints.append("/usage")
-    if state.taxdb is not None:
-        endpoints.extend(sorted(TAXONOMY_PATHS))
+    if state.taxonomy is not None:
+        endpoints.append(f"{TAXONOMY_MOUNT}/...")
     return endpoints
 
 
@@ -748,8 +754,6 @@ def _lifespan(config: ServerConfig) -> Any:
             metadata = app.state.metadata
             if metadata is not None:
                 metadata.close()
-            if app.state.taxdb is not None:
-                app.state.taxdb.close()
 
     return lifespan
 
@@ -781,9 +785,9 @@ def create_app(
     ]
     if config.usage is not None:
         routes.append(Route("/usage", _usage, methods=["GET"]))
-    taxdb = TaxDb(config.taxonomy_db) if config.taxonomy_db is not None else None
-    if taxdb is not None:
-        routes.extend(taxonomy_routes())
+    catalog = Catalog(config.taxonomy_db) if config.taxonomy_db is not None else None
+    if catalog is not None:
+        routes.append(Mount(TAXONOMY_MOUNT, routes=taxonomy_routes(catalog)))
     app = Starlette(
         routes=routes,
         exception_handlers={
@@ -806,7 +810,7 @@ def create_app(
     app.state.about = config.about
     app.state.messages = config.messages
     app.state.usage = config.usage
-    app.state.taxdb = taxdb
+    app.state.taxonomy = catalog
     app.state.require_token = config.require_token
     app.state.taxonomy_rate_limit = config.taxonomy_rate_limit
     app.state.jobs = JobSlots(config.max_jobs, config.max_queue)
@@ -824,12 +828,12 @@ def create_app(
             trusted=frozenset(config.trusted_proxies),
             privileged=config.privileged_tokens,
         )
-    if taxdb is not None and config.taxonomy_rate_limit is not None:
+    if catalog is not None and config.taxonomy_rate_limit is not None:
         count, window = config.taxonomy_rate_limit
         app.add_middleware(
             RateLimitMiddleware,
             limiter=RateLimiter(count, window),
-            paths=TAXONOMY_PATHS,
+            prefix=f"{TAXONOMY_MOUNT}/",
             trusted=frozenset(config.trusted_proxies),
             privileged=config.privileged_tokens,
         )

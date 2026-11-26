@@ -40,7 +40,7 @@ set. The server must expose the four `tax_*` columns for `tax`; `--tax-source` t
 sources the profile is resolved against.
 
 A hit that has an NCBI **nearest** taxon but no NCBI lineage of its own (`setup
---ncbi-taxonomy`; a GlobDB MAG, say) is placed in the `ncbi` profile at that (raw) node instead of
+--taxonomy-db`; a GlobDB MAG, say) is placed in the `ncbi` profile at that (raw) node instead of
 in `unclassified`: its `t__` row hangs directly below the nearest clade, and the `/profile` JSON
 marks that clade with a `nearest` object (`taxid`, `rank`, `name`, `clade`). When NCBI only names
 that species informally, the metadata's `ncbi_nearest_formal_*` columns name the nearest ancestor

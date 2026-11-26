@@ -19,7 +19,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
-from . import __version__, ncbi_nearest, ncbi_taxonomy
+import omnitax
+from omnitax import Taxonomy
+
+from . import __version__, taxonomy_nearest
 from .catalog import SYLPHTAX_VERSION
 from .metadata import (
     _DICT_POSITIONS,
@@ -41,6 +44,7 @@ from .taxonomy_sources import (
     _load_dictionary,
     _next_ord,
     _report_taxonomy_overlaps,
+    assembly_accession,
     is_redundant_gtdb_source,
     match_accessions,
 )
@@ -358,7 +362,7 @@ def _use_accessions(connection: sqlite3.Connection) -> None:
     connection.create_function(
         "assembly_accession",
         1,
-        ncbi_taxonomy.assembly_accession,
+        assembly_accession,
         deterministic=True,
     )
 
@@ -383,27 +387,29 @@ def _prune_ncbi_rows(connection: sqlite3.Connection) -> None:
 
 def _enrich_ncbi(
     connection: sqlite3.Connection,
-    taxdump: ncbi_taxonomy.Taxdump,
-    *,
-    progress: object = None,
+    ncbi: Taxonomy,
+    sources: Sequence[str],
 ) -> dict[str, dict[str, int]]:
     """Give the sylph-tax keys GTDB does not cover an NCBI lineage.
 
-    Each such key's assembly accession and taxid come from NCBI's assembly
-    summaries, and its lineage from ``rankedlineage.dmp``.  The result is
-    stored as ordinary metadata rows (same accession, GTDB columns NULL,
+    Each such key's assembly accession is looked up in ``ncbi``'s genomes (the
+    genome ``sources``, best first), which say its taxid and organism, and the
+    taxid's lineage is the taxon's.  The result is stored as ordinary metadata
+    rows (same accession, GTDB columns NULL,
     ``ncbi_taxid``/``ncbi_taxonomy``/``ncbi_organism_name`` filled), so the
     metadata lookup, the NCBI profile view and the NCBI links need no change.
     A key is covered when GTDB has a row for its *extracted* accession --
     exactly, or, when the accession has no version (GlobDB's
     ``GCF_003697165``), as the only GTDB version of that base -- and a GTDB
-    row is never replaced.  An unversioned key GTDB does not cover is matched
-    to the assembly summary's single (current) version of that base and stored
-    under that versioned accession.  Every run deletes the earlier enrichment
-    rows and rebuilds them, so a rerun is idempotent and values are refreshed.
+    row is never replaced.  The genome is found as omnitax finds genomes (the
+    accession, else its version, else the only stored version of its number;
+    ``GCA_`` and ``GCF_`` are different genomes) and is stored under the
+    versioned accession omnitax holds it under, or under the key's own when that
+    has a version.  Every run deletes the earlier enrichment rows and rebuilds
+    them, so a rerun is idempotent and values are refreshed.
     Returns per-source counts: ``gtdb`` (covered by GTDB's metadata, so with
-    GTDB's own NCBI data), ``mapped``, ``no_accession``, ``not_in_summary`` and
-    ``no_lineage``.
+    GTDB's own NCBI data), ``mapped``, ``no_accession``, ``not_in_summary``
+    (no genome of that accession) and ``ambiguous`` (several).
     """
     _use_accessions(connection)
     connection.execute(f"DELETE FROM metadata_data WHERE {_NCBI_ONLY}")
@@ -421,31 +427,18 @@ def _enrich_ncbi(
     connection.execute("DROP TABLE IF EXISTS temp._enrich_covered")
 
     entries = [
-        (str(name), ncbi_taxonomy.assembly_accession(str(key)), str(key))
+        (str(name), assembly_accession(str(key)), str(key))
         for name, key in connection.execute(
             "SELECT s.name, e.key FROM taxonomy_entry AS e "
             "JOIN taxonomy_source AS s ON s.id = e.source_id ORDER BY s.ord"
         )
     ]
-    accessions = {
-        accession
-        for _, accession, _key in entries
-        if accession is not None and accession not in covered
-    }
-    found = ncbi_taxonomy.lookup(
-        sorted(accessions), taxdump.cache_dir, progress=progress, taxdump=taxdump
-    )
+    wanted = {accession for _, accession, _key in entries if accession is not None and accession not in covered}
+    found = ncbi.genomes(sorted(wanted), sources=list(sources))
     counts: dict[str, dict[str, int]] = {}
     for name, accession, key in entries:
         count = counts.setdefault(
-            name,
-            {
-                "gtdb": 0,
-                "mapped": 0,
-                "no_accession": 0,
-                "not_in_summary": 0,
-                "no_lineage": 0,
-            },
+            name, {"gtdb": 0, "mapped": 0, "no_accession": 0, "not_in_summary": 0, "ambiguous": 0}
         )
         genome = None if accession is None else found.get(accession)
         if (accession or key) in covered:
@@ -454,14 +447,17 @@ def _enrich_ncbi(
             count["no_accession"] += 1
         elif genome is None:
             count["not_in_summary"] += 1
-        elif genome.lineage is None:
-            count["no_lineage"] += 1
+        elif isinstance(genome, list):
+            count["ambiguous"] += 1
         else:
             count["mapped"] += 1
-    mapped = [
-        genome for genome in found.values() if genome.lineage is not None
-    ]
-    if mapped:
+    rows = {}
+    for accession, genome in found.items():
+        if isinstance(genome, list):
+            continue
+        stored = accession if "." in accession else genome.accession
+        rows[stored] = (int(genome.taxon.id), genome.taxon.lineage_string(), genome.organism)
+    if rows:
         taxonomies = _load_dictionary(connection, "dict_ncbi_taxonomy")
         organisms = _load_dictionary(connection, "dict_ncbi_organism_name")
         connection.executemany(
@@ -469,10 +465,8 @@ def _enrich_ncbi(
             "(accession, ncbi_taxid, ncbi_taxonomy, ncbi_organism_name) "
             "VALUES (?, ?, ?, ?)",
             [
-                (genome.accession, genome.taxid, taxonomies.encode(genome.lineage),
-                 organisms.encode(genome.organism))
-                for genome in mapped
-                if genome.lineage is not None
+                (accession, taxid, taxonomies.encode(lineage), organisms.encode(organism))
+                for accession, (taxid, lineage, organism) in rows.items()
             ],
         )
         taxonomies.flush(connection, "dict_ncbi_taxonomy")
@@ -481,23 +475,31 @@ def _enrich_ncbi(
 
 
 def _enrich_and_find_nearest(
-    connection: sqlite3.Connection, cache_dir: Path, progress: object
+    connection: sqlite3.Connection, taxonomy_db: str | os.PathLike[str], release: str | None
 ) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, object]]]:
-    """``setup --ncbi-taxonomy``: the enrichment, then the nearest NCBI taxa.
+    """``setup --taxonomy-db``: the enrichment, then the nearest NCBI taxa.
 
-    The taxdump is downloaded once for both (and only when one needs it) and
-    removed afterwards.  The nearest taxon of a key without an NCBI record
-    (see :mod:`sylphd.ncbi_nearest`) is computed *after* the enrichment, so a
-    key whose assembly NCBI does know has its real taxid and gets none.
+    ``taxonomy_db`` is an omnitax file (``omnitax build ... ncbi+assemblies+gtdb:232
+    gtdb:232``) with NCBI, its genomes from the assembly summaries and from GTDB's
+    metadata, and the GTDB release of the metadata (``release``; the newest GTDB
+    in the file when unknown).  Genomes are looked up through GTDB's own taxids first, then
+    NCBI's assemblies (whichever of the two the file has).
+    The nearest taxon of a key without an NCBI record (see
+    :mod:`sylphd.taxonomy_nearest`) is computed *after* the enrichment, so a key
+    whose assembly NCBI does know has its real taxid and gets none.
     """
-    with ncbi_taxonomy.Taxdump(cache_dir, progress=progress) as taxdump:  # type: ignore[arg-type]
-        counts = _enrich_ncbi(connection, taxdump, progress=progress)
-
-        def load() -> tuple[ncbi_nearest.NcbiTree, Path, Path]:
-            ranked, nodes, merged = taxdump.files()
-            return ncbi_nearest.NcbiTree.from_files(nodes, merged), ranked, nodes
-
-        nearest = ncbi_nearest.compute_nearest(connection, load)
+    with (
+        closing(omnitax.open(taxonomy_db, "ncbi")) as ncbi,
+        closing(omnitax.open(taxonomy_db, f"gtdb:{release}" if release else "gtdb")) as gtdb,
+    ):
+        sources = [source for source in (f"gtdb:{gtdb.version}", "ncbi-assemblies") if source in ncbi.genome_sources]
+        if not sources:
+            raise ValueError(
+                f"{taxonomy_db}: NCBI has no genome links ({', '.join(ncbi.genome_sources) or 'none'}); build the file with "
+                f"`omnitax build -o FILE ncbi+assemblies+gtdb:{gtdb.version} gtdb:{gtdb.version}`"
+            )
+        counts = _enrich_ncbi(connection, ncbi, sources)
+        nearest = taxonomy_nearest.compute_nearest(connection, ncbi, gtdb, sources)
     return counts, nearest
 
 
@@ -549,8 +551,7 @@ def build_metadata_db(
     reps_only: bool = False,
     progress: object = None,
     taxonomy: Sequence[TaxonomySource] = (),
-    ncbi_cache: str | os.PathLike[str] | None = None,
-    download_progress: object = None,
+    taxonomy_db: str | os.PathLike[str] | None = None,
 ) -> dict[str, object]:
     """Build a SQLite metadata database from GTDB metadata TSV files.
 
@@ -566,10 +567,9 @@ def build_metadata_db(
     ``skipped_taxonomy`` instead of being stored twice, while a local file or a
     different release is imported (``is_redundant_gtdb_source``).
 
-    ``ncbi_cache`` (``setup --ncbi-taxonomy``) gives the sylph-tax keys that
-    GTDB does not cover an NCBI lineage; NCBI's taxdump is downloaded into a
-    temporary directory there and removed again, the assembly summaries are
-    streamed; ``download_progress`` reports those transfers.
+    ``taxonomy_db`` (``setup --taxonomy-db``) is an omnitax file that gives the
+    sylph-tax keys GTDB does not cover an NCBI lineage and the keys without an
+    NCBI record a nearest NCBI taxon (:func:`_enrich_and_find_nearest`).
     """
     if not files and not taxonomy:
         raise ValueError("at least one metadata file or taxonomy source is required")
@@ -663,10 +663,8 @@ def build_metadata_db(
 
         counts: dict[str, dict[str, int]] = {}
         nearest: dict[str, dict[str, object]] = {}
-        if ncbi_cache is not None:
-            counts, nearest = _enrich_and_find_nearest(
-                connection, Path(ncbi_cache), download_progress
-            )
+        if taxonomy_db is not None:
+            counts, nearest = _enrich_and_find_nearest(connection, taxonomy_db, release_text)
         info = {
             "format_version": METADATA_FORMAT_VERSION,
             "sylphd_version": __version__,
@@ -679,7 +677,7 @@ def build_metadata_db(
             "sylphtax_rules": SYLPHTAX_VERSION,
             "taxonomy_sources": json.dumps(taxonomy_source_rows),
         }
-        if ncbi_cache is not None:
+        if taxonomy_db is not None:
             info["ncbi_taxonomy"] = json.dumps(counts)
             info["ncbi_nearest"] = json.dumps(nearest)
         _finish(connection, info)
@@ -740,8 +738,7 @@ def update_metadata_db(
     taxonomy: Sequence[TaxonomySource] = (),
     force: bool = False,
     progress: object = None,
-    ncbi_cache: str | os.PathLike[str] | None = None,
-    download_progress: object = None,
+    taxonomy_db: str | os.PathLike[str] | None = None,
 ) -> dict[str, object]:
     """Copy an existing metadata database, add taxonomy sources, write ``output``.
 
@@ -810,14 +807,12 @@ def update_metadata_db(
             progress=progress,
         )
         sources = _taxonomy_source_list(connection)
-        # Without the flag the enrichment rows are kept, minus those no source
+        # Without --taxonomy-db the enrichment rows are kept, minus those no source
         # refers to any more, and the counts of replaced sources are dropped.
         counts = json.loads(info.get("ncbi_taxonomy") or "{}")
         nearest = json.loads(info.get("ncbi_nearest") or "{}")
-        if ncbi_cache is not None:
-            counts, nearest = _enrich_and_find_nearest(
-                connection, Path(ncbi_cache), download_progress
-            )
+        if taxonomy_db is not None:
+            counts, nearest = _enrich_and_find_nearest(connection, taxonomy_db, info.get("release") or None)
         else:
             _prune_ncbi_rows(connection)
             for replaced in taxonomy:

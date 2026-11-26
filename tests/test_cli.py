@@ -1006,21 +1006,6 @@ class TestRequireToken:
             process.terminate()
             process.wait(timeout=20)
 
-    def test_without_a_token_the_server_says_it_needs_one(self, private) -> None:
-        socket_path, _, _ = private
-        result = _run("taxonomy", "--socket", str(socket_path), "562", check=False)
-        assert result.returncode == 1
-        assert "requires an access token" in result.stderr
-
-    def test_a_wrong_token_warns_and_is_still_refused(self, private) -> None:
-        socket_path, _, directory = private
-        wrong = directory / "wrong"
-        wrong.write_text("w" * 30 + "\n")
-        result = _run("taxonomy", "--socket", str(socket_path), "--token-file", str(wrong), "562", check=False)
-        assert result.returncode == 1
-        assert "sylphd: warning:" in result.stderr and "does not accept this access token" in result.stderr
-        assert "not accepted" in result.stderr
-
     def test_info_stays_open_and_a_wrong_token_warns_there_too(self, private) -> None:
         socket_path, tokens, directory = private
         assert _run("info", "--socket", str(socket_path)).returncode == 0

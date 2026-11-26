@@ -45,8 +45,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_serve_parser(subparsers)
     add_download_parser(subparsers)
     add_setup_parser(subparsers)
-    add_taxdb_parser(subparsers)
-    add_taxonomy_parser(subparsers)
     return parser
 
 
@@ -135,7 +133,7 @@ def add_serve_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar="FILE",
         default=None,
         help=(
-            "NCBI taxonomy file (from `sylphd taxdb build`): serves /taxonomy/*; "
+            "taxonomy file (from `omnitax build`): serves omnitax's API at /taxonomy; "
             "a replaced file is picked up without a restart"
         ),
     )
@@ -144,7 +142,7 @@ def add_serve_parser(subparsers: argparse._SubParsersAction) -> None:
         type=_rate_limit,
         default=None,
         metavar="N/min",
-        help="per-client rate limit of the /taxonomy/* endpoints, e.g. 120/min (off by default)",
+        help="per-client rate limit of the /taxonomy endpoints, e.g. 120/min (off by default)",
     )
     serve_parser.add_argument(
         "--privileged-token-file",
@@ -358,13 +356,13 @@ def add_setup_parser(subparsers: argparse._SubParsersAction) -> None:
         help="where downloaded taxonomy files are kept [default: <output dir>/taxonomy]",
     )
     setup_parser.add_argument(
-        "--ncbi-taxonomy",
-        action="store_true",
+        "--taxonomy-db",
+        metavar="FILE",
+        default=None,
         help=(
-            "give the sylph-tax keys that GTDB does not cover an NCBI lineage, "
-            "and those with no NCBI assembly (GlobDB MAGs) a nearest NCBI taxon "
-            "(streams the assembly summaries and downloads NCBI's taxdump each run; "
-            "nothing is kept in --cache-dir afterwards)"
+            "a taxonomy file (from `omnitax build`, with NCBI and GTDB): gives the sylph-tax "
+            "keys that GTDB does not cover an NCBI lineage, and those with no NCBI assembly "
+            "(GlobDB MAGs) a nearest NCBI taxon"
         ),
     )
     setup_parser.add_argument(
@@ -384,109 +382,3 @@ def add_setup_parser(subparsers: argparse._SubParsersAction) -> None:
     setup_parser.add_argument(
         "-q", "--quiet", action="store_true", help="no progress output"
     )
-
-
-def _add_client_options(parser: argparse.ArgumentParser) -> None:
-    address = parser.add_mutually_exclusive_group()
-    address.add_argument(
-        "--socket",
-        metavar="PATH",
-        help="Unix socket of the server [default: $SYLPHD_SOCKET or "
-        "$XDG_RUNTIME_DIR/sylphd.sock]",
-    )
-    address.add_argument(
-        "--tcp", metavar="HOST:PORT", help="server address [default: $SYLPHD_URL]"
-    )
-    address.add_argument(
-        "--url",
-        metavar="URL",
-        help=(
-            "server base URL, http:// or https://, optionally with a path "
-            "prefix (e.g. https://api.example.org/sylphd) "
-            "[default: $SYLPHD_URL]"
-        ),
-    )
-    parser.add_argument(
-        "--token-file",
-        metavar="PATH",
-        default=None,
-        help=(
-            "file holding a privileged bearer token, sent as Authorization "
-            "[default: $SYLPHD_TOKEN, the token itself]"
-        ),
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=None,
-        metavar="SECONDS",
-        help="read timeout in seconds [default: no timeout]",
-    )
-    parser.add_argument(
-        "--retries",
-        type=int,
-        default=0,
-        metavar="N",
-        help="retry up to N times when the server answers 429 or 503, waiting "
-        "for its Retry-After (at most 30 s) [default: 0]",
-    )
-
-
-def add_taxdb_parser(subparsers: argparse._SubParsersAction) -> None:
-    taxdb_parser = subparsers.add_parser(
-        "taxdb", help="build the NCBI taxonomy file (see `sylphd serve --taxonomy-db`)"
-    )
-    actions = taxdb_parser.add_subparsers(dest="taxdb_command", required=True)
-    build = actions.add_parser(
-        "build",
-        help="build the taxonomy SQLite file from NCBI's new_taxdump.tar.gz",
-    )
-    build.add_argument(
-        "-o", "--output", required=True, metavar="FILE", help="SQLite file to write (atomic)"
-    )
-    build.add_argument(
-        "--taxdump",
-        metavar="FILE",
-        help="a local new_taxdump.tar.gz [default: download the current one]",
-    )
-    build.add_argument(
-        "--cache-dir",
-        metavar="DIR",
-        help="where the download is unpacked, deleted afterwards [default: next to --output]",
-    )
-    build.add_argument(
-        "--no-fuzzy",
-        action="store_true",
-        help="skip the fuzzy-search index (saves about 15%% of the file)",
-    )
-    build.add_argument("--force", action="store_true", help="replace the output file")
-    build.add_argument("-q", "--quiet", action="store_true", help="no progress output")
-
-
-def add_taxonomy_parser(subparsers: argparse._SubParsersAction) -> None:
-    parser = subparsers.add_parser(
-        "taxonomy",
-        help="look up NCBI taxa by taxid or name, on a server or in a taxonomy file",
-        description=(
-            "Each QUERY is a taxid (digits) or a name. Prints one tab-separated line per "
-            "taxon: taxid, name, rank, parent, genetic code, mitochondrial genetic code."
-        ),
-    )
-    parser.add_argument("queries", nargs="+", metavar="QUERY", help="taxid or exact name")
-    parser.add_argument(
-        "--db", metavar="FILE", help="read this taxonomy file instead of asking a server"
-    )
-    parser.add_argument(
-        "--search",
-        action="store_true",
-        help="treat each QUERY as the start of a name (with --fuzzy: a similar name), or of a taxid when it is digits",
-    )
-    parser.add_argument("--fuzzy", action="store_true", help="with --search: tolerate typos")
-    parser.add_argument("--rank", metavar="RANK", help="with --search: only this rank")
-    parser.add_argument(
-        "--limit", type=int, default=10, metavar="N", help="with --search: hits per query [10]"
-    )
-    parser.add_argument(
-        "--lineage", action="store_true", help="print the lineage (root first) instead"
-    )
-    _add_client_options(parser)

@@ -105,7 +105,7 @@ TAXONOMIES: tuple[str, ...] = (*TAXONOMY_COLUMNS, SYLPHTAX)
 #: it is deliberately not requested.
 SYLPHTAX_PROFILE_COLUMNS: tuple[str, ...] = ("tax_source", "tax_key", "tax_lineage")
 
-#: Columns of the nearest NCBI taxon (``setup --ncbi-taxonomy``) the ``ncbi``
+#: Columns of the nearest NCBI taxon (``setup --taxonomy-db``) the ``ncbi``
 #: profile uses for hits that have no NCBI lineage of their own.  The first five
 #: are the raw nearest node; the ``formal_*`` three name the nearest ancestor
 #: NCBI names formally (equal to the raw node unless it is an informal species),
@@ -303,7 +303,7 @@ def resolve_taxonomy_columns(
             elif column not in columns:
                 columns.append(column)
         if taxonomy == "ncbi":
-            # Optional: only a file built with --ncbi-taxonomy has them.
+            # Optional: only a file built with --taxonomy-db has them.
             columns.extend(
                 column
                 for column in NEAREST_PROFILE_COLUMNS

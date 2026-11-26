@@ -1336,7 +1336,7 @@
       const cont = Array.isArray(r.Containment_ind) ? r.Containment_ind : null;
       const lineage = lin.length ? lin : tax;
       const source = S.hitSource(r);
-      // A hit without an NCBI record may be placed at its nearest NCBI taxon (setup --ncbi-taxonomy):
+      // A hit without an NCBI record may be placed at its nearest NCBI taxon (setup --taxonomy-db):
       // say so, with the GTDB clade the taxon was derived from.
       const nearest = !has(r.ncbi_taxid) && has(r.ncbi_nearest_name);
       return el('tr', { class: i === 1 ? 'top-row' : null },

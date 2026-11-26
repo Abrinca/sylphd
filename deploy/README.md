@@ -91,13 +91,19 @@ SYLPH_META=meta-globdb-r232.sqlite
 SYLPH_SERVE_ARGS="--allow-sequences --max-jobs 2 --max-contigs 100 --max-queue 16 --rate-limit 10/min --trusted-proxy unix --cors-origin *"
 ```
 
-Build the metadata file once, anywhere (it is a few hundred MB, and needs the network for
-`--ncbi-taxonomy`), then copy it to `/srv/sylphd/db/`:
+The metadata file is built once, anywhere (it is a few hundred MB). `--taxonomy-db` reads a taxonomy file that
+[omnitax](../docs/guides/ncbi-taxonomy.md) builds (once, with the network; the server serves it too):
+
+```bash
+omnitax build -o taxonomies.sqlite ncbi+assemblies+gtdb:232 gtdb:232
+```
+
+Then build the metadata file and copy it to `/srv/sylphd/db/`:
 
 ```bash
 sylphd setup -m bac120_metadata_r232.tsv.gz ar53_metadata_r232.tsv.gz \
     --taxonomy GlobDB_r232 --taxonomy UHGV_default --taxonomy FungiRefSeq-latest \
-    --ncbi-taxonomy --release 232 -o meta-globdb-r232.sqlite
+    --taxonomy-db taxonomies.sqlite --release 232 -o meta-globdb-r232.sqlite
 ```
 
 Do **not** add `--reps-only` here. It drops every GTDB row whose `gtdb_representative` is not
@@ -105,7 +111,7 @@ true, and this configuration needs the full table: GlobDB names its genomes with
 version (`GCA_041167105`), and an unversioned name resolves to the GTDB row of the *only* version
 of that base. With the non-representative rows gone, a base that GTDB has in two versions looks
 unique, so a genome can be given the wrong version's row, and a genome whose GTDB row was dropped
-looks "not covered by GTDB", so `--ncbi-taxonomy` replaces its GTDB lineage with an NCBI-only
+looks "not covered by GTDB", so `--taxonomy-db` replaces its GTDB lineage with an NCBI-only
 row (GTDB columns empty). The GlobDB_r232 ↔ GTDB_r232 overlap (199,923 keys, all of which must
 get GTDB metadata and NCBI taxids) is the check after the build: `setup` prints it. (That
 `--reps-only` would break the GlobDB case is read off the code and the unversioned-name rules; it
@@ -130,7 +136,7 @@ SYLPH_META=meta-r232-reps.sqlite
 ```bash
 sylphd setup -m bac120_metadata_r232.tsv.gz ar53_metadata_r232.tsv.gz \
     --taxonomy UHGV_default --taxonomy FungiRefSeq-latest \
-    --ncbi-taxonomy --release 232 --reps-only -o meta-r232-reps.sqlite
+    --taxonomy-db taxonomies.sqlite --release 232 --reps-only -o meta-r232-reps.sqlite
 ```
 
 Here only species representatives are in the sylph database, so `--reps-only` (about 80 MB instead

@@ -23,17 +23,14 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Typing :: Typed",
 ]
-# The base install is light on purpose: sylphd.ncbitax and sylphd.taxdb need only httpx.
+# The base install is empty on purpose: `sylphd diff` and `sylphd taxmatrix` are pure standard
+# library, and the base `sylphd` command tells what to install for the rest.
 # The query commands run in `sylphd-client`, a native binary shipped as the platform wheel
 # `sylphd-bin` (py3-none-<platform>, any Python); it is pinned to this exact version
 # (tests/test_packaging.py keeps the pins, `__version__` and the Rust workspace in step).
-dependencies = [
-  "httpx",
-]
+dependencies = []
 
 [project.optional-dependencies]
-# Look up NCBI taxa (a server, a socket or a file): no binary, no pysylph.
-taxonomy = []
 # The command line against a server: sketches locally in the native client.
 client = [
   "sylphd-bin==0.8.0",
@@ -43,6 +40,8 @@ client = [
 server = [
   "sylphd-bin==0.8.0",
   "dnaio",
+  "httpx",
+  "omnitax[server]",
   "pysylph",
   "python-multipart",
   "starlette",
@@ -65,6 +64,8 @@ extra-build-dependencies = { pysylph = ["cmake"] }
 
 [tool.uv.sources]
 pysylph = { git = "https://github.com/MrTomRod/pysylph", branch = "multi-db" }
+# Until omnitax is on PyPI: the checkout next to this one.
+omnitax = { path = "../omnitax", editable = true }
 # Development: `uv sync` builds the binary from this checkout (needs a Rust toolchain).
 sylphd-bin = { path = "rust/sylphd-client" }
 

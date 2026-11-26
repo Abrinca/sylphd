@@ -9,9 +9,8 @@
 //! 5. the default socket path (`$XDG_RUNTIME_DIR/sylphd.sock`, else
 //!    `/tmp/sylphd-$UID.sock`)
 //!
-//! The address and token logic deliberately exists twice: here and in the Python
-//! client (`client.connect`, which `sylphd.ncbitax` still needs). Both are tested
-//! against the shared table `tests/data/address_cases.json`.
+//! The address and token logic is tested against the table
+//! `tests/data/address_cases.json`.
 
 use std::fmt;
 use std::path::PathBuf;

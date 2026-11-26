@@ -332,7 +332,7 @@ jobs:
           uv venv --python 3.14 lean
           VIRTUAL_ENV="$PWD/lean" uv pip install --python lean/bin/python \
             --only-binary :all: --find-links dist "sylphd==$VERSION"
-          lean/bin/python -c 'import sylphd.ncbitax, sylphd.client'
+          lean/bin/python -c 'import sylphd'
           ! lean/bin/python -c 'import pysylph' 2> /dev/null
           # The base install has no binary: the wrapper says how to get one.
           lean/bin/sylphd --help | grep -q "sylphd\[client\]"

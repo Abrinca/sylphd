@@ -30,8 +30,6 @@ def test_python_commands_are_the_server_and_admin_ones() -> None:
         "serve",
         "setup",
         "download",
-        "taxdb",
-        "taxonomy",
         "taxmatrix",
         "diff",
     ]

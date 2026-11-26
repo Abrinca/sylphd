@@ -23,7 +23,8 @@ only needed for manual runs.
 | `test_assembly_sketch.py` | `/assembly` with a sketch: same results as the raw path, works without `--allow-sequences`, malformed sketches |
 | `test_classify.py` | species assignment and hit relations for `/assembly` |
 | `test_sketchcheck.py` | structural validation of uploaded sketches, including drift against a decoded sketch |
-| `test_client.py` | the Python transport (for `ncbitax`): base URLs, address precedence, path prefixes, retries |
+| `test_taxonomy_mount.py` | omnitax's API under `/taxonomy`, `/info`, token and rate limit; a live server with an omnitax-only client |
+| `test_taxonomy_build.py`, `test_unversioned_nearest.py` | `setup --taxonomy-db`: NCBI lineages and nearest taxa from an omnitax file built in the tests (`taxfile.py`) |
 | `test_cli.py` | the CLI against live servers: round trips, metadata, taxprof outputs, errors |
 | `test_client_binary.py` | the native client end to end (a live server on a socket) |
 | `test_entry.py`, `test_packaging.py` | the `sylphd` wrapper, `sylphd.run`, version pins |

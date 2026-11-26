@@ -16,12 +16,12 @@ file is one ``taxonomy_source`` with its ``key -> lineage [-> host]`` rows in
 many keys both have: importing overlapping sources is allowed (the one
 imported later wins, as in sylph-tax) but never silent.
 
-``setup --ncbi-taxonomy`` adds rows for the sylph-tax keys that GTDB does not
+``setup --taxonomy-db`` adds rows for the sylph-tax keys that GTDB does not
 cover: same accession key, ``gtdb_taxonomy`` NULL, ``ncbi_taxid``,
-``ncbi_taxonomy`` and ``ncbi_organism_name`` filled (see
-``sylphd.ncbi_taxonomy``).  The lookup, the NCBI taxonomy view and the NCBI
+``ncbi_taxonomy`` and ``ncbi_organism_name`` filled, from an omnitax file (see
+``sylphd.metadata_build``).  The lookup, the NCBI taxonomy view and the NCBI
 links then work for those genomes without knowing about the enrichment.
-Each ``--ncbi-taxonomy`` run rebuilds those rows from scratch; ``--update``
+Each ``--taxonomy-db`` run rebuilds those rows from scratch; ``--update``
 without it drops those no remaining source key refers to.
 
 The writers live in :mod:`sylphd.metadata_build` and the sylph-tax import in
@@ -347,7 +347,7 @@ HIT_TAXONOMY_COLUMNS: tuple[str, ...] = (
 
 
 #: The columns of the *nearest* NCBI taxon of a key without an NCBI record
-#: (``setup --ncbi-taxonomy``).  Like ``tax_*`` they are virtual, and only exist
+#: (``setup --taxonomy-db``).  Like ``tax_*`` they are virtual, and only exist
 #: in a file that has the ``taxonomy_nearest`` table; they never replace
 #: ``ncbi_taxid``, which is an assembly's real taxid.  The ``formal_*`` columns
 #: are the nearest ancestor of the raw taxon that NCBI names formally, for a raw
@@ -367,7 +367,7 @@ NEAREST_COLUMNS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class NearestTaxon:
-    """The nearest NCBI taxon of a resolved key (see :mod:`sylphd.ncbi_nearest`)."""
+    """The nearest NCBI taxon of a resolved key (see :mod:`sylphd.taxonomy_nearest`)."""
 
     taxid: int
     rank: str
@@ -508,7 +508,7 @@ class MetadataDB:
             )
         self.format_version: str = version
         #: Whether the file has the nearest NCBI taxon of keys without an NCBI
-        #: record (``setup --ncbi-taxonomy``); older files simply do not, and
+        #: record (``setup --taxonomy-db``); older files simply do not, and
         #: then the ``ncbi_nearest_*`` columns do not exist at all.
         self.has_nearest: bool = "taxonomy_nearest" in tables
         #: The sources, in ``ord`` order.
@@ -639,9 +639,9 @@ class MetadataDB:
         ``keys`` is the number of stored keys of the source.  Keys shared with
         another source are reported once per pair at the metadata level
         (:meth:`taxonomy_overlaps`), not per source.  A source enriched by
-        ``setup --ncbi-taxonomy`` carries its ``ncbi`` counts (mapped keys,
+        ``setup --taxonomy-db`` carries its ``ncbi`` counts (mapped keys,
         keys GTDB's metadata covers, keys without an assembly accession, keys
-        NCBI's summaries do not have and keys whose taxid has no lineage) and
+        the taxonomy file has no genome of and keys with several) and
         its ``ncbi_nearest`` counts (keys without an NCBI record, how many got a
         nearest NCBI taxon, how many of those are an informally named species
         and the counts per raw rank).
@@ -739,7 +739,7 @@ class MetadataDB:
 
         Used to tell a GTDB database from one whose genome names merely look
         like accessions (fungal RefSeq genomes are ``GCF_`` too, but they are
-        not in GTDB's metadata; with ``--ncbi-taxonomy`` they do have a row,
+        not in GTDB's metadata; with ``--taxonomy-db`` they do have a row,
         with a NULL ``gtdb_taxonomy``).  Stopping at the first match keeps the
         query small even for a batch of sampled names.  An unversioned name
         (``GCF_003697165``) counts when exactly one GTDB version of it exists.
