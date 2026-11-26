@@ -12,12 +12,16 @@ ever an assembly's real taxid):
    GTDB leaf below it votes once, with the NCBI node of its genomes (strains
    and no-rank nodes vote as their species; members under *unclassified
    sequences*, *other sequences* and *environmental samples* do not vote), and
-   the answer is the deepest NCBI node that more than 90 % of the votes have as
-   ancestor-or-self, lifted to a standard rank; the walk stops at the first
-   (deepest) clade that has one;
+   the answer is the deepest NCBI node that at least 80 % (:data:`THRESHOLD`)
+   of the votes have as ancestor-or-self, lifted to a standard rank.  A vote
+   that only reaches a higher rank (*Xanthomonadaceae bacterium*) abstains
+   below it instead of counting against a genus it does not contradict
+   (omnitax's default ``min_informative``); the walk stops at the first
+   (deepest) clade that has an answer;
 3. the result is stored as the taxid, its rank, name and ranked lineage, the
-   GTDB clade it came from and how many votes it had (``members``) and which
-   share of them agreed (``support``);
+   GTDB clade it came from, the votes that counted at the answer's rank
+   (``members``, abstentions excluded) and the share of them that agreed
+   (``support``);
 4. NCBI names many species only informally (*Clostridia bacterium*, *uncultured
    Collinsella sp.*).  The raw consensus is reported as it is; alongside it, the
    *formal* taxon is the nearest ancestor-or-self of it that is not such an
@@ -70,6 +74,10 @@ _SCHEMA = (
     "CREATE INDEX taxonomy_nearest_key ON taxonomy_nearest (key)",
 )
 
+
+
+#: Share of the counted votes the nearest taxon needs (omnitax recommends 0.8 for placing novel genomes).
+THRESHOLD = 0.8
 
 def lineage_clades(lineage: str | None) -> tuple[str, ...]:
     """The named GTDB clades of a lineage, shallowest first (``g__Thiobacillus``).
@@ -144,7 +152,13 @@ def compute_nearest(
             placed[clade] = None
             if clade in gtdb:
                 placement = gtdb.translate(
-                    clade, ncbi, details=True, exclude=ncbi.uninformative, ranks=STANDARD_RANKS, other_sources=list(sources)
+                    clade,
+                    ncbi,
+                    details=True,
+                    threshold=THRESHOLD,
+                    exclude=ncbi.uninformative,
+                    ranks=STANDARD_RANKS,
+                    other_sources=list(sources),
                 )
                 if placement.taxon is not None:
                     placed[clade] = (placement.taxon, round(placement.total), placement.share)

@@ -27,12 +27,13 @@ All notable changes to `sylphd` are documented here. The format follows
   number. The per-source `ncbi` counts have `ambiguous` (several genomes) where they had `no_lineage`.
   The metadata format is unchanged (still 3).
 - **The nearest NCBI taxon is placed by omnitax's `translate`: more cautious, more precise.** A GTDB clade is
-  translated into NCBI through the shared genomes with the default threshold **0.9** (the deepest node that more
-  than 90 % of the weight has as ancestor-or-self; it was a bare majority, 0.5) and every GTDB **leaf** votes once
-  (its vote split among its genomes; it was one vote per genome, so a species of many genomes decided its genus).
-  On a benchmark of genomes with a known NCBI taxon, 0.5 gave 68 % precision and 0.9 gives 91 %; a MAG is
-  now more often placed at its family or genus than at a species the data barely supports. `members` is the number
-  of voting leaves, and the nearest ranks are the standard ranks (no kingdom). Rebuild a metadata file with
+  translated into NCBI through the shared genomes: the deepest node that **at least 80 %** of the votes have as
+  ancestor-or-self (it was a bare majority, 0.5), every GTDB **leaf** votes once (its vote split among its genomes;
+  it was one vote per genome, so a species of many genomes decided its genus), and a placeholder vote
+  (*Xanthomonadaceae bacterium*) abstains below its own rank instead of counting against a genus it does not
+  contradict. On omnitax's benchmark of known genomes the genus is placed with 95.6 % precision and 65.8 % recall,
+  against 86.9 % and 67.8 % for the old rule. `members` is the number of votes that counted at the answer's rank
+  (abstentions excluded), and the nearest ranks are the standard ranks (no kingdom). Rebuild a metadata file with
   `sylphd setup --update --taxonomy-db FILE` to get the new placements.
 - **The base install has no dependencies** (it was `httpx`); `httpx` and `omnitax[server]` are in `sylphd[server]`,
   which is what `serve`, `setup` and `download` need (the base `sylphd` says so when one is missing).

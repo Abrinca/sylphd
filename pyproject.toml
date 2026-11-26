@@ -65,7 +65,7 @@ extra-build-dependencies = { pysylph = ["cmake"] }
 
 [tool.uv.sources]
 pysylph = { git = "https://github.com/MrTomRod/pysylph", branch = "multi-db" }
-# Until omnitax is on PyPI: the checkout next to this one.
+# Until omnitax is on PyPI: the checkout next to this one, at commit 4751fcc (abstaining votes).
 omnitax = { path = "../omnitax", editable = true }
 # Development: `uv sync` builds the binary from this checkout (needs a Rust toolchain).
 sylphd-bin = { path = "rust/sylphd-client" }

@@ -394,13 +394,14 @@ def test_nearest_taxa_of_keys_without_a_record(nearest_db: Path) -> None:
     assert rows[("Mags", "MAG4")][:4] == [40, "family", "Hydrogenophilaceae", "f__Hydrogenophilaceae"]
     assert rows[("Mags", "MAG5")][1] == "domain"
     assert ("Mags", "MAG6") not in rows and ("Mags", "UHGV-1") not in rows
-    # The raw nearest taxon is NCBI's informal species; the formal one is above it.
+    # Votes on NCBI's informal species are lifted to their formal ancestor and abstain below it, so an all-informal
+    # clade is placed at that ancestor (it was the informal species, with the formal taxon above it).
     assert rows[("Mags", "MAG7")] == [
-        81, "species", "uncultured Collinsella sp.", "g__Collinsella", 1,
+        80, "genus", "Collinsella", "g__Collinsella", 1,
         80, "genus", "Collinsella",
     ]
     assert rows[("Mags", "MAG8")] == [
-        13, "species", "Clostridia bacterium", "g__Placeholder", 1,
+        12, "class", "Clostridia", "g__Placeholder", 1,
         12, "class", "Clostridia",
     ]
     # the virtual GTDB source: a genome without a taxid
@@ -417,10 +418,10 @@ def test_nearest_counts_by_source_and_rank(nearest_db: Path) -> None:
         sources = {s["name"]: s for s in db.taxonomy_sources()}
     mags = sources["Mags"]["ncbi_nearest"]
     # MAG1..MAG10 and GCF_110000000 are GTDB-style without a record; UHGV-1 is not.
-    # The ranks are the raw ones; MAG7 and MAG8 are informal species (their formal
-    # taxon is the genus/class above).
-    assert mags["keys"] == 11 and mags["assigned"] == 10 and mags["informal"] == 2
-    assert mags["ranks"] == {"domain": 1, "family": 5, "genus": 1, "species": 3}
+    # The ranks are the raw ones; MAG7 and MAG8 (all votes on informal species) are placed
+    # at the formal genus/class, so no raw taxon is informal.
+    assert mags["keys"] == 11 and mags["assigned"] == 10 and mags["informal"] == 0
+    assert mags["ranks"] == {"domain": 1, "family": 5, "genus": 2, "class": 1, "species": 1}
     assert sources["GTDB_r232"]["ncbi_nearest"]["assigned"] == 1
     assert sources["GTDB_r232"]["ncbi_nearest"]["informal"] == 0
 
@@ -503,10 +504,10 @@ def test_setup_reports_the_nearest_taxa(tmp_path: Path, capsys: pytest.CaptureFi
     assert code == 0, err
     assert (
         "nearest NCBI taxon: 3 of 3 keys without an NCBI record "
-        "(domain 1, species 2; 1 informal, formally named above)"
+        "(domain 1, genus 1, species 1)"
     ) in err
     counts = json.loads(MetadataDB(tmp_path / "o.sqlite").info["ncbi_nearest"])["Mags"]
-    assert counts["assigned"] == 3 and counts["informal"] == 1
+    assert counts["assigned"] == 3 and counts["informal"] == 0
 
 
 # ---------------------------------------------------------------------------

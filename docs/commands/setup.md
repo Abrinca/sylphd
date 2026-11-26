@@ -125,10 +125,13 @@ gets a place in the NCBI view: the **nearest NCBI taxon** of its deepest GTDB cl
 translated into NCBI through the genomes the two taxonomies share (omnitax's `translate`): every GTDB leaf
 below the clade votes once, with the NCBI nodes of its genomes (the leaf's vote is split between them, so a
 species of many genomes does not outvote one of few), under NCBI's *unclassified sequences*, *other
-sequences* and *environmental samples* nothing votes, and the deepest NCBI node that **more than 90 %** of the
-votes have as ancestor-or-self wins, lifted to a standard rank (a strict LCA would be dragged up by one
-misclassified genome; a bare majority put a genus's MAGs at a species the data barely supports: on a
-benchmark of known genomes 0.5 gave 68 % precision, 0.9 gives 91 %). That node is reported as it is, even when it is a species
+sequences* and *environmental samples* nothing votes, and the deepest NCBI node that **at least 80 %** of
+the votes have as ancestor-or-self wins, lifted to a standard rank; a vote that only reaches a higher
+rank (*Xanthomonadaceae bacterium*) abstains below it rather than counting against a genus it does not
+contradict (a strict LCA would be dragged up by one misclassified genome; the old bare majority put a
+genus's MAGs at a species the data barely supports: on omnitax's benchmark of known genomes the genus is
+placed with 95.6 % precision and 65.8 % recall, against 86.9 % and 67.8 % for the old rule). That node is
+reported as it is, even when it is a species
 NCBI only names informally (*Clostridia bacterium*, *uncultured Collinsella sp.*). Alongside it, the
 server stores the nearest ancestor NCBI names *formally* — from NCBI's `specified_species`
 flag, so not a pattern on names — as `ncbi_nearest_formal_taxid`, `_formal_rank` and `_formal_name`:
@@ -146,8 +149,11 @@ e.g.:
 
 ```text
   GlobDB_r232: 346,233 keys (sylphtax)
-    NCBI lineage: 0 mapped, 146,310 without an assembly accession, 0 not in the summaries, 0 without a lineage, 199,923 with GTDB's NCBI data
-    nearest NCBI taxon: 146,310 of 146,310 keys without an NCBI record (domain 6,201, kingdom 2,234, phylum 9,998, class 17,119, order 22,718, family 22,055, genus 21,958, species 44,027; 40,537 informal, formally named above)
+    NCBI lineage: 0 mapped, 146,310 without an assembly accession, 0 not in the summaries, 0 without a
+lineage, 199,923 with GTDB's NCBI data
+    nearest NCBI taxon: 146,310 of 146,310 keys without an NCBI record (domain 6,201, kingdom 2,234,
+phylum 9,998, class 17,119, order 22,718, family 22,055, genus 21,958, species 44,027; 40,537 informal,
+formally named above)
   FungiRefSeq-latest: 661 keys (sylphtax)
     NCBI lineage: 659 mapped, 0 without an assembly accession, 2 not in the summaries, 0 without a lineage
 ```
