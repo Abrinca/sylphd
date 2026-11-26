@@ -13,7 +13,7 @@ ever an assembly's real taxid):
    and no-rank nodes vote as their species; members under *unclassified
    sequences*, *other sequences* and *environmental samples* do not vote), and
    the answer is the deepest NCBI node that at least 80 % (:data:`THRESHOLD`)
-   of the votes have as ancestor-or-self, lifted to a standard rank.  A vote
+   of the votes have as ancestor-or-self, lifted to one of :data:`NEAREST_RANKS`.  A vote
    that only reaches a higher rank (*Xanthomonadaceae bacterium*) abstains
    below it instead of counting against a genus it does not contradict
    (omnitax's default ``min_informative``); the walk stops at the first
@@ -45,8 +45,11 @@ from .taxonomy_sources import assembly_accession, match_accessions
 #: GTDB rank prefixes in lineage order.
 GTDB_RANKS: tuple[str, ...] = ("d", "p", "c", "o", "f", "g", "s")
 
-#: The ranks of the nearest taxa, shallowest first, for the counts.
-_RANK_ORDER = {rank: index for index, rank in enumerate(STANDARD_RANKS)}
+#: The ranks a nearest taxon may have, shallowest first: GTDB's seven plus NCBI's kingdom, the level
+#: (Bacillati, Pseudomonadati, Nanobdellati, ...) where clades that NCBI splits across phyla still agree.
+NEAREST_RANKS: tuple[str, ...] = (STANDARD_RANKS[0], "kingdom", *STANDARD_RANKS[1:])
+
+_RANK_ORDER = {rank: index for index, rank in enumerate(NEAREST_RANKS)}
 
 _SCHEMA = (
     "DROP TABLE IF EXISTS taxonomy_nearest",
@@ -157,7 +160,7 @@ def compute_nearest(
                     details=True,
                     threshold=THRESHOLD,
                     exclude=ncbi.uninformative,
-                    ranks=STANDARD_RANKS,
+                    ranks=NEAREST_RANKS,
                     other_sources=list(sources),
                 )
                 if placement.taxon is not None:
@@ -176,7 +179,7 @@ def compute_nearest(
                 continue
             taxon, members, support = result
             # The formal taxon is the raw one lifted past an informal species, never a new vote.
-            formal = taxon.closest(STANDARD_RANKS, formal=True) or taxon
+            formal = taxon.closest(NEAREST_RANKS, formal=True) or taxon
             taxa[taxon.id] = taxon
             taxa[formal.id] = formal
             assigned.append((source_id, key, int(taxon.id), clade, members, support, int(formal.id)))

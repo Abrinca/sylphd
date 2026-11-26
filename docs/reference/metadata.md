@@ -266,7 +266,7 @@ share in the omnitax file (`Taxonomy.translate`): every GTDB leaf below the clad
 NCBI taxa of its genomes (its vote is split between them, so a species of many genomes does not outvote
 one of few; a strain votes as its species); genomes below NCBI's *unclassified sequences*, *other
 sequences* or *environmental samples* do not vote. That gives the clade's consensus: the deepest NCBI node
-that **at least 80 %** of the weight has as ancestor-or-self, lifted to a standard rank; a vote that only
+that **at least 80 %** of the weight has as ancestor-or-self, lifted to a major rank (GTDB's seven and NCBI's kingdom); a vote that only
 reaches a higher rank (*Xanthomonadaceae bacterium*) abstains below it instead of counting against a genus it
 does not contradict. A strict LCA would be dragged to the root by one misclassified genome, and a bare
 majority (the rule before omnitax) put a genus's MAGs at a species the data barely supports: on omnitax's

@@ -33,7 +33,8 @@ All notable changes to `sylphd` are documented here. The format follows
   (*Xanthomonadaceae bacterium*) abstains below its own rank instead of counting against a genus it does not
   contradict. On omnitax's benchmark of known genomes the genus is placed with 95.6 % precision and 65.8 % recall,
   against 86.9 % and 67.8 % for the old rule. `members` is the number of votes that counted at the answer's rank
-  (abstentions excluded), and the nearest ranks are the standard ranks (no kingdom). Rebuild a metadata file with
+  (abstentions excluded), and the nearest ranks are GTDB's seven plus NCBI's kingdom (Bacillati, Pseudomonadati, ...), where clades
+  that NCBI splits across phyla still agree. Rebuild a metadata file with
   `sylphd setup --update --taxonomy-db FILE` to get the new placements.
 - **The base install has no dependencies** (it was `httpx`); `httpx` and `omnitax[server]` are in `sylphd[server]`,
   which is what `serve`, `setup` and `download` need (the base `sylphd` says so when one is missing).

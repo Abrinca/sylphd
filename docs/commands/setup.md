@@ -126,7 +126,7 @@ translated into NCBI through the genomes the two taxonomies share (omnitax's `tr
 below the clade votes once, with the NCBI nodes of its genomes (the leaf's vote is split between them, so a
 species of many genomes does not outvote one of few), under NCBI's *unclassified sequences*, *other
 sequences* and *environmental samples* nothing votes, and the deepest NCBI node that **at least 80 %** of
-the votes have as ancestor-or-self wins, lifted to a standard rank; a vote that only reaches a higher
+the votes have as ancestor-or-self wins, lifted to a major rank (GTDB's seven and NCBI's kingdom); a vote that only reaches a higher
 rank (*Xanthomonadaceae bacterium*) abstains below it rather than counting against a genus it does not
 contradict (a strict LCA would be dragged up by one misclassified genome; the old bare majority put a
 genus's MAGs at a species the data barely supports: on omnitax's benchmark of known genomes the genus is
