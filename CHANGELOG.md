@@ -27,7 +27,7 @@ All notable changes to `sylphd` are documented here. The format follows
   number. The per-source `ncbi` counts have `ambiguous` (several genomes) where they had `no_lineage`.
   The metadata format is unchanged (still 3).
 - **The nearest NCBI taxon is placed by omnitax's `translate`: more cautious, more precise.** A GTDB clade is
-  translated into NCBI through the shared genomes: the deepest node that **at least 80 %** of the votes have as
+  translated into NCBI through the shared genomes: the deepest node that **more than 80 %** of the votes have as
   ancestor-or-self (it was a bare majority, 0.5), every GTDB **leaf** votes once (its vote split among its genomes;
   it was one vote per genome, so a species of many genomes decided its genus), and a placeholder vote
   (*Xanthomonadaceae bacterium*) abstains below its own rank instead of counting against a genus it does not
@@ -38,7 +38,6 @@ All notable changes to `sylphd` are documented here. The format follows
   `sylphd setup --update --taxonomy-db FILE` to get the new placements.
 - **The base install has no dependencies** (it was `httpx`); `httpx` and `omnitax[server]` are in `sylphd[server]`,
   which is what `serve`, `setup` and `download` need (the base `sylphd` says so when one is missing).
-  Until omnitax is on PyPI, development resolves it from `../omnitax` (`[tool.uv.sources]`), so a release waits for it.
 
 ### Added
 

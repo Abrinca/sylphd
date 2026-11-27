@@ -158,9 +158,14 @@ wheels = [
 
 [[package]]
 name = "omnitax"
-source = { editable = "../omnitax" }
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/03/c8/23e60f91f01acbe0697b69ce1d0ca3eecf4e8e9d41f73e8807362afb1711/omnitax-0.1.0.tar.gz", hash = "sha256:24ba97ab0bf397ed8dd5cf95401daa22c4676ab3a1f6fd081185219dfcd0ed6f", size = 102213, upload-time = "2026-11-27T00:31:17.007Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/5f/e83c6fc2513892d201de4390bad15948379adb528a654374181907ac1d50/omnitax-0.1.0-py3-none-any.whl", hash = "sha256:bcbc75fe8fbbbe064a73dab624ee1a5f0e47b43bbe4dd161b54927b346698c55", size = 111712, upload-time = "2026-11-27T00:31:16.177Z" },
 ]
 
 [package.optional-dependencies]
@@ -168,22 +173,6 @@ server = [
     { name = "anyio" },
     { name = "starlette" },
     { name = "uvicorn" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anyio", marker = "extra == 'server'" },
-    { name = "httpx" },
-    { name = "starlette", marker = "extra == 'server'" },
-    { name = "uvicorn", marker = "extra == 'server'" },
-    { name = "xxhash", marker = "extra == 'taxdump'" },
-]
-provides-extras = ["server", "taxdump"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "omnitax", extras = ["server", "taxdump"] },
-    { name = "pytest" },
 ]
 
 [[package]]
@@ -285,8 +274,8 @@ dev = [
 requires-dist = [
     { name = "dnaio", marker = "extra == 'server'" },
     { name = "httpx", marker = "extra == 'server'" },
-    { name = "omnitax", marker = "extra == 'client'", editable = "../omnitax" },
-    { name = "omnitax", extras = ["server"], marker = "extra == 'server'", editable = "../omnitax" },
+    { name = "omnitax", marker = "extra == 'client'", specifier = ">=0.1,<0.2" },
+    { name = "omnitax", extras = ["server"], marker = "extra == 'server'", specifier = ">=0.1,<0.2" },
     { name = "pysylph", marker = "extra == 'server'", git = "https://github.com/MrTomRod/pysylph?branch=multi-db" },
     { name = "python-multipart", marker = "extra == 'server'" },
     { name = "starlette", marker = "extra == 'server'" },

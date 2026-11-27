@@ -12,7 +12,7 @@ ever an assembly's real taxid):
    GTDB leaf below it votes once, with the NCBI node of its genomes (strains
    and no-rank nodes vote as their species; members under *unclassified
    sequences*, *other sequences* and *environmental samples* do not vote), and
-   the answer is the deepest NCBI node that at least 80 % (:data:`THRESHOLD`)
+   the answer is the deepest NCBI node that more than 80 % (:data:`THRESHOLD`)
    of the votes have as ancestor-or-self, lifted to one of :data:`NEAREST_RANKS`.  A vote
    that only reaches a higher rank (*Xanthomonadaceae bacterium*) abstains
    below it instead of counting against a genus it does not contradict
@@ -80,7 +80,7 @@ _SCHEMA = (
 
 
 
-#: Share of the counted votes the nearest taxon needs (omnitax recommends 0.8 for placing novel genomes).
+#: Share of the counted votes the nearest taxon must exceed (strictly more than; omnitax recommends 0.8 for placing novel genomes).
 THRESHOLD = 0.8
 
 def lineage_clades(lineage: str | None) -> tuple[str, ...]:

@@ -266,12 +266,12 @@ share in the omnitax file (`Taxonomy.translate`): every GTDB leaf below the clad
 NCBI taxa of its genomes (its vote is split between them, so a species of many genomes does not outvote
 one of few; a strain votes as its species); genomes below NCBI's *unclassified sequences*, *other
 sequences* or *environmental samples* do not vote. That gives the clade's consensus: the deepest NCBI node
-that **at least 80 %** of the weight has as ancestor-or-self, lifted to a major rank (GTDB's seven and NCBI's kingdom); a vote that only
+that **more than 80 %** of the weight has as ancestor-or-self, lifted to a major rank (GTDB's seven and NCBI's kingdom); a vote that only
 reaches a higher rank (*Xanthomonadaceae bacterium*) abstains below it instead of counting against a genus it
 does not contradict. A strict LCA would be dragged to the root by one misclassified genome, and a bare
 majority (the rule before omnitax) put a genus's MAGs at a species the data barely supports: on omnitax's
 benchmark of known genomes the genus is placed with 95.6 % precision and 65.8 % recall, against 86.9 % and
-67.8 % for the old rule. When no node reaches 80 %, the members' shared
+67.8 % for the old rule. When no node exceeds 80 %, the members' shared
 ancestors still do, so a split clade yields the nearest node they have in common. The first (deepest)
 clade with a consensus wins, so a genus with no informative members falls back to its family. The raw
 taxon is reported as it is, even when it is a species NCBI only names informally (*Clostridia bacterium*,

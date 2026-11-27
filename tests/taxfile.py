@@ -32,9 +32,12 @@ def write_taxonomy_file(
     linked += [Link(accession, str(taxid), None, f"gtdb:{release}") for accession, taxid in links]
     aliases = [(str(old), str(new)) for old, new in (merged or {}).items()]
     omnitax.Taxonomy.build(Rows(recs, aliases=aliases, links=linked), "ncbi", "2026-01-01", path=path, fuzzy=False).close()
-    lines = path.with_suffix(".gtdb.tsv")
-    lines.write_text("".join(f"{accession}\t{lineage}\n" for accession, lineage in gtdb))
-    omnitax.load("gtdb", release, files=[lines], path=path, fuzzy=False).close()
+    if gtdb:
+        lines = path.with_suffix(".gtdb.tsv")
+        lines.write_text("".join(f"{accession}\t{lineage}\n" for accession, lineage in gtdb))
+        omnitax.load("gtdb", release, files=[lines], path=path, fuzzy=False).close()
+    else:  # omnitax.load refuses a GTDB file without a lineage; a GTDB with one node and no genomes it is
+        omnitax.Taxonomy.build(Rows([Rec("d__Bacteria", None, "domain", "Bacteria")]), "gtdb", release, path=path, fuzzy=False).close()
     return path
 
 
