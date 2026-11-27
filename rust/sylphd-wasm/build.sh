@@ -27,7 +27,9 @@ cargo build --release --target wasm32-unknown-unknown --locked -p sylphd-wasm
   target/wasm32-unknown-unknown/release/sylphd_wasm.wasm
 WASM_OPT="${WASM_OPT:-$(command -v wasm-opt || true)}"
 if [ -n "$WASM_OPT" ]; then
-  "$WASM_OPT" -O3 --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals \
+  # The features rustc emits for wasm32 (SIMD from ../.cargo/config.toml); wasm-opt rejects the module without them.
+  "$WASM_OPT" -O3 --enable-simd --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
+    --enable-mutable-globals --enable-reference-types --enable-multivalue \
     "$OUT_DIR/sylph_sketch_bg.wasm" -o "$OUT_DIR/sylph_sketch_bg.wasm"
 fi
 ls -l "$OUT_DIR/sylph_sketch_bg.wasm"
