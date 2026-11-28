@@ -128,7 +128,12 @@ species of many genomes does not outvote one of few), under NCBI's *unclassified
 sequences* and *environmental samples* nothing votes, and the deepest NCBI node that **more than 80 %** of
 the votes have as ancestor-or-self wins, lifted to a major rank (GTDB's seven and NCBI's kingdom); a vote that only reaches a higher
 rank (*Xanthomonadaceae bacterium*) abstains below it rather than counting against a genus it does not
-contradict (a strict LCA would be dragged up by one misclassified genome; the old bare majority put a
+contradict, as long as at least 30 % of the votes reach that rank (the abstention guard, omnitax 0.2's default
+for GTDB → NCBI, below it plain voting applies), and the answer is capped: a genus clade is never answered by a
+species, a clade is never answered by anything finer than its own rank (the kingdom counts as a rank, so a
+domain clade is not answered by a kingdom either). On omnitax's benchmark guard 0.3 with the cap leaves a species out with
+82.24 % strict precision (80.01 % before) at a slightly lower yield. sylphd passes both explicitly, so an
+omnitax default can never move a placement (a strict LCA would be dragged up by one misclassified genome; the old bare majority put a
 genus's MAGs at a species the data barely supports: on omnitax's benchmark of known genomes the genus is
 placed with 95.6 % precision and 65.8 % recall, against 86.9 % and 67.8 % for the old rule). That node is
 reported as it is, even when it is a species

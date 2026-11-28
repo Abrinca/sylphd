@@ -352,7 +352,8 @@ def nearest_db(tmp_path: Path) -> Path:
             f"MAG7\t{collinsella}g__Collinsella;s__MOTU_7",  # informal species: genus 80
             f"MAG8\t{clostridia}g__Placeholder;s__MOTU_8",  # informal species: class 12
             f"MAG9\t{prefix}g__Heavy;s__MOTU_9",  # the heavy species does not outvote the light one
-            f"MAG10\t{prefix}g__Pure;s__MOTU_10",  # all members agree: species 51
+            f"MAG10\t{prefix}g__Pure;s__MOTU_10",  # all members agree on species 51, but a genus clade is capped at the genus
+            f"MAG11\t{prefix}g__Pure;s__Pure a",  # a species clade may be answered by its species
         ],
     )
     output = tmp_path / "meta.sqlite"
@@ -375,9 +376,15 @@ def test_nearest_taxa_of_keys_without_a_record(nearest_db: Path) -> None:
             )
         }
     # raw taxid, rank, name, clade, members (the voting leaves), then formal taxid, rank, name
+    # all members of g__Pure agree on species 51, but a genus clade is never answered by a species (cap): the genus
     assert rows[("Mags", "MAG10")] == [
-        51, "species", "Thiobacillus denitrificans", "g__Pure", 1,
-        51, "species", "Thiobacillus denitrificans",  # formal == raw for a binomial
+        50, "genus", "Thiobacillus", "g__Pure", 1,
+        50, "genus", "Thiobacillus",  # formal == raw for a genus
+    ]
+    # the species clade of the same members is answered by the species, formal == raw for a binomial
+    assert rows[("Mags", "MAG11")] == [
+        51, "species", "Thiobacillus denitrificans", "s__Pure a", 1,
+        51, "species", "Thiobacillus denitrificans",
     ]
     # its one leaf has 4 genomes: a strain and two of species 51 (3 / 4) and one of Tepidiphilus margaritifer: no
     # node below the family has more than 0.9 of the weight (the old majority rule said species 51)
@@ -417,11 +424,11 @@ def test_nearest_counts_by_source_and_rank(nearest_db: Path) -> None:
     with MetadataDB(nearest_db) as db:
         sources = {s["name"]: s for s in db.taxonomy_sources()}
     mags = sources["Mags"]["ncbi_nearest"]
-    # MAG1..MAG10 and GCF_110000000 are GTDB-style without a record; UHGV-1 is not.
+    # MAG1..MAG11 and GCF_110000000 are GTDB-style without a record; UHGV-1 is not.
     # The ranks are the raw ones; MAG7 and MAG8 (all votes on informal species) are placed
     # at the formal genus/class, so no raw taxon is informal.
-    assert mags["keys"] == 11 and mags["assigned"] == 10 and mags["informal"] == 0
-    assert mags["ranks"] == {"domain": 1, "family": 5, "genus": 2, "class": 1, "species": 1}
+    assert mags["keys"] == 12 and mags["assigned"] == 11 and mags["informal"] == 0
+    assert mags["ranks"] == {"domain": 1, "family": 5, "genus": 3, "class": 1, "species": 1}
     assert sources["GTDB_r232"]["ncbi_nearest"]["assigned"] == 1
     assert sources["GTDB_r232"]["ncbi_nearest"]["informal"] == 0
 
@@ -435,13 +442,13 @@ def test_resolved_hits_carry_the_nearest_taxon(nearest_db: Path) -> None:
         near = hits[0].columns()
         assert near["tax_key"] == "MAG10"
         assert (near["ncbi_nearest_taxid"], near["ncbi_nearest_rank"], near["ncbi_nearest_name"]) == (
-            51, "species", "Thiobacillus denitrificans"
+            50, "genus", "Thiobacillus"  # the members agree on species 51; the genus clade is capped at the genus
         )
         assert near["ncbi_nearest_clade"] == "g__Pure"
         assert str(near["ncbi_nearest_lineage"]).startswith("d__Bacteria;p__Pseudomonadota;")
         # a formally named raw taxon: the formal columns are the same node
         assert (near["ncbi_nearest_formal_taxid"], near["ncbi_nearest_formal_rank"],
-                near["ncbi_nearest_formal_name"]) == (51, "species", "Thiobacillus denitrificans")
+                near["ncbi_nearest_formal_name"]) == (50, "genus", "Thiobacillus")
         # a miss has the columns, empty
         assert hits[1].columns()["ncbi_nearest_taxid"] is None
         assert hits[1].columns()["ncbi_nearest_formal_taxid"] is None
@@ -451,7 +458,7 @@ def test_resolved_hits_carry_the_nearest_taxon(nearest_db: Path) -> None:
             "s",
             fields=["ncbi_taxid", "ncbi_nearest_taxid", "ncbi_nearest_rank"],
         )
-        assert rows[0]["ncbi_taxid"] is None and rows[0]["ncbi_nearest_taxid"] == 51
+        assert rows[0]["ncbi_taxid"] is None and rows[0]["ncbi_nearest_taxid"] == 50
         assert db.summary()["taxonomy_sources"][-1]["ncbi_nearest"]["assigned"] >= 1
 
 
@@ -468,7 +475,7 @@ def test_update_keeps_and_replaces_nearest_taxa(
     kept = tmp_path / "kept.sqlite"
     update_metadata_db(nearest_db, kept, taxonomy=[TaxonomySource("Extra", _taxonomy(tmp_path / "e.gz", ["E1\td__Bacteria"]))])
     with MetadataDB(kept) as db:
-        assert db.resolve([("genomes/MAG10.fa.gz", "m")])[0].columns()["ncbi_nearest_taxid"] == 51
+        assert db.resolve([("genomes/MAG10.fa.gz", "m")])[0].columns()["ncbi_nearest_taxid"] == 50
     # replacing the source drops its nearest rows (the new keys are not computed without the flag)
     replaced = tmp_path / "replaced.sqlite"
     other = _taxonomy(tmp_path / "o.gz", ["MAG10\td__Bacteria;p__Pseudomonadota"])
@@ -504,7 +511,7 @@ def test_setup_reports_the_nearest_taxa(tmp_path: Path, capsys: pytest.CaptureFi
     assert code == 0, err
     assert (
         "nearest NCBI taxon: 3 of 3 keys without an NCBI record "
-        "(domain 1, genus 1, species 1)"
+        "(domain 1, genus 2)"
     ) in err
     counts = json.loads(MetadataDB(tmp_path / "o.sqlite").info["ncbi_nearest"])["Mags"]
     assert counts["assigned"] == 3 and counts["informal"] == 0
@@ -592,10 +599,6 @@ def test_ncbi_profile_falls_back_end_to_end_from_the_metadata(nearest_db: Path) 
         "|f__Hydrogenophilaceae|g__Thiobacillus"
     )
     assert "unclassified" not in clades
-    species = f"{genus}|s__Thiobacillus denitrificans"
-    assert clades[species].relative == 1.0
-    nearest = clades[f"{species}|t__MAG10.fa.gz"].nearest
-    assert nearest == {
-        "taxid": 51, "rank": "species",
-        "name": "Thiobacillus denitrificans", "clade": "g__Pure",
-    }
+    assert clades[genus].relative == 1.0
+    nearest = clades[f"{genus}|t__MAG10.fa.gz"].nearest
+    assert nearest == {"taxid": 50, "rank": "genus", "name": "Thiobacillus", "clade": "g__Pure"}

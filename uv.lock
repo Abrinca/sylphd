@@ -158,14 +158,14 @@ wheels = [
 
 [[package]]
 name = "omnitax"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/03/c8/23e60f91f01acbe0697b69ce1d0ca3eecf4e8e9d41f73e8807362afb1711/omnitax-0.1.0.tar.gz", hash = "sha256:24ba97ab0bf397ed8dd5cf95401daa22c4676ab3a1f6fd081185219dfcd0ed6f", size = 102213, upload-time = "2026-11-27T00:31:17.007Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/e6/226fba984a7008e3dceba2758929e9a19259c7ce65d16b8edd0e3fa970e2/omnitax-0.2.0.tar.gz", hash = "sha256:19852894cc6d8e3fbdc58e37811cab20fa1185409676355288f150a91bdf54f7", size = 115413, upload-time = "2026-11-27T16:59:23.773Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ac/5f/e83c6fc2513892d201de4390bad15948379adb528a654374181907ac1d50/omnitax-0.1.0-py3-none-any.whl", hash = "sha256:bcbc75fe8fbbbe064a73dab624ee1a5f0e47b43bbe4dd161b54927b346698c55", size = 111712, upload-time = "2026-11-27T00:31:16.177Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/df/1b814404d8f637e886ce2e3fce6c10265c2b948268613354eedd162176e5/omnitax-0.2.0-py3-none-any.whl", hash = "sha256:e2cd0c6c9402f5d393d0a5e4a564bafb911389078bae11747bd42281f42b44c4", size = 122221, upload-time = "2026-11-27T16:59:22.7Z" },
 ]
 
 [package.optional-dependencies]
@@ -274,8 +274,8 @@ dev = [
 requires-dist = [
     { name = "dnaio", marker = "extra == 'server'" },
     { name = "httpx", marker = "extra == 'server'" },
-    { name = "omnitax", marker = "extra == 'client'", specifier = ">=0.1,<0.2" },
-    { name = "omnitax", extras = ["server"], marker = "extra == 'server'", specifier = ">=0.1,<0.2" },
+    { name = "omnitax", marker = "extra == 'client'", specifier = ">=0.2,<0.3" },
+    { name = "omnitax", extras = ["server"], marker = "extra == 'server'", specifier = ">=0.2,<0.3" },
     { name = "pysylph", marker = "extra == 'server'", git = "https://github.com/MrTomRod/pysylph?branch=multi-db" },
     { name = "python-multipart", marker = "extra == 'server'" },
     { name = "starlette", marker = "extra == 'server'" },

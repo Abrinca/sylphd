@@ -268,7 +268,12 @@ one of few; a strain votes as its species); genomes below NCBI's *unclassified s
 sequences* or *environmental samples* do not vote. That gives the clade's consensus: the deepest NCBI node
 that **more than 80 %** of the weight has as ancestor-or-self, lifted to a major rank (GTDB's seven and NCBI's kingdom); a vote that only
 reaches a higher rank (*Xanthomonadaceae bacterium*) abstains below it instead of counting against a genus it
-does not contradict. A strict LCA would be dragged to the root by one misclassified genome, and a bare
+does not contradict, as long as at least 30 % of the votes reach that rank (the abstention guard 0.3; below it
+plain voting applies). The answer is **capped**: a clade is never answered by something finer than its own rank,
+so a genus clade is placed at a genus at most, never at a species, even when all its genomes are one species (the
+ladder is GTDB's seven ranks plus the kingdom, so a domain clade is not answered by a kingdom). Guard and cap are
+omnitax 0.2's defaults for GTDB → NCBI, passed explicitly by sylphd (strict precision leaving a species out
+82.24 % against 80.01 % without them). A strict LCA would be dragged to the root by one misclassified genome, and a bare
 majority (the rule before omnitax) put a genus's MAGs at a species the data barely supports: on omnitax's
 benchmark of known genomes the genus is placed with 95.6 % precision and 65.8 % recall, against 86.9 % and
 67.8 % for the old rule. When no node exceeds 80 %, the members' shared

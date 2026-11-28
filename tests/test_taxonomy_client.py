@@ -183,3 +183,24 @@ def test_a_bad_taxonomy_file_fails_at_once_with_a_hint(tmp_path: Path, layout, w
         check=False, capture_output=True, text=True, timeout=60,
     )
     assert setup.returncode == 1 and words in setup.stderr and not (tmp_path / "meta.sqlite").exists(), setup.stderr
+
+
+def test_a_wal_mode_taxonomy_file_fails_at_once_with_the_conversion_command(tmp_path: Path) -> None:
+    """omnitax 0.2 refuses files that 0.1.1 or older left in WAL mode; sylphd passes its message (with the command) on."""
+    import sqlite3
+
+    file = _sqlite_file(tmp_path / "taxdump.sqlite", 3)
+    db = sqlite3.connect(file)
+    assert db.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+    db.close()
+    words = ("is in WAL mode", "PRAGMA journal_mode=DELETE", str(file))
+    serve = subprocess.run(
+        [sys.executable, "-m", "sylphd", "serve", "--db", str(ECOLI_TWO_STAGE), "--tcp", f"127.0.0.1:{_free_port()}", "--taxonomy-db", str(file)],
+        check=False, capture_output=True, text=True, timeout=60,
+    )
+    assert serve.returncode == 2 and all(word in serve.stderr for word in words), serve.stderr
+    setup = subprocess.run(
+        [sys.executable, "-m", "sylphd", "setup", "-m", str(tmp_path / "none.tsv"), "-o", str(tmp_path / "meta.sqlite"), "--taxonomy-db", str(file)],
+        check=False, capture_output=True, text=True, timeout=60,
+    )
+    assert setup.returncode == 1 and all(word in setup.stderr for word in words) and not (tmp_path / "meta.sqlite").exists(), setup.stderr

@@ -4,6 +4,21 @@ All notable changes to `sylphd` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **omnitax 0.2** (`omnitax>=0.2,<0.3`, also `omnitax[server]`). Its files are never in WAL mode any more (no
+  `-wal`/`-shm` beside them); a file built with omnitax 0.1.1 or older is in WAL mode and is refused, and
+  `serve --taxonomy-db` / `setup --taxonomy-db` pass omnitax's message on, which gives the one-line conversion
+  command (`python -c "import sqlite3,sys; sqlite3.connect(sys.argv[1]).execute('PRAGMA journal_mode=DELETE')" FILE`;
+  nothing is lost).
+- **The nearest NCBI taxon uses omnitax 0.2's GTDB → NCBI defaults, now passed explicitly:** the abstention guard
+  `min_informative=0.3` (it was 0.2) and `cap=True` (a clade is never answered by something finer than its own
+  rank: a genus clade is no longer placed at a species), with the threshold 0.8. On omnitax's benchmark strict
+  precision leaving a species out is 82.24 % against 80.01 %. The cap ladder is the nearest ranks (GTDB's seven
+  plus the kingdom). **Rebuild** a metadata database with `setup --taxonomy-db` to get the new placements.
+
 ## [0.9.0] - 2026-11-27
 
 ### Changed (breaking)

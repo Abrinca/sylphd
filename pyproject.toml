@@ -34,7 +34,7 @@ dependencies = []
 # The command line against a server: sketches locally in the native client.
 client = [
   "sylphd-bin==0.9.0",
-  "omnitax>=0.1,<0.2",
+  "omnitax>=0.2,<0.3",
 ]
 # `sylphd serve`, and everything `client` does. The server still sketches
 # uploaded sequences (pysylph) and parses them (dnaio).
@@ -42,7 +42,7 @@ server = [
   "sylphd-bin==0.9.0",
   "dnaio",
   "httpx",
-  "omnitax[server]>=0.1,<0.2",
+  "omnitax[server]>=0.2,<0.3",
   "pysylph",
   "python-multipart",
   "starlette",

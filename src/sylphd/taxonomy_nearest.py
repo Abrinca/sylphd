@@ -15,9 +15,18 @@ ever an assembly's real taxid):
    the answer is the deepest NCBI node that more than 80 % (:data:`THRESHOLD`)
    of the votes have as ancestor-or-self, lifted to one of :data:`NEAREST_RANKS`.  A vote
    that only reaches a higher rank (*Xanthomonadaceae bacterium*) abstains
-   below it instead of counting against a genus it does not contradict
-   (omnitax's default ``min_informative``); the walk stops at the first
-   (deepest) clade that has an answer;
+   below it instead of counting against a genus it does not contradict, but only
+   while at least 30 % of the votes reach that rank (:data:`MIN_INFORMATIVE`; below it
+   plain voting applies).  The answer is capped (:data:`CAP`): a clade is never
+   answered by something finer than its own rank -- a genus clade by a genus at
+   most, never by a species, even when all its genomes are one species.  The
+   ladder of the cap is :data:`NEAREST_RANKS`, kingdom included, so a domain
+   clade is not answered by a kingdom either; an answer that is no finer than
+   the clade's rank (including one on a rank outside the ladder, strains
+   counted as their species) is kept as it is.  All three numbers are passed
+   to omnitax explicitly, so a placement never changes with an omnitax default
+   (omnitax 0.2: strict precision 82.24 against 80.01 % leaving a species out);
+   the walk stops at the first (deepest) clade that has an answer;
 3. the result is stored as the taxid, its rank, name and ranked lineage, the
    GTDB clade it came from, the votes that counted at the answer's rank
    (``members``, abstentions excluded) and the share of them that agreed
@@ -82,6 +91,12 @@ _SCHEMA = (
 
 #: Share of the counted votes the nearest taxon must exceed (strictly more than; omnitax recommends 0.8 for placing novel genomes).
 THRESHOLD = 0.8
+
+#: Votes that only reach a higher rank abstain while at least this share of the votes reach the rank asked about (omnitax 0.2's default, kept explicit).
+MIN_INFORMATIVE = 0.3
+
+#: The ladder of omnitax's ``cap``: no answer finer than the clade's own rank, on NEAREST_RANKS (GTDB's seven plus kingdom); omnitax's own default ladder lacks the kingdom.
+CAP: tuple[str, ...] = NEAREST_RANKS
 
 def lineage_clades(lineage: str | None) -> tuple[str, ...]:
     """The named GTDB clades of a lineage, shallowest first (``g__Thiobacillus``).
@@ -160,6 +175,8 @@ def compute_nearest(
                     ncbi,
                     details=True,
                     threshold=THRESHOLD,
+                    min_informative=MIN_INFORMATIVE,
+                    cap=CAP,
                     exclude=ncbi.uninformative,
                     ranks=NEAREST_RANKS,
                     other_sources=list(sources),
